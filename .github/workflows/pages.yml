@@ -24,7 +24,7 @@ jobs:
     steps:
       # 1. Checkout source
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # 2. Inject firebase-config.js from GitHub Secrets
       #    ตั้งค่า Secrets ที่: Repo → Settings → Secrets and variables → Actions
@@ -33,7 +33,7 @@ jobs:
       #      FIREBASE_STORAGE_BUCKET, FIREBASE_MESSAGING_SENDER_ID, FIREBASE_APP_ID,
       #      FIREBASE_ORG_ID, FIREBASE_TEAM_EMAIL, FIREBASE_TEAM_PASSWORD
       - name: Inject Firebase config
-        if: ${{ secrets.FIREBASE_API_KEY != '' }}
+        if: env.secrets.FIREBASE_API_KEY != ''
         run: |
           cat > firebase-config.js << 'JSEOF'
           const FIREBASE_CONFIG = {
@@ -59,7 +59,7 @@ jobs:
 
       # 4. Upload and deploy
       - name: Setup Pages
-        uses: actions/configure-pages@v4
+        uses: actions/configure-pages@v5
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
@@ -68,4 +68,4 @@ jobs:
 
       - name: Deploy to GitHub Pages
         id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
