@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0d6efd">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ใบกำกับ">
+<title>นำเข้าข้อมูลลูกค้าจาก Excel</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+.drop-zone {
+  border: 3px dashed #0d6efd; border-radius: 12px; padding: 48px 24px;
+  text-align: center; cursor: pointer; transition: background .2s;
+}
+.drop-zone:hover, .drop-zone.dragover { background: #dbeafe; }
+[data-bs-theme="dark"] .drop-zone:hover,
+[data-bs-theme="dark"] .drop-zone.dragover { background: #1a2d4a; }
+
+tr.row-new      { background: #f0fff4; }
+tr.row-dup      { background: #fffde7; }
+tr.row-saved    { background: #e8f4fd; opacity: .7; }
+tr.row-error    { background: #fff5f5; }
+td.editable-cell { padding: 2px 4px !important; }
+td.editable-cell input { font-size: 13px; }
+.col-map-select { font-size: 13px; }
+
+.badge-new    { background: #198754; color: #fff; }
+.badge-dup    { background: #ffc107; color: #000; }
+.badge-saved  { background: #0d6efd; color: #fff; }
+.badge-error  { background: #dc3545; color: #fff; }
+
+[data-bs-theme="dark"] tr.row-new  { background: #0d2d1a; }
+[data-bs-theme="dark"] tr.row-dup  { background: #2a1e00; }
+[data-bs-theme="dark"] tr.row-saved { background: #0d1e33; }
+[data-bs-theme="dark"] tr.row-error { background: #2a0a0a; }
+
+/* ── Brand tags ── */
+.imp-brand-tag {
+  display:inline-flex;align-items:center;gap:2px;
+  background:#e0f2fe;color:#0369a1;border:1px solid #7dd3fc;
+  border-radius:20px;padding:0px 6px 0px 8px;font-size:11px;font-weight:600;
+  margin:1px;
+}
+.imp-brand-rm {
+  background:none;border:none;padding:0;line-height:1;
+  color:#0369a1;cursor:pointer;font-size:12px;
+}
+.imp-brand-rm:hover { color:#dc2626; }
+.imp-brand-add {
+  background:none;border:1px dashed #94a3b8;border-radius:20px;
+  padding:0px 7px;font-size:11px;color:#64748b;cursor:pointer;
+  margin:1px;
+}
+.imp-brand-add:hover { border-color:#0d6efd;color:#0d6efd; }
+.imp-brand-input {
+  font-size:11px;border:1px solid #7dd3fc;border-radius:20px;
+  padding:0px 7px;width:80px;outline:none;margin:1px;
+}
+[data-bs-theme="dark"] .imp-brand-tag { background:#0c2d4a;color:#7dd3fc;border-color:#1d4ed8; }
+[data-bs-theme="dark"] .imp-brand-rm  { color:#7dd3fc; }
+[data-bs-theme="dark"] .imp-brand-add { border-color:#4b5563;color:#9ca3af; }
+</style>
+</head>
+<body>
+<div id="navContainer"></div>
+<div class="page-wrap">
+
+  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h5 class="mb-0 fw-bold">
+      <i class="bi bi-person-lines-fill me-2 text-primary"></i>นำเข้าข้อมูลลูกค้าจาก Excel
+    </h5>
+    <button class="btn btn-primary d-none" id="saveBtn" onclick="saveCustomers()">
+      <i class="bi bi-save me-1"></i>บันทึกลูกค้าที่เลือก
+      (<span id="saveCount">0</span>)
+    </button>
+  </div>
+  <div id="alertBox" class="mb-3"></div>
+
+  <!-- Step 1: Upload -->
+  <div id="step1">
+    <div id="dropZone" class="drop-zone mb-4"
+         onclick="document.getElementById('xlsxInput').click()"
+         ondrop="handleDrop(event)"
+         ondragover="event.preventDefault();this.classList.add('dragover')"
+         ondragleave="this.classList.remove('dragover')">
+      <i class="bi bi-file-earmark-excel display-4 text-success d-block mb-3"></i>
+      <div class="fw-semibold fs-5 mb-1">วาง Excel ที่นี่ หรือคลิกเพื่อเลือกไฟล์</div>
+      <div class="text-muted small">.xlsx / .xls / .csv</div>
+      <input type="file" id="xlsxInput" accept=".xlsx,.xls,.csv"
+             style="display:none" onchange="handleFile(this.files[0])">
+    </div>
+
+    <!-- รูปแบบตัวอย่าง -->
+    <div class="card">
+      <div class="card-header py-2 fw-semibold small">
+        <i class="bi bi-info-circle me-1 text-primary"></i>รูปแบบไฟล์ที่รองรับ
+      </div>
+      <div class="card-body pb-2">
+        <p class="text-muted small mb-2">
+          ระบบจะจับคู่คอลัมน์อัตโนมัติจากชื่อหัวตาราง — คอลัมน์ที่ต้องมีคือ <strong>ชื่อลูกค้า / ชื่อบริษัท</strong><br>
+          <i class="bi bi-arrow-right-short text-primary"></i>
+          ลูกค้าคนเดียว <strong>มีหลายแถว</strong> (แต่ละแถวคนละยี่ห้อ) — ระบบจะ<strong>รวมเป็นรายการเดียว</strong>โดยอัตโนมัติ
+        </p>
+
+        <!-- รูปแบบที่ 1: ชื่อบริษัท + ยี่ห้อ (หลายแถวต่อลูกค้า) -->
+        <p class="fw-semibold small mb-1 text-primary"><i class="bi bi-table me-1"></i>รูปแบบที่ 1 — ชื่อบริษัท + ยี่ห้อ (หลายแถวต่อลูกค้า)</p>
+        <div class="table-responsive mb-3">
+          <table class="table table-sm table-bordered small mb-0" style="max-width:340px">
+            <thead class="table-light">
+              <tr><th>ชื่อบริษัท</th><th>ยี่ห้อ</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>สงขลา เฮลติ้กรุ๊ป</td><td>ไม่มีฉลาก</td></tr>
+              <tr><td>สงขลา เฮลติ้กรุ๊ป</td><td>เก้าห้า</td></tr>
+              <tr><td>สงขลา เฮลติ้กรุ๊ป</td><td>สีน้ำเงิน</td></tr>
+              <tr><td>สงขลา เฮลติ้กรุ๊ป</td><td>สีชมพู</td></tr>
+              <tr><td>ร้านน้ำดี</td><td>Crystal</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- รูปแบบที่ 2: คั่น , ในช่องเดียว -->
+        <p class="fw-semibold small mb-1 text-primary"><i class="bi bi-table me-1"></i>รูปแบบที่ 2 — ยี่ห้อหลายรายการคั่นด้วย ,</p>
+        <div class="table-responsive">
+          <table class="table table-sm table-bordered small mb-0" style="max-width:480px">
+            <thead class="table-light">
+              <tr><th>ชื่อบริษัท</th><th>เบอร์โทร</th><th>ยี่ห้อ</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>สงขลา เฮลติ้กรุ๊ป</td><td>081-234-5678</td><td>ไม่มีฉลาก, เก้าห้า, สีน้ำเงิน</td></tr>
+              <tr><td>ร้านน้ำดี</td><td>089-987-6543</td><td>Crystal, Aqua</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 2: Column Mapping -->
+  <div id="step2" class="d-none">
+    <div class="card mb-3">
+      <div class="card-header bg-primary text-white fw-semibold py-2 d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-table me-1"></i>กำหนดคอลัมน์ข้อมูล</span>
+        <div class="d-flex align-items-center gap-2">
+          <label class="text-white fw-normal small mb-0">Sheet:</label>
+          <select id="sheetSel" class="form-select form-select-sm" style="width:auto"
+                  onchange="loadSheet()"></select>
+        </div>
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">
+          <i class="bi bi-info-circle me-1"></i>
+          กำหนดว่าแต่ละคอลัมน์ใน Excel ตรงกับข้อมูลอะไร — ระบบจะพยายามจับคู่ให้อัตโนมัติ
+        </p>
+        <div id="colMapUI" class="row g-2"></div>
+        <div class="mt-3 d-flex gap-2 align-items-center flex-wrap">
+          <label class="fw-semibold mb-0 small">แถวหัวตาราง (Header row):</label>
+          <input type="number" id="headerRowNum" class="form-control form-control-sm"
+                 style="width:80px" value="1" min="1" max="10">
+          <button class="btn btn-primary btn-sm" onclick="applyMapping()">
+            <i class="bi bi-check2 me-1"></i>ใช้การตั้งค่านี้ → ดูตัวอย่าง
+          </button>
+          <button class="btn btn-outline-secondary btn-sm" onclick="resetAll()">
+            <i class="bi bi-arrow-counterclockwise me-1"></i>เริ่มใหม่
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 3: Preview Table -->
+  <div id="step3" class="d-none">
+    <div class="card mb-3">
+      <div class="card-header bg-primary text-white fw-semibold py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="bi bi-list-check me-1"></i>ตรวจสอบและแก้ไขก่อนบันทึก</span>
+        <div class="d-flex gap-2 align-items-center flex-wrap">
+          <span id="matchSummary" class="small"></span>
+          <button class="btn btn-sm btn-outline-light" onclick="checkAll(true)">เลือกทั้งหมด</button>
+          <button class="btn btn-sm btn-outline-light" onclick="checkAll(false)">ยกเลิกทั้งหมด</button>
+          <button class="btn btn-sm btn-outline-warning" onclick="checkNewOnly()">เฉพาะรายการใหม่</button>
+        </div>
+      </div>
+      <div class="card-body p-0">
+        <!-- ตำนาน -->
+        <div class="d-flex gap-3 px-3 py-2 border-bottom small flex-wrap">
+          <span><span class="badge badge-new me-1">ใหม่</span>ยังไม่มีในระบบ</span>
+          <span><span class="badge badge-dup me-1">ซ้ำชื่อ</span>ชื่อตรงกัน → อัปเดต</span>
+          <span><span class="badge" style="background:#fd7e14;color:#fff">ซ้ำเบอร์</span>เบอร์โทรตรงกัน → อัปเดต</span>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0" id="previewTable">
+            <thead class="table-dark sticky-top">
+              <tr>
+                <th style="width:36px"><input type="checkbox" id="checkAllBox" onclick="checkAll(this.checked)"></th>
+                <th>#</th>
+                <th>ชื่อลูกค้า</th>
+                <th>ที่อยู่</th>
+                <th>เบอร์โทร</th>
+                <th>เลขภาษี</th>
+                <th style="min-width:130px">ยี่ห้อ</th>
+                <th>สถานะ</th>
+              </tr>
+            </thead>
+            <tbody id="previewBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script>
+<script>
+const session = Auth.require();
+DB.init();
+Nav.render('customer-import');
+
+// ─── State ────────────────────────────────────────────────────────────────────
+let _wb        = null;
+let _sheetData = [];
+let _headers   = [];
+let _colMap    = {};
+let _rows      = [];     // parsed + matched rows
+
+const FIELDS = [
+  { key: 'name',    label: 'ชื่อลูกค้า / ชื่อบริษัท *', required: true,
+    keywords: ['ชื่อบริษัท','ชื่อลูกค้า','ชื่อร้าน','ชื่อ','ลูกค้า','บริษัท','company','name','customer','ร้าน','กิจการ'] },
+  { key: 'address', label: 'ที่อยู่',
+    keywords: ['ที่อยู่','address','addr','อยู่'] },
+  { key: 'phone',   label: 'เบอร์โทร',
+    keywords: ['เบอร์โทร','เบอร์','โทรศัพท์','โทร','phone','tel','mobile','contact'] },
+  { key: 'taxId',   label: 'เลขประจำตัวผู้เสียภาษี',
+    keywords: ['เลขประจำตัว','เลขภาษี','ภาษี','taxid','tax','vat'] },
+  { key: 'brand',  label: 'ยี่ห้อ',
+    keywords: ['ยี่ห้อสินค้า','ยี่ห้อ1','ยี่ห้อ','brand1','brand','สินค้า','product'] },
+  { key: 'ignore',  label: '— ไม่ใช้ —', keywords: [] },
+];
+
+// ─── File Handling ────────────────────────────────────────────────────────────
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('dropZone').classList.remove('dragover');
+  const f = e.dataTransfer.files[0];
+  if (f) handleFile(f);
+}
+
+function handleFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      _wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+      populateSheetSel();
+      document.getElementById('step1').classList.add('d-none');
+      document.getElementById('step2').classList.remove('d-none');
+      loadSheet();
+    } catch(err) {
+      showAlert('ไม่สามารถอ่านไฟล์ได้: ' + err.message, 'danger');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function populateSheetSel() {
+  const sel = document.getElementById('sheetSel');
+  sel.innerHTML = _wb.SheetNames.map((n, i) =>
+    `<option value="${i}">${n}</option>`).join('');
+}
+
+function loadSheet() {
+  const idx = +document.getElementById('sheetSel').value;
+  const ws  = _wb.Sheets[_wb.SheetNames[idx]];
+  _sheetData = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false });
+  detectHeaders();
+  buildColMapUI();
+}
+
+function detectHeaders() {
+  const hRow = +document.getElementById('headerRowNum').value - 1;
+  _headers   = (_sheetData[hRow] || []).map(h => String(h || '').trim());
+  // Auto-map
+  _colMap = {};
+  FIELDS.forEach(f => {
+    if (f.key === 'ignore') return;
+    const idx = _headers.findIndex(h => {
+      const lh = h.toLowerCase();
+      return f.keywords.some(k => lh.includes(k.toLowerCase()));
+    });
+    if (idx >= 0) _colMap[f.key] = idx;
+  });
+}
+
+function buildColMapUI() {
+  const container = document.getElementById('colMapUI');
+  container.innerHTML = FIELDS.filter(f => f.key !== 'ignore').map(f => `
+    <div class="col-sm-6 col-md-4 col-lg-3">
+      <label class="form-label small fw-semibold mb-1">${f.label}</label>
+      <select class="form-select form-select-sm col-map-select" id="map_${f.key}"
+              onchange="onMapChange('${f.key}',this.value)">
+        <option value="-1">— ไม่ใช้ —</option>
+        ${_headers.map((h, i) => `<option value="${i}" ${_colMap[f.key]===i?'selected':''}>${h || '(คอลัมน์ '+(i+1)+')'}</option>`).join('')}
+      </select>
+    </div>`).join('');
+}
+
+function onMapChange(key, val) {
+  if (+val < 0) delete _colMap[key];
+  else _colMap[key] = +val;
+}
+
+function applyMapping() {
+  if (_colMap.name === undefined) {
+    showAlert('กรุณาเลือกคอลัมน์ "ชื่อลูกค้า / ชื่อบริษัท" ก่อน', 'warning');
+    return;
+  }
+  parseRows();
+  renderPreview();
+  document.getElementById('step3').classList.remove('d-none');
+  document.getElementById('step3').scrollIntoView({ behavior: 'smooth' });
+}
+
+// ─── Phone normalisation ──────────────────────────────────────────────────────
+// แปลงเบอร์โทรเป็นตัวเลขล้วน รองรับหลายเบอร์คั่นด้วย , / ;
+function normalizePhones(phoneStr) {
+  if (!phoneStr) return [];
+  return String(phoneStr)
+    .split(/[,/;]+/)
+    .map(p => p.replace(/\D/g, ''))   // เก็บแค่ตัวเลข
+    .filter(p => p.length >= 8);      // ต้องมีอย่างน้อย 8 หลัก
+}
+
+// ตรวจสอบว่าเบอร์โทรใน Excel ตรงกับเบอร์ในระบบหรือไม่ (any overlap)
+function phonesOverlap(excelPhone, dbPhone) {
+  const a = normalizePhones(excelPhone);
+  const b = normalizePhones(dbPhone);
+  if (!a.length || !b.length) return false;
+  return a.some(pa => b.some(pb => pa === pb));
+}
+
+// หาลูกค้าที่ match — คืน { existing, matchBy: 'name'|'phone'|null }
+function findExisting(custs, name, phone) {
+  // 1. จับคู่ชื่อก่อน (ไม่คำนึงตัวพิมพ์เล็ก-ใหญ่)
+  const byName = custs.find(c =>
+    c.name.trim().toLowerCase() === name.trim().toLowerCase()
+  );
+  if (byName) return { existing: byName, matchBy: 'name' };
+
+  // 2. จับคู่เบอร์โทร (ถ้ามีเบอร์ใน Excel)
+  if (phone) {
+    const byPhone = custs.find(c => phonesOverlap(phone, c.phone || ''));
+    if (byPhone) return { existing: byPhone, matchBy: 'phone' };
+  }
+
+  return { existing: null, matchBy: null };
+}
+
+// ─── Brand helpers ───────────────────────────────────────────────────────────
+// แยก string เป็น array ยี่ห้อ รองรับ , ; / และ newline
+function parseBrands(raw) {
+  return String(raw || '')
+    .split(/[,;/\n\r]+/)
+    .map(b => b.trim())
+    .filter(b => b.length > 0)
+    .filter((b, i, arr) => arr.indexOf(b) === i);  // ตัดซ้ำ
+}
+
+// รวมหลาย raw string แล้ว dedupe
+function collectBrands(...raws) {
+  const all = raws.flatMap(r => parseBrands(r));
+  return [...new Set(all)];
+}
+
+// ─── Parsing ──────────────────────────────────────────────────────────────────
+function parseRows() {
+  const hRow  = +document.getElementById('headerRowNum').value - 1;
+  const custs = DB.getCustomers();
+
+  // ── ขั้นที่ 1: อ่านทุกแถว แล้ว group ตามชื่อลูกค้า ──────────────────────
+  // key = name.trim().toLowerCase()  เพื่อ case-insensitive grouping
+  const grouped = new Map();   // key → { name, address, phone, taxId, brandsSet }
+
+  for (let ri = hRow + 1; ri < _sheetData.length; ri++) {
+    const r    = _sheetData[ri];
+    const name = cellVal(r, _colMap.name);
+    if (!name) continue;
+
+    const key = name.trim().toLowerCase();
+
+    if (!grouped.has(key)) {
+      // แถวแรกของลูกค้านี้ → เก็บข้อมูลหลัก
+      grouped.set(key, {
+        name:     name.trim(),
+        address:  cellVal(r, _colMap.address),
+        phone:    cellVal(r, _colMap.phone),
+        taxId:    cellVal(r, _colMap.taxId),
+        brands:   new Set(),   // ใช้ Set เพื่อ dedupe อัตโนมัติ
+      });
+    }
+
+    // ทุกแถวของลูกค้านี้ → รวมยี่ห้อ
+    const entry = grouped.get(key);
+    collectBrands(
+      cellVal(r, _colMap.brand),
+    ).forEach(b => entry.brands.add(b));
+  }
+
+  // ── ขั้นที่ 2: แปลง Map → _rows ─────────────────────────────────────────
+  _rows = [];
+  for (const entry of grouped.values()) {
+    const brands = [...entry.brands];
+    const { existing, matchBy } = findExisting(custs, entry.name, entry.phone);
+    _rows.push({
+      name:     entry.name,
+      address:  entry.address,
+      phone:    entry.phone,
+      taxId:    entry.taxId,
+      brands,
+      existing,
+      matchBy,
+      checked:  !existing,   // default: เลือกเฉพาะรายใหม่
+      saved:    false,
+    });
+  }
+}
+
+function cellVal(row, colIdx) {
+  if (colIdx === undefined || colIdx < 0) return '';
+  return String(row[colIdx] || '').trim();
+}
+
+// ─── Badge helper ─────────────────────────────────────────────────────────────
+function makeBadge(r) {
+  if (r.saved) return '<span class="badge badge-saved">บันทึกแล้ว</span>';
+  if (!r.existing) return '<span class="badge badge-new">ใหม่</span>';
+  if (r.matchBy === 'phone') {
+    const dbName = esc(r.existing.name);
+    return `<span class="badge" style="background:#fd7e14;color:#fff" title="เบอร์ตรงกับ: ${dbName}">ซ้ำเบอร์</span>
+            <div class="text-muted" style="font-size:10px;white-space:nowrap">← ${dbName}</div>`;
+  }
+  return '<span class="badge badge-dup">ซ้ำชื่อ</span>';
+}
+
+// ─── Preview Table ─────────────────────────────────────────────────────────────
+function renderPreview() {
+  const tbody = document.getElementById('previewBody');
+  const newCount      = _rows.filter(r => !r.existing).length;
+  const dupNameCount  = _rows.filter(r => r.matchBy === 'name').length;
+  const dupPhoneCount = _rows.filter(r => r.matchBy === 'phone').length;
+
+  document.getElementById('matchSummary').innerHTML =
+    `<span class="badge badge-new me-1">${newCount}</span> ใหม่ &nbsp;` +
+    `<span class="badge badge-dup me-1">${dupNameCount}</span> ซ้ำชื่อ &nbsp;` +
+    `<span class="badge me-1" style="background:#fd7e14;color:#fff">${dupPhoneCount}</span> ซ้ำเบอร์`;
+
+  tbody.innerHTML = _rows.map((r, i) => {
+    const rowCls = r.saved     ? 'row-saved'
+                 : r.matchBy === 'phone' ? 'row-dup'   // สีเดียวกัน
+                 : r.existing  ? 'row-dup'
+                 : 'row-new';
+
+    return `<tr class="${rowCls}" id="row_${i}">
+      <td class="text-center">
+        <input type="checkbox" id="chk_${i}" ${r.checked ? 'checked' : ''} ${r.saved ? 'disabled' : ''}
+               onchange="onCheck(${i},this.checked)">
+      </td>
+      <td class="text-muted small">${i+1}</td>
+      <td class="editable-cell">
+        <input class="form-control form-control-sm border-0 bg-transparent" value="${esc(r.name)}"
+               ${r.saved ? 'readonly' : ''}
+               oninput="_rows[${i}].name=this.value;reCheckDup(${i})">
+      </td>
+      <td class="editable-cell">
+        <input class="form-control form-control-sm border-0 bg-transparent" value="${esc(r.address)}"
+               ${r.saved ? 'readonly' : ''}
+               oninput="_rows[${i}].address=this.value">
+      </td>
+      <td class="editable-cell">
+        <input class="form-control form-control-sm border-0 bg-transparent" value="${esc(r.phone)}"
+               ${r.saved ? 'readonly' : ''}
+               oninput="_rows[${i}].phone=this.value;reCheckDup(${i})">
+      </td>
+      <td class="editable-cell">
+        <input class="form-control form-control-sm border-0 bg-transparent" value="${esc(r.taxId)}"
+               ${r.saved ? 'readonly' : ''}
+               oninput="_rows[${i}].taxId=this.value">
+      </td>
+      <td id="brandcell_${i}" style="min-width:130px;padding:4px 6px">
+        ${renderBrandCell(i, r)}
+      </td>
+      <td style="min-width:90px">${makeBadge(r)}</td>
+    </tr>`;
+  }).join('');
+
+  updateSaveBtn();
+}
+
+function esc(s) {
+  return String(s || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+
+// ─── Brand cell ───────────────────────────────────────────────────────────────
+function renderBrandCell(i, r) {
+  if (r.saved) {
+    return r.brands.length ? r.brands.map(b => `<span class="imp-brand-tag">${esc(b)}</span>`).join('') : '<span class="text-muted small">-</span>';
+  }
+  const tags = r.brands.map((b, bi) =>
+    `<span class="imp-brand-tag">${esc(b)}<button class="imp-brand-rm" onclick="removeBrandFromRow(${i},${bi})" title="ลบ">×</button></span>`
+  ).join('');
+  const addBtn = `<button class="imp-brand-add" onclick="showBrandInput(${i})" id="baddbtn_${i}">+ ยี่ห้อ</button>
+    <span id="binputwrap_${i}" style="display:none">
+      <input class="imp-brand-input" id="binput_${i}" placeholder="ยี่ห้อ"
+             onkeydown="handleBrandKey(event,${i})">
+      <button class="imp-brand-rm" style="font-size:14px" onclick="confirmBrandInput(${i})">✓</button>
+      <button class="imp-brand-rm" style="font-size:14px" onclick="hideBrandInput(${i})">✕</button>
+    </span>`;
+  return `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:1px">${tags}${addBtn}</div>`;
+}
+
+function showBrandInput(i) {
+  document.getElementById('baddbtn_' + i).style.display = 'none';
+  document.getElementById('binputwrap_' + i).style.display = 'inline';
+  document.getElementById('binput_' + i).focus();
+}
+function hideBrandInput(i) {
+  const w = document.getElementById('binputwrap_' + i);
+  if (w) w.style.display = 'none';
+  const b = document.getElementById('baddbtn_' + i);
+  if (b) b.style.display = '';
+  const inp = document.getElementById('binput_' + i);
+  if (inp) inp.value = '';
+}
+function handleBrandKey(e, i) {
+  if (e.key === 'Enter')  { e.preventDefault(); confirmBrandInput(i); }
+  if (e.key === 'Escape') { hideBrandInput(i); }
+}
+function confirmBrandInput(i) {
+  const inp = document.getElementById('binput_' + i);
+  if (!inp) return;
+  const val = inp.value.trim();
+  if (val && !_rows[i].brands.includes(val)) {
+    _rows[i].brands.push(val);
+  }
+  refreshBrandCell(i);
+}
+function removeBrandFromRow(i, bi) {
+  _rows[i].brands.splice(bi, 1);
+  refreshBrandCell(i);
+}
+function refreshBrandCell(i) {
+  const cell = document.getElementById('brandcell_' + i);
+  if (cell) cell.innerHTML = renderBrandCell(i, _rows[i]);
+}
+
+function reCheckDup(i) {
+  const r = _rows[i];
+  const custs = DB.getCustomers();
+  const found = findExisting(custs, r.name, r.phone);
+  r.existing = found.existing;
+  r.matchBy  = found.matchBy;
+  const row = document.getElementById('row_' + i);
+  if (row) {
+    row.className = r.existing ? 'row-dup' : 'row-new';
+    const badgeCell = row.querySelector('td:last-child');
+    if (badgeCell) badgeCell.innerHTML = makeBadge(r);
+  }
+}
+
+// ─── Selection ────────────────────────────────────────────────────────────────
+function onCheck(i, val) {
+  _rows[i].checked = val;
+  updateSaveBtn();
+  syncHeaderCheckbox();
+}
+
+function checkAll(val) {
+  _rows.forEach((r, i) => {
+    if (!r.saved) { r.checked = val; const el = document.getElementById('chk_'+i); if(el) el.checked = val; }
+  });
+  document.getElementById('checkAllBox').checked = val;
+  updateSaveBtn();
+}
+
+function checkNewOnly() {
+  _rows.forEach((r, i) => {
+    if (!r.saved) {
+      r.checked = !r.existing;
+      const el = document.getElementById('chk_'+i);
+      if (el) el.checked = r.checked;
+    }
+  });
+  updateSaveBtn();
+  syncHeaderCheckbox();
+}
+
+function syncHeaderCheckbox() {
+  const all = _rows.filter(r => !r.saved);
+  document.getElementById('checkAllBox').checked = all.length > 0 && all.every(r => r.checked);
+}
+
+function updateSaveBtn() {
+  const cnt = _rows.filter(r => r.checked && !r.saved).length;
+  document.getElementById('saveCount').textContent = cnt;
+  document.getElementById('saveBtn').classList.toggle('d-none', cnt === 0);
+}
+
+// ─── Save ─────────────────────────────────────────────────────────────────────
+function saveCustomers() {
+  const toSave = _rows.map((r, i) => ({ ...r, _i: i })).filter(r => r.checked && !r.saved);
+  if (!toSave.length) return;
+
+  const now = new Date().toISOString();
+  let addedCount = 0, updatedCount = 0, errorCount = 0;
+
+  toSave.forEach(r => {
+    const name = r.name.trim();
+    if (!name) { errorCount++; return; }
+    try {
+      if (r.existing) {
+        // อัปเดตข้อมูลที่มีอยู่ (ไม่ทับ notes)
+        // ซ้ำเบอร์: อัปเดตทุกฟิลด์รวมถึงชื่อ
+        // ซ้ำชื่อ: อัปเดตที่อยู่, เบอร์, เลขภาษี, ยี่ห้อ (ชื่อไม่เปลี่ยน)
+        const brands = r.brands.filter(b => b);
+        const patch = {
+          address: r.address.trim(),
+          phone:   r.phone.trim(),
+          taxId:   r.taxId.trim(),
+          brands,
+          brand:   brands[0] || '',
+        };
+        if (r.matchBy === 'phone') patch.name = name;  // จับจากเบอร์ → อัปเดตชื่อด้วย
+        DB.updateCustomer(r.existing.id, patch);
+        updatedCount++;
+      } else {
+        // เพิ่มใหม่
+        const brands = r.brands.filter(b => b);
+        DB.addCustomer({
+          id:        Utils.uuid(),
+          name:      name,
+          address:   r.address.trim(),
+          phone:     r.phone.trim(),
+          taxId:     r.taxId.trim(),
+          brands,
+          brand:     brands[0] || '',
+          notes:     [],
+          createdAt: now,
+        });
+        addedCount++;
+      }
+      _rows[r._i].saved = true;
+    } catch(e) {
+      console.error('saveCustomers row error:', e);
+      errorCount++;
+    }
+  });
+
+  // อัปเดต UI
+  renderPreview();
+
+  const parts = [];
+  if (addedCount)   parts.push(`เพิ่มใหม่ <strong>${addedCount}</strong> ราย`);
+  if (updatedCount) parts.push(`อัปเดต <strong>${updatedCount}</strong> ราย`);
+  if (errorCount)   parts.push(`<span class="text-danger">ผิดพลาด ${errorCount} ราย</span>`);
+  showAlert('✅ ' + parts.join(' &nbsp;|&nbsp; ') +
+    ' &nbsp;<a href="customers.html" class="alert-link">ดูรายชื่อลูกค้า →</a>', 'success');
+}
+
+// ─── Alert ────────────────────────────────────────────────────────────────────
+function showAlert(msg, type='info') {
+  document.getElementById('alertBox').innerHTML =
+    `<div class="alert alert-${type} alert-dismissible fade show py-2 mb-0" role="alert">
+      ${msg}
+      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>`;
+}
+
+// ─── Reset ────────────────────────────────────────────────────────────────────
+function resetAll() {
+  _wb = null; _sheetData = []; _headers = []; _colMap = {}; _rows = [];
+  document.getElementById('step1').classList.remove('d-none');
+  document.getElementById('step2').classList.add('d-none');
+  document.getElementById('step3').classList.add('d-none');
+  document.getElementById('saveBtn').classList.add('d-none');
+  document.getElementById('xlsxInput').value = '';
+  document.getElementById('alertBox').innerHTML = '';
+}
+</script>
+</body>
+</html>

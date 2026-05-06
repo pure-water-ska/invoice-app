@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0d6efd">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ใบกำกับ">
+<title>นำเข้าการชำระเงินจาก Excel</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+.drop-zone {
+  border: 3px dashed #198754; border-radius: 12px; padding: 48px 24px;
+  text-align: center; cursor: pointer; transition: background .2s;
+}
+.drop-zone:hover,.drop-zone.dragover { background: #d1e7dd; }
+tr.row-matched   { background: #f0fff4; }
+tr.row-warning   { background: #fffde7; }
+tr.row-unmatched { background: #fff5f5; }
+tr.row-saved     { background: #e8f4fd; opacity:.7; }
+td.editable-cell { padding: 2px 4px !important; }
+td.editable-cell input, td.editable-cell select { font-size: 13px; }
+.col-map-select { font-size: 13px; }
+</style>
+</head>
+<body>
+<div id="navContainer"></div>
+<div class="page-wrap">
+
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0 fw-bold">
+      <i class="bi bi-file-earmark-excel me-2 text-success"></i>นำเข้าการชำระเงินจาก Excel
+    </h5>
+    <button class="btn btn-success d-none" id="saveBtn" onclick="savePayments()">
+      <i class="bi bi-save me-1"></i>บันทึกการชำระเงินที่เลือก
+      (<span id="saveCount">0</span>)
+    </button>
+  </div>
+  <div id="alertBox" class="mb-3"></div>
+
+  <!-- Step 1: Upload -->
+  <div id="step1">
+    <div id="dropZone" class="drop-zone mb-4"
+         onclick="document.getElementById('xlsxInput').click()"
+         ondrop="handleDrop(event)"
+         ondragover="event.preventDefault();this.classList.add('dragover')"
+         ondragleave="this.classList.remove('dragover')">
+      <i class="bi bi-file-earmark-excel display-4 text-success d-block mb-3"></i>
+      <div class="fw-semibold fs-5 mb-1">วาง Excel ที่นี่ หรือคลิกเพื่อเลือกไฟล์</div>
+      <div class="text-muted small">.xlsx / .xls / .csv</div>
+      <input type="file" id="xlsxInput" accept=".xlsx,.xls,.csv"
+             style="display:none" onchange="handleFile(this.files[0])">
+    </div>
+  </div>
+
+  <!-- Step 2: Column Mapping + Sheet Selector -->
+  <div id="step2" class="d-none">
+    <div class="card mb-3">
+      <div class="card-header bg-success text-white fw-semibold py-2 d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-table me-1"></i>กำหนดคอลัมน์ข้อมูล</span>
+        <div class="d-flex align-items-center gap-2">
+          <label class="text-white fw-normal small mb-0">Sheet:</label>
+          <select id="sheetSel" class="form-select form-select-sm" style="width:auto"
+                  onchange="loadSheet()"></select>
+        </div>
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">
+          <i class="bi bi-info-circle me-1"></i>
+          กำหนดว่าแต่ละคอลัมน์ใน Excel ตรงกับข้อมูลอะไร
+          — ระบบจะพยายามจับคู่ให้อัตโนมัติ
+        </p>
+        <div id="colMapUI" class="row g-2"></div>
+        <div class="mt-3 d-flex gap-2 align-items-center">
+          <label class="fw-semibold mb-0 small">แถวหัวตาราง (Header row):</label>
+          <input type="number" id="headerRowNum" class="form-control form-control-sm"
+                 style="width:80px" value="1" min="1" max="10">
+          <button class="btn btn-success btn-sm" onclick="applyMapping()">
+            <i class="bi bi-check2 me-1"></i>ใช้การตั้งค่านี้ → ดูตัวอย่าง
+          </button>
+          <button class="btn btn-outline-secondary btn-sm" onclick="resetAll()">
+            <i class="bi bi-arrow-counterclockwise me-1"></i>เริ่มใหม่
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 3: Preview Table -->
+  <div id="step3" class="d-none">
+    <div class="card mb-3">
+      <div class="card-header bg-primary text-white fw-semibold py-2 d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-list-check me-1"></i>ตรวจสอบและแก้ไขก่อนบันทึก</span>
+        <div class="d-flex gap-2 align-items-center">
+          <span id="matchSummary" class="small"></span>
+          <button class="btn btn-sm btn-outline-light" onclick="checkAll(true)">เลือกทั้งหมด</button>
+          <button class="btn btn-sm btn-outline-light" onclick="checkAll(false)">ยกเลิกทั้งหมด</button>
+          <button class="btn btn-sm btn-outline-warning" onclick="checkMatched()">เลือกเฉพาะที่ตรงกัน</button>
+        </div>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0" id="previewTable">
+            <thead class="table-dark sticky-top">
+              <tr>
+                <th style="width:36px"><input type="checkbox" id="checkAllBox" onclick="checkAll(this.checked)"></th>
+                <th>#</th>
+                <th>เลขที่ใบกำกับ</th>
+                <th>ลูกค้าใน Excel</th>
+                <th>จับคู่กับใบ</th>
+                <th>จำนวนเงิน</th>
+                <th>วิธีชำระ</th>
+                <th>วันที่ชำระ</th>
+                <th>หมายเหตุ</th>
+                <th>สถานะ</th>
+              </tr>
+            </thead>
+            <tbody id="previewBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Invoice Picker Modal -->
+<div class="modal fade" id="pickInvModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">เลือกใบกำกับสินค้า</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="text" id="invPickSearch" class="form-control mb-3"
+               placeholder="ค้นหาเลขที่ใบ หรือ ชื่อลูกค้า..." oninput="filterInvPick()">
+        <div class="table-responsive" style="max-height:400px;overflow-y:auto">
+          <table class="table table-sm table-hover mb-0">
+            <thead class="table-light sticky-top">
+              <tr><th>เลขที่</th><th>วันที่</th><th>ลูกค้า</th><th>ยอด</th><th>ค้างชำระ</th><th></th></tr>
+            </thead>
+            <tbody id="invPickBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script>
+<script>
+const session = Auth.require();
+DB.init();
+Nav.render('excel-import');
+
+// ─── State ────────────────────────────────────────────────────────────────
+let _wb         = null;  // Workbook
+let _sheetData  = [];    // Raw rows (arrays) from current sheet
+let _headers    = [];    // Header row values
+let _colMap     = {};    // fieldKey → colIndex
+let _rows       = [];    // Parsed + matched rows
+let _pickRowIdx = -1;    // Row index being assigned manually
+
+const FIELDS = [
+  { key: 'invoiceNumber', label: 'เลขที่ใบกำกับ',  keywords: ['เลข','บิล','inv','invoice','no','number'] },
+  { key: 'customerName',  label: 'ชื่อลูกค้า',      keywords: ['ลูกค้า','customer','ชื่อ','name'] },
+  { key: 'amount',        label: 'จำนวนเงิน',        keywords: ['จำนวน','amount','ยอด','เงิน','บาท'] },
+  { key: 'method',        label: 'วิธีชำระ',          keywords: ['วิธี','method','ประเภท','type','ช่องทาง'] },
+  { key: 'payDate',       label: 'วันที่ชำระ',        keywords: ['วันที่','date','วัน'] },
+  { key: 'note',          label: 'หมายเหตุ',          keywords: ['หมาย','note','remark','detail','รายละเอียด'] },
+  { key: 'ignore',        label: '— ไม่ใช้ —',        keywords: [] },
+];
+
+const payMethods = DB.getPayMethods();
+
+function getCustName(customerId) {
+  return DB.getCustomers().find(c => c.id === customerId)?.name || '';
+}
+
+// ─── File Handling ──────────────────────────────────────────────────────
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('dropZone').classList.remove('dragover');
+  const f = e.dataTransfer.files[0];
+  if (f) handleFile(f);
+}
+
+function handleFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      _wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+      populateSheetSel();
+      document.getElementById('step1').classList.add('d-none');
+      document.getElementById('step2').classList.remove('d-none');
+      loadSheet();
+    } catch (err) {
+      Utils.showAlert('อ่านไฟล์ไม่สำเร็จ: ' + err.message, 'danger');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function populateSheetSel() {
+  const sel = document.getElementById('sheetSel');
+  sel.innerHTML = _wb.SheetNames.map(n => `<option>${n}</option>`).join('');
+}
+
+function loadSheet() {
+  const name = document.getElementById('sheetSel').value;
+  const ws   = _wb.Sheets[name];
+  _sheetData = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+  detectAndRenderMapping();
+}
+
+// ─── Column Mapping ─────────────────────────────────────────────────────
+function detectAndRenderMapping() {
+  const hRow = parseInt(document.getElementById('headerRowNum').value || 1) - 1;
+  _headers   = (_sheetData[hRow] || []).map(v => String(v).trim());
+  _colMap    = autoDetect(_headers);
+  renderColMapUI();
+}
+
+function autoDetect(headers) {
+  const map = {};
+  headers.forEach((h, ci) => {
+    const lower = h.toLowerCase();
+    for (const f of FIELDS) {
+      if (f.key === 'ignore') continue;
+      if (f.keywords.some(kw => lower.includes(kw)) && !(f.key in map)) {
+        map[f.key] = ci; break;
+      }
+    }
+  });
+  return map;
+}
+
+function renderColMapUI() {
+  const container = document.getElementById('colMapUI');
+  // Show only columns that exist
+  container.innerHTML = _headers.map((h, ci) => {
+    // Find which field this column is mapped to
+    const currentField = Object.entries(_colMap).find(([k,v]) => v === ci)?.[0] || 'ignore';
+    return `
+      <div class="col-6 col-md-4 col-lg-3">
+        <div class="border rounded p-2">
+          <div class="text-muted small mb-1 text-truncate" title="${esc(h)}">
+            <strong>คอลัมน์ ${colLetter(ci)}</strong>: ${esc(h)||'(ว่าง)'}
+          </div>
+          <select class="form-select form-select-sm col-map-select" data-ci="${ci}"
+                  onchange="updateColMap(this)">
+            ${FIELDS.map(f =>
+              `<option value="${f.key}"${f.key===currentField?' selected':''}>${f.label}</option>`
+            ).join('')}
+          </select>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function updateColMap(sel) {
+  const ci   = parseInt(sel.dataset.ci);
+  const fkey = sel.value;
+  // Remove old mapping for this field
+  Object.keys(_colMap).forEach(k => { if (_colMap[k] === ci) delete _colMap[k]; });
+  if (fkey !== 'ignore') {
+    // Remove ci from any other column mapped to fkey
+    Object.entries(_colMap).forEach(([k,v]) => { if (k===fkey) delete _colMap[k]; });
+    _colMap[fkey] = ci;
+  }
+}
+
+// ─── Apply Mapping & Build Preview ─────────────────────────────────────
+function applyMapping() {
+  const hRow = parseInt(document.getElementById('headerRowNum').value || 1) - 1;
+  const dataRows = _sheetData.slice(hRow + 1).filter(r => r.some(c => c !== ''));
+
+  _rows = dataRows.map((row, idx) => {
+    const get = key => {
+      const ci = _colMap[key];
+      return ci !== undefined ? String(row[ci] ?? '').trim() : '';
+    };
+
+    const invNumRaw  = get('invoiceNumber');
+    const custRaw    = get('customerName');
+    const amtRaw     = get('amount');
+    const methodRaw  = get('method');
+    const dateRaw    = get('payDate');
+    const noteRaw    = get('note');
+
+    // Normalize amount
+    const amount = parseFloat(String(amtRaw).replace(/[^\d.]/g,'')) || 0;
+
+    // Normalize date
+    const payDate = parseDate(dateRaw) || Utils.todayInputValue();
+
+    // Match invoice
+    const match = matchInvoice(invNumRaw, custRaw, amount);
+
+    // Try to extract invoice number from description if not directly provided
+    let invoiceNumber = invNumRaw;
+    if (!invoiceNumber) {
+      const m = (invNumRaw + ' ' + noteRaw).match(/\b(\d{6}-\d{3})\b/);
+      if (m) invoiceNumber = m[1];
+    }
+
+    return {
+      idx, rowNum: hRow + 2 + idx,
+      invoiceNumber, custRaw, amount,
+      method: normalizeMethod(methodRaw),
+      payDate, note: noteRaw,
+      match,
+      selected: match.type !== 'not_found',
+      saved: false
+    };
+  }).filter(r => r.amount > 0 || r.invoiceNumber);
+
+  renderPreview();
+  document.getElementById('step3').classList.remove('d-none');
+}
+
+// ─── Match Logic ────────────────────────────────────────────────────────
+function matchInvoice(invNum, custName, amount) {
+  const invs = DB.getInvoices();
+
+  // 1. Exact invoice number
+  if (invNum) {
+    const found = invs.find(i => i.invoiceNumber === invNum);
+    if (found) {
+      const paid      = DB.getInvoicePaidAmount(found.invoiceNumber);
+      const remaining = (parseFloat(found.totalAmount) || 0) - paid;
+      return { type: 'matched', invoice: found, paid, remaining };
+    }
+  }
+
+  // 2. Customer name match
+  if (custName) {
+    const custs = DB.getCustomers();
+    let bestC = null, bestLen = 0;
+    for (const c of custs) {
+      if (c.name && c.name.length > bestLen &&
+          (custName.includes(c.name) || c.name.includes(custName))) {
+        bestC = c; bestLen = c.name.length;
+      }
+    }
+    if (bestC) {
+      // Only look at unpaid invoices for this customer (unique invoice numbers)
+      const allCustInvs = invs.filter(i => i.customerId === bestC.id);
+      const uniqNums = [...new Set(allCustInvs.map(i => i.invoiceNumber))];
+      const unpaidNums = uniqNums.filter(num => {
+        const pg = allCustInvs.find(i => i.invoiceNumber === num);
+        return DB.getInvoicePaidAmount(num) < (parseFloat(pg?.totalAmount) || 0);
+      });
+      const targetNums = unpaidNums.length ? unpaidNums : uniqNums;
+      if (targetNums.length === 1) {
+        const found     = allCustInvs.find(i => i.invoiceNumber === targetNums[0]);
+        const paid      = DB.getInvoicePaidAmount(found.invoiceNumber);
+        const remaining = (parseFloat(found.totalAmount) || 0) - paid;
+        return { type: 'cust_only', invoice: found, paid, remaining, custName: bestC.name };
+      }
+      if (targetNums.length > 1) {
+        return { type: 'multiple', invoices: allCustInvs, custName: bestC.name };
+      }
+    }
+  }
+
+  return { type: 'not_found' };
+}
+
+// ─── Render Preview ─────────────────────────────────────────────────────
+function renderPreview() {
+  const methods = DB.getPayMethods();
+  const methodOpts = methods.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+
+  const tbody = document.getElementById('previewBody');
+  tbody.innerHTML = _rows.map((r, ri) => {
+    const m   = r.match;
+    const inv = m.invoice;
+    const rowCls = r.saved        ? 'row-saved'
+                 : m.type === 'matched'   ? 'row-matched'
+                 : m.type === 'cust_only' ? 'row-warning'
+                 : m.type === 'multiple'  ? 'row-warning'
+                 : 'row-unmatched';
+
+    const statusBadge = statusHtml(m, r.amount);
+    const matchedInvHtml = inv
+      ? `<div class="small">
+           <strong>${esc(inv.invoiceNumber)}</strong>
+           <span class="text-muted"> / ${esc(getCustName(inv.customerId))}</span><br>
+           <span class="text-muted">ยอด: ${Utils.formatNumber(parseFloat(inv.totalAmount)||0)} |
+           ค้าง: <strong class="${m.remaining < r.amount ? 'text-danger' : 'text-success'}">
+           ${Utils.formatNumber(m.remaining)}</strong></span>
+         </div>`
+      : `<button class="btn btn-sm btn-outline-warning" onclick="openPickModal(${ri})">
+           <i class="bi bi-search me-1"></i>เลือกใบ
+         </button>`;
+
+    const selCheck = r.saved
+      ? '<i class="bi bi-check-circle-fill text-success"></i>'
+      : `<input type="checkbox" class="row-check" data-ri="${ri}"
+                ${r.selected?'checked':''} onchange="onRowCheck(${ri},this.checked)">`;
+
+    return `<tr class="${rowCls}" id="prow_${ri}">
+      <td class="text-center">${selCheck}</td>
+      <td class="text-muted small">${r.rowNum}</td>
+      <td class="editable-cell">
+        <input type="text" class="form-control form-control-sm r-invnum"
+               data-ri="${ri}" value="${esc(r.invoiceNumber)}"
+               placeholder="030569-001" oninput="onInvNumChange(${ri},this.value)">
+      </td>
+      <td class="small text-muted">${esc(r.custRaw)}</td>
+      <td id="match_${ri}">${matchedInvHtml}</td>
+      <td class="editable-cell">
+        <input type="number" class="form-control form-control-sm r-amount"
+               data-ri="${ri}" value="${r.amount}" min="0" step="0.01"
+               oninput="onAmountChange(${ri},this.value)">
+      </td>
+      <td class="editable-cell">
+        <select class="form-select form-select-sm r-method" data-ri="${ri}"
+                onchange="_rows[${ri}].method=this.value">
+          ${methods.map(m2 =>
+            `<option value="${esc(m2)}"${m2===r.method?' selected':''}>${esc(m2)}</option>`
+          ).join('')}
+        </select>
+      </td>
+      <td class="editable-cell">
+        <input type="date" class="form-control form-control-sm r-date"
+               data-ri="${ri}" value="${r.payDate}"
+               onchange="_rows[${ri}].payDate=this.value">
+      </td>
+      <td class="editable-cell">
+        <input type="text" class="form-control form-control-sm r-note"
+               data-ri="${ri}" value="${esc(r.note)}"
+               oninput="_rows[${ri}].note=this.value">
+      </td>
+      <td id="status_${ri}">${statusBadge}</td>
+    </tr>`;
+  }).join('');
+
+  updateMatchSummary();
+  updateSaveBtn();
+}
+
+function statusHtml(m, amount) {
+  if (m.type === 'matched') {
+    if (m.remaining <= 0) return `<span class="badge bg-secondary">ชำระครบแล้ว</span>`;
+    if (amount > m.remaining) return `<span class="badge bg-warning text-dark">เกินยอด</span>`;
+    return `<span class="badge bg-success">✓ ตรงกัน</span>`;
+  }
+  if (m.type === 'cust_only') return `<span class="badge bg-warning text-dark">จับจากชื่อลูกค้า</span>`;
+  if (m.type === 'multiple')  return `<span class="badge bg-info text-dark">หลายใบ — เลือกเอง</span>`;
+  return `<span class="badge bg-danger">ไม่พบใบ</span>`;
+}
+
+function onRowCheck(ri, checked) {
+  _rows[ri].selected = checked;
+  updateSaveBtn();
+}
+function onAmountChange(ri, val) {
+  _rows[ri].amount = parseFloat(val) || 0;
+  const m = _rows[ri].match;
+  if (m.invoice) document.getElementById(`status_${ri}`).innerHTML = statusHtml(m, _rows[ri].amount);
+}
+function onInvNumChange(ri, val) {
+  _rows[ri].invoiceNumber = val.trim();
+  const match = matchInvoice(val.trim(), _rows[ri].custRaw, _rows[ri].amount);
+  _rows[ri].match = match;
+  const inv = match.invoice;
+  document.getElementById(`match_${ri}`).innerHTML = inv
+    ? `<div class="small"><strong>${esc(inv.invoiceNumber)}</strong>
+         <span class="text-muted"> / ${esc(getCustName(inv.customerId))}</span><br>
+         <span class="text-muted">ค้าง: <strong>${Utils.formatNumber(match.remaining)}</strong></span>
+       </div>`
+    : `<button class="btn btn-sm btn-outline-warning" onclick="openPickModal(${ri})">
+         <i class="bi bi-search me-1"></i>เลือกใบ
+       </button>`;
+  document.getElementById(`status_${ri}`).innerHTML = statusHtml(match, _rows[ri].amount);
+  const tr = document.getElementById(`prow_${ri}`);
+  tr.className = match.type === 'matched' ? 'row-matched'
+               : match.type === 'cust_only' ? 'row-warning' : 'row-unmatched';
+  updateMatchSummary();
+}
+
+function checkAll(checked) {
+  document.getElementById('checkAllBox').checked = checked;
+  document.querySelectorAll('.row-check').forEach(cb => {
+    const ri = parseInt(cb.dataset.ri);
+    if (!_rows[ri].saved) { cb.checked = checked; _rows[ri].selected = checked; }
+  });
+  updateSaveBtn();
+}
+function checkMatched() {
+  document.querySelectorAll('.row-check').forEach(cb => {
+    const ri = parseInt(cb.dataset.ri);
+    const ok = _rows[ri].match.type === 'matched' && !_rows[ri].saved;
+    cb.checked = ok; _rows[ri].selected = ok;
+  });
+  updateSaveBtn();
+}
+
+function updateMatchSummary() {
+  const matched   = _rows.filter(r => r.match.type === 'matched').length;
+  const unmatched = _rows.filter(r => r.match.type === 'not_found').length;
+  document.getElementById('matchSummary').innerHTML =
+    `<span class="badge bg-success me-1">✓ ${matched}</span>` +
+    `<span class="badge bg-danger me-1">✗ ${unmatched}</span>` +
+    `<span class="badge bg-light text-dark">${_rows.length} แถว</span>`;
+}
+function updateSaveBtn() {
+  const n = _rows.filter(r => r.selected && !r.saved && r.match.invoice).length;
+  document.getElementById('saveCount').textContent = n;
+  document.getElementById('saveBtn').classList.toggle('d-none', n === 0);
+}
+
+// ─── Invoice Picker Modal ───────────────────────────────────────────────
+let _pickModal = null;
+function openPickModal(ri) {
+  _pickRowIdx = ri;
+  if (!_pickModal) _pickModal = new bootstrap.Modal(document.getElementById('pickInvModal'));
+  document.getElementById('invPickSearch').value = '';
+  filterInvPick();
+  _pickModal.show();
+}
+
+function filterInvPick() {
+  const q       = document.getElementById('invPickSearch').value.toLowerCase();
+  const customers = DB.getCustomers();
+  const custMap = Object.fromEntries(customers.map(c => [c.id, c.name]));
+  const invs = DB.getInvoices().filter(i => {
+    if (!q) return true;
+    const cName = (custMap[i.customerId] || '').toLowerCase();
+    return i.invoiceNumber.toLowerCase().includes(q) || cName.includes(q);
+  });
+  const tbody = document.getElementById('invPickBody');
+  tbody.innerHTML = invs.slice(0,100).map(inv => {
+    const paid  = DB.getInvoicePaidAmount(inv.invoiceNumber);
+    const total = parseFloat(inv.totalAmount) || 0;
+    const rem   = total - paid;
+    const cName = custMap[inv.customerId] || '';
+    return `<tr>
+      <td>${esc(inv.invoiceNumber)}</td>
+      <td>${Utils.formatDateTH(inv.createdAt)}</td>
+      <td>${esc(cName)}</td>
+      <td>${Utils.formatNumber(total)}</td>
+      <td class="${rem>0?'text-success':'text-muted'}">${Utils.formatNumber(rem)}</td>
+      <td><button class="btn btn-sm btn-primary" onclick="pickInvoice('${inv.id}')">เลือก</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function pickInvoice(invId) {
+  if (_pickRowIdx < 0) return;
+  const inv       = DB.getInvoiceById(invId);
+  const paid      = DB.getInvoicePaidAmount(inv.invoiceNumber);
+  const remaining = (parseFloat(inv.totalAmount)||0) - paid;
+  const ri        = _pickRowIdx;
+  _rows[ri].match          = { type: 'matched', invoice: inv, paid, remaining };
+  _rows[ri].invoiceNumber  = inv.invoiceNumber;
+  _rows[ri].selected       = true;
+  // Update row UI
+  document.getElementById(`prow_${ri}`).className = 'row-matched';
+  document.getElementById(`match_${ri}`).innerHTML =
+    `<div class="small"><strong>${esc(inv.invoiceNumber)}</strong>
+     <span class="text-muted"> / ${esc(getCustName(inv.customerId))}</span><br>
+     <span class="text-muted">ค้าง: <strong>${Utils.formatNumber(remaining)}</strong></span>
+     </div>`;
+  document.getElementById(`status_${ri}`).innerHTML = statusHtml(_rows[ri].match, _rows[ri].amount);
+  const invInput = document.querySelector(`[data-ri="${ri}"].r-invnum`);
+  if (invInput) invInput.value = inv.invoiceNumber;
+  const cb = document.querySelector(`[data-ri="${ri}"].row-check`);
+  if (cb) cb.checked = true;
+  updateMatchSummary(); updateSaveBtn();
+  _pickModal.hide();
+}
+
+// ─── Save Payments ──────────────────────────────────────────────────────
+function savePayments() {
+  let saved = 0; const errors = [];
+  for (const r of _rows) {
+    if (!r.selected || r.saved || !r.match.invoice) continue;
+    const inv = r.match.invoice;
+    const amount = parseFloat(
+      document.querySelector(`[data-ri="${r.idx}"].r-amount`)?.value
+    ) || r.amount;
+    const method = document.querySelector(`[data-ri="${r.idx}"].r-method`)?.value || r.method;
+    const payDate = document.querySelector(`[data-ri="${r.idx}"].r-date`)?.value || r.payDate;
+    const note   = document.querySelector(`[data-ri="${r.idx}"].r-note`)?.value || r.note;
+
+    if (!amount || amount <= 0) { errors.push(`แถว ${r.rowNum}: ยอดเงินต้องมากกว่า 0`); continue; }
+
+    DB.addPayment({
+      id: Utils.uuid(), invoiceNumber: inv.invoiceNumber,
+      customerId: inv.customerId, amount, method,
+      payDate, note, bank: '',
+      createdAt: new Date().toISOString(), createdBy: session.userId,
+      importedFrom: 'excel'
+    });
+    DB.logActivity(session.userId, session.username, 'นำเข้าการชำระเงินจาก Excel',
+      { invoiceNumber: inv.invoiceNumber, amount });
+
+    r.saved = true;
+    const tr = document.getElementById(`prow_${r.idx}`);
+    if (tr) {
+      tr.className = 'row-saved';
+      const cb = tr.querySelector('.row-check');
+      if (cb) { cb.checked = false; cb.disabled = true; }
+      tr.querySelector(`td:nth-child(1)`).innerHTML =
+        '<i class="bi bi-check-circle-fill text-success"></i>';
+    }
+    saved++;
+  }
+  let msg = `บันทึกการชำระเงิน ${saved} รายการสำเร็จ`;
+  if (errors.length) msg += `<br><small>${errors.map(e=>`⚠️ ${esc(e)}`).join('<br>')}</small>`;
+  Utils.showAlert(msg, saved ? 'success' : 'warning');
+  updateSaveBtn();
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────
+function parseDate(raw) {
+  if (!raw || raw === '') return null;
+  // Handle Excel Date serial
+  if (typeof raw === 'number') {
+    const d = XLSX.SSF.parse_date_code(raw);
+    if (d) return `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`;
+  }
+  const s = String(raw).trim();
+  // DD/MM/YYYY (possibly BE)
+  const m1 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m1) {
+    let y = parseInt(m1[3]); if (y > 2500) y -= 543;
+    return `${y}-${m1[2].padStart(2,'0')}-${m1[1].padStart(2,'0')}`;
+  }
+  // YYYY-MM-DD
+  const m2 = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m2) return s;
+  // JavaScript Date string
+  const d = new Date(s);
+  if (!isNaN(d)) return d.toISOString().slice(0,10);
+  return null;
+}
+
+function normalizeMethod(raw) {
+  const methods = DB.getPayMethods();
+  const lower   = String(raw||'').toLowerCase().trim();
+  if (!lower) return methods[0] || 'โอน';
+  const found = methods.find(m => m.toLowerCase().includes(lower) || lower.includes(m.toLowerCase()));
+  return found || raw || methods[0] || 'โอน';
+}
+
+function colLetter(ci) {
+  let s = ''; let n = ci + 1;
+  while (n > 0) { s = String.fromCharCode(65 + (n-1)%26) + s; n = Math.floor((n-1)/26); }
+  return s;
+}
+
+function resetAll() {
+  _wb = null; _sheetData = []; _headers = []; _colMap = {}; _rows = [];
+  document.getElementById('step1').classList.remove('d-none');
+  document.getElementById('step2').classList.add('d-none');
+  document.getElementById('step3').classList.add('d-none');
+  document.getElementById('xlsxInput').value = '';
+  document.getElementById('saveBtn').classList.add('d-none');
+}
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+</body>
+</html>

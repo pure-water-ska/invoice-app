@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0d6efd">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ใบกำกับ">
+<title>รายการคืนสินค้า</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="navContainer"></div>
+<div class="page-wrap" style="max-width:1100px">
+  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h5 class="fw-bold mb-0"><i class="bi bi-arrow-return-left me-2 text-warning"></i>รายการคืนสินค้า</h5>
+    <button class="btn btn-warning" onclick="openReturnModal()" id="btnAdd" style="display:none">
+      <i class="bi bi-plus-circle me-1"></i>บันทึกรายการคืน
+    </button>
+  </div>
+  <div id="alertBox" class="mb-3"></div>
+
+  <!-- Filters -->
+  <div class="card mb-3">
+    <div class="card-body py-2">
+      <div class="row g-2 align-items-end">
+        <div class="col-md-3">
+          <input type="text" id="searchInput" class="form-control form-control-sm" placeholder="ค้นหา ลูกค้า / เลขที่ใบกำกับ / สาเหตุ" oninput="render()">
+        </div>
+        <div class="col-md-2">
+          <select id="filterStatus" class="form-select form-select-sm" onchange="render()">
+            <option value="">ทุกสถานะ</option>
+            <option value="pending">รอหักออก</option>
+            <option value="deducted">หักออกแล้ว</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <select id="filterReason" class="form-select form-select-sm" onchange="render()">
+            <option value="">ทุกสาเหตุ</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <input type="date" id="filterFrom" class="form-control form-control-sm" onchange="render()" placeholder="จากวันที่">
+        </div>
+        <div class="col-md-2">
+          <input type="date" id="filterTo" class="form-control form-control-sm" onchange="render()" placeholder="ถึงวันที่">
+        </div>
+        <div class="col-md-1">
+          <button class="btn btn-outline-secondary btn-sm w-100" onclick="clearFilters()">ล้าง</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="card">
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-hover table-sm mb-0" id="returnTable">
+          <thead class="table-dark">
+            <tr>
+              <th style="width:140px">วันที่</th>
+              <th>ลูกค้า</th>
+              <th>สินค้า / จำนวน</th>
+              <th>สาเหตุ</th>
+              <th style="width:120px">ใบกำกับต้นทาง</th>
+              <th style="width:120px">หักออกใบ</th>
+              <th style="width:90px">สถานะ</th>
+              <th style="width:80px"></th>
+            </tr>
+          </thead>
+          <tbody id="returnBody">
+            <tr><td colspan="8" class="text-center text-muted py-4">กำลังโหลด...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Return Modal ────────────────────────────────────────────────────────── -->
+<div class="modal fade" id="returnModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header bg-warning py-2">
+        <h6 class="modal-title fw-bold mb-0" id="returnModalTitle"><i class="bi bi-arrow-return-left me-2"></i>บันทึกรายการคืนสินค้า</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="returnModalAlert" class="mb-3"></div>
+        <input type="hidden" id="returnId">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">ลูกค้า <span class="text-danger">*</span></label>
+            <input type="text" id="returnCustSearch" class="form-control" list="returnCustDatalist"
+                   placeholder="พิมพ์ชื่อลูกค้า..." oninput="onCustSearchInput()" autocomplete="off">
+            <datalist id="returnCustDatalist"></datalist>
+            <input type="hidden" id="returnCustId">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">ใบกำกับต้นทาง <span class="text-danger">*</span></label>
+            <input type="text" id="returnSourceInv" class="form-control" list="returnInvDatalist"
+                   placeholder="พิมพ์เลขที่ใบกำกับ..." oninput="onSourceInvInput()" autocomplete="off">
+            <datalist id="returnInvDatalist"></datalist>
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold">รายการสินค้าคืน <span class="text-danger">*</span></label>
+            <div id="returnItemRows" class="mb-2"></div>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addReturnItemRow()">
+              <i class="bi bi-plus-circle me-1"></i>เพิ่มสินค้า
+            </button>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">วันที่คืน</label>
+            <input type="date" id="returnDate" class="form-control">
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold">สาเหตุการคืน <span class="text-danger">*</span></label>
+            <div class="d-flex flex-wrap gap-2 mb-2" id="reasonChips"></div>
+            <div class="input-group">
+              <input type="text" id="returnReasonCustom" class="form-control form-control-sm" placeholder="ระบุสาเหตุอื่น...">
+              <button class="btn btn-outline-secondary btn-sm" onclick="addCustomReason()"><i class="bi bi-plus-lg"></i></button>
+            </div>
+            <input type="hidden" id="returnReason">
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold">รูปภาพประกอบ</label>
+            <input type="file" id="returnImages" class="form-control form-control-sm" accept="image/*" multiple onchange="previewImages(this)">
+            <div id="imagePreviewRow" class="d-flex flex-wrap gap-2 mt-2"></div>
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold">หมายเหตุ</label>
+            <textarea id="returnNote" class="form-control" rows="2" placeholder="รายละเอียดเพิ่มเติม"></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-warning fw-semibold" onclick="saveReturn()"><i class="bi bi-save me-1"></i>บันทึก</button>
+        <button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Deduct Modal ────────────────────────────────────────────────────────── -->
+<div class="modal fade" id="deductModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header bg-info text-white py-2">
+        <h6 class="modal-title fw-bold mb-0"><i class="bi bi-scissors me-2"></i>บันทึกการหักออกจากใบกำกับ</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="deductReturnId">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">เลขที่ใบกำกับที่หักออก <span class="text-danger">*</span></label>
+          <select id="deductInvNum" class="form-select"></select>
+        </div>
+        <div id="deductInfo" class="text-muted small"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-info text-white fw-semibold" onclick="saveDeduct()"><i class="bi bi-check-lg me-1"></i>บันทึก</button>
+        <button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── View Modal ─────────────────────────────────────────────────────────── -->
+<div class="modal fade" id="viewReturnModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header bg-secondary text-white py-2">
+        <h6 class="modal-title fw-bold mb-0"><i class="bi bi-eye me-2"></i>รายละเอียดการคืนสินค้า</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="viewReturnBody"></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script>
+<script>
+const session = Auth.requirePage('returns');
+DB.init();
+Nav.render('returns');
+
+const REASONS = ['ขวดผิดรูป','ขวดรั่ว','สกรีนผิด','สกรีนเสีย','ฝาชำรุด','สินค้าหมดอายุ','ส่งผิดรายการ','อื่นๆ'];
+let _pendingImages = [];
+let _returnItems   = []; // [{ productId, productName, qty }]
+
+window.addEventListener('DOMContentLoaded', () => {
+  if (Auth.can('return_add')) document.getElementById('btnAdd').style.display = '';
+  populateFilters();
+  render();
+});
+
+function populateFilters() {
+  const sel = document.getElementById('filterReason');
+  REASONS.forEach(r => { const o = document.createElement('option'); o.value = r; o.textContent = r; sel.appendChild(o); });
+  // เพิ่มสาเหตุที่กำหนดเองจากข้อมูล
+  const custom = [...new Set(DB.getReturns().map(r => r.reason).filter(r => !REASONS.includes(r) && r))];
+  custom.forEach(r => { const o = document.createElement('option'); o.value = r; o.textContent = r; sel.appendChild(o); });
+}
+
+function clearFilters() {
+  ['searchInput','filterStatus','filterFrom','filterTo','filterReason'].forEach(id => document.getElementById(id).value = '');
+  render();
+}
+
+function _getReturnItems(r) {
+  // support both old (single) and new (items array) format
+  if (r.items && r.items.length) return r.items;
+  if (r.productId || r.productName) return [{ productId: r.productId, productName: r.productName, qty: r.qty }];
+  return [];
+}
+
+function _itemsSummary(r) {
+  return _getReturnItems(r).map(it => {
+    const p = DB.getProductById(it.productId);
+    return `${p?.name || it.productName || '-'} <span class="badge bg-secondary">×${it.qty}</span>`;
+  }).join(' ');
+}
+
+function render() {
+  const q      = document.getElementById('searchInput').value.toLowerCase();
+  const status = document.getElementById('filterStatus').value;
+  const reason = document.getElementById('filterReason').value;
+  const from   = document.getElementById('filterFrom').value;
+  const to     = document.getElementById('filterTo').value;
+
+  let list = DB.getReturns().filter(r => {
+    const cust = DB.getCustomerById(r.customerId);
+    const custName = (cust?.name||'').toLowerCase();
+    if (q && !custName.includes(q) && !(r.sourceInvoice||'').toLowerCase().includes(q) && !(r.reason||'').toLowerCase().includes(q)) return false;
+    if (status === 'pending'  && r.deductedInvoice) return false;
+    if (status === 'deducted' && !r.deductedInvoice) return false;
+    if (reason && r.reason !== reason) return false;
+    if (from && r.returnDate < from) return false;
+    if (to   && r.returnDate > to)   return false;
+    return true;
+  });
+
+  const tbody = document.getElementById('returnBody');
+  if (!list.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4"><i class="bi bi-inbox fs-3 d-block mb-2"></i>ไม่พบรายการ</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = list.map(r => {
+    const cust  = DB.getCustomerById(r.customerId);
+    const isDed = !!r.deductedInvoice;
+    return `<tr>
+      <td class="text-muted small">${r.returnDate||'-'}</td>
+      <td class="fw-semibold">${cust?.name||'-'}</td>
+      <td class="small">${_itemsSummary(r)}</td>
+      <td class="small">${r.reason||'-'}</td>
+      <td class="small text-muted">${r.sourceInvoice||'-'}</td>
+      <td class="small ${isDed?'text-success':'text-warning'}">${isDed ? r.deductedInvoice : '—'}</td>
+      <td>${isDed
+        ? '<span class="badge bg-success">หักแล้ว</span>'
+        : '<span class="badge bg-warning text-dark">รอหัก</span>'}</td>
+      <td>
+        <div class="d-flex gap-1">
+          <button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="viewReturn('${r.id}')" title="ดูรายละเอียด"><i class="bi bi-eye"></i></button>
+          ${Auth.can('return_edit') && !isDed ? `<button class="btn btn-sm btn-outline-info py-0 px-1" onclick="openDeduct('${r.id}')" title="บันทึกหักออก"><i class="bi bi-scissors"></i></button>` : ''}
+          ${Auth.can('return_edit') ? `<button class="btn btn-sm btn-outline-warning py-0 px-1" onclick="openReturnModal('${r.id}')" title="แก้ไข"><i class="bi bi-pencil"></i></button>` : ''}
+          ${Auth.can('return_delete') ? `<button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="deleteReturn('${r.id}')" title="ลบ"><i class="bi bi-trash3"></i></button>` : ''}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Return Modal ─────────────────────────────────────────────────────────────
+function openReturnModal(id) {
+  _pendingImages = [];
+  _returnItems   = [];
+  document.getElementById('returnId').value = id || '';
+  document.getElementById('returnModalTitle').innerHTML = id
+    ? '<i class="bi bi-pencil me-2"></i>แก้ไขรายการคืน'
+    : '<i class="bi bi-arrow-return-left me-2"></i>บันทึกรายการคืนสินค้า';
+  document.getElementById('returnModalAlert').innerHTML = '';
+  document.getElementById('imagePreviewRow').innerHTML = '';
+  document.getElementById('returnImages').value = '';
+  document.getElementById('returnNote').value = '';
+  document.getElementById('returnReason').value = '';
+  document.getElementById('returnReasonCustom').value = '';
+  document.getElementById('returnDate').value = new Date().toISOString().slice(0,10);
+  document.getElementById('returnCustSearch').value = '';
+  document.getElementById('returnCustId').value = '';
+
+  // populate customer datalist
+  const dl = document.getElementById('returnCustDatalist');
+  dl.innerHTML = '';
+  DB.getCustomers().sort((a,b) => a.name.localeCompare(b.name,'th')).forEach(c => {
+    dl.innerHTML += `<option value="${c.name}" data-id="${c.id}">`;
+  });
+
+  document.getElementById('returnSourceInv').value = '';
+  _populateAllInvDatalist();
+  renderReasonChips('');
+  renderItemRows();
+
+  if (id) {
+    const r = DB.getReturnById(id);
+    if (r) {
+      const cust = DB.getCustomerById(r.customerId);
+      if (cust) {
+        document.getElementById('returnCustSearch').value = cust.name;
+        document.getElementById('returnCustId').value = r.customerId;
+        _filterInvDatalist(r.customerId);
+      }
+      document.getElementById('returnSourceInv').value = r.sourceInvoice || '';
+      // load items
+      _returnItems = _getReturnItems(r).map(it => ({ ...it }));
+      if (!_returnItems.length) _returnItems = [{ productId: '', productName: '', qty: 1 }];
+      renderItemRows();
+
+      document.getElementById('returnDate').value = r.returnDate || '';
+      document.getElementById('returnNote').value = r.note || '';
+      renderReasonChips(r.reason);
+      if (r.images?.length) {
+        _pendingImages = [...r.images];
+        document.getElementById('imagePreviewRow').innerHTML = r.images.map((src,i) =>
+          `<div class="position-relative" id="imgwrap${i}">
+            <img src="${src}" style="height:80px;border-radius:6px;object-fit:cover">
+            <button class="btn btn-danger btn-sm position-absolute top-0 end-0 p-0 px-1" onclick="removeImg(${i})" style="font-size:10px">×</button>
+          </div>`).join('');
+      }
+    }
+  } else {
+    _returnItems = [{ productId: '', productName: '', qty: 1 }];
+    renderItemRows();
+  }
+
+  new bootstrap.Modal(document.getElementById('returnModal')).show();
+}
+
+function _populateAllInvDatalist() {
+  const nums = [...new Set(DB.getInvoices().map(i => i.invoiceNumber))].sort().reverse();
+  document.getElementById('returnInvDatalist').innerHTML = nums.map(n => `<option value="${n}">`).join('');
+}
+
+function _filterInvDatalist(custId) {
+  if (!custId) { _populateAllInvDatalist(); return; }
+  const nums = [...new Set(DB.getInvoices().filter(i => i.customerId === custId).map(i => i.invoiceNumber))].sort().reverse();
+  document.getElementById('returnInvDatalist').innerHTML = nums.map(n => `<option value="${n}">`).join('');
+}
+
+function onCustSearchInput() {
+  const search = document.getElementById('returnCustSearch').value.trim();
+  const match  = DB.getCustomers().find(c => c.name === search);
+  const prevId = document.getElementById('returnCustId').value;
+  document.getElementById('returnCustId').value = match ? match.id : '';
+  if (match && match.id !== prevId) {
+    _filterInvDatalist(match.id);
+    document.getElementById('returnSourceInv').value = '';
+  }
+  if (!match) _populateAllInvDatalist();
+}
+
+function onSourceInvInput() {
+  const invNum = document.getElementById('returnSourceInv').value.trim();
+  if (!invNum) return;
+  const inv = DB.getInvoices().find(i => i.invoiceNumber === invNum);
+  if (!inv) return;
+  const cust = DB.getCustomerById(inv.customerId);
+  if (!cust) return;
+  const prevId = document.getElementById('returnCustId').value;
+  if (cust.id !== prevId) {
+    document.getElementById('returnCustSearch').value = cust.name;
+    document.getElementById('returnCustId').value = cust.id;
+    _filterInvDatalist(cust.id);
+  }
+}
+
+function onReturnCustChange(cb) {
+  const custId = document.getElementById('returnCustId').value;
+  _filterInvDatalist(custId);
+  if (cb) cb();
+}
+
+// ── Item rows ─────────────────────────────────────────────────────────────────
+function renderItemRows() {
+  const products = DB.getProducts();
+  const prodOpts = '<option value="">-- เลือกสินค้า --</option>' +
+    products.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+
+  document.getElementById('returnItemRows').innerHTML = _returnItems.map((it, i) => `
+    <div class="d-flex gap-2 align-items-center mb-2" id="rirow_${i}">
+      <div style="flex:1;min-width:0">
+        <select class="form-select form-select-sm" onchange="_returnItems[${i}].productId=this.value;_returnItems[${i}].productName=this.options[this.selectedIndex].text">
+          ${products.map(p => `<option value="${p.id}" ${it.productId===p.id?'selected':''}>${p.name}</option>`).join('')}
+          ${!it.productId ? '<option value="" selected>-- เลือกสินค้า --</option>' : ''}
+        </select>
+      </div>
+      <div style="width:90px">
+        <input type="number" class="form-control form-control-sm text-center" min="1" placeholder="จำนวน"
+               value="${it.qty||''}" oninput="_returnItems[${i}].qty=+this.value">
+      </div>
+      <button type="button" class="btn btn-outline-danger btn-sm px-2" onclick="removeReturnItemRow(${i})"
+              ${_returnItems.length===1?'disabled':''} title="ลบ">
+        <i class="bi bi-x-lg"></i>
+      </button>
+    </div>`).join('');
+}
+
+function addReturnItemRow() {
+  _returnItems.push({ productId: '', productName: '', qty: 1 });
+  renderItemRows();
+}
+
+function removeReturnItemRow(i) {
+  if (_returnItems.length <= 1) return;
+  _returnItems.splice(i, 1);
+  renderItemRows();
+}
+
+function renderReasonChips(selected) {
+  document.getElementById('reasonChips').innerHTML = REASONS.map(r =>
+    `<button type="button" class="btn btn-sm ${r===selected?'btn-warning':'btn-outline-secondary'}"
+      onclick="selectReason('${r}')">${r}</button>`
+  ).join('');
+  document.getElementById('returnReason').value = selected;
+}
+
+function selectReason(r) {
+  document.getElementById('returnReason').value = r;
+  renderReasonChips(r);
+  document.getElementById('returnReasonCustom').value = '';
+}
+
+function addCustomReason() {
+  const v = document.getElementById('returnReasonCustom').value.trim();
+  if (!v) return;
+  document.getElementById('returnReason').value = v;
+  renderReasonChips(v);
+}
+
+function previewImages(input) {
+  const files = [...input.files];
+  const row   = document.getElementById('imagePreviewRow');
+  files.forEach(f => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      _pendingImages.push(e.target.result);
+      const i = _pendingImages.length - 1;
+      row.innerHTML += `<div class="position-relative" id="imgwrap${i}">
+        <img src="${e.target.result}" style="height:80px;border-radius:6px;object-fit:cover">
+        <button class="btn btn-danger btn-sm position-absolute top-0 end-0 p-0 px-1" onclick="removeImg(${i})" style="font-size:10px">×</button>
+      </div>`;
+    };
+    reader.readAsDataURL(f);
+  });
+}
+
+function removeImg(i) {
+  _pendingImages[i] = null;
+  const w = document.getElementById('imgwrap'+i);
+  if (w) w.remove();
+}
+
+function saveReturn() {
+  const custId = document.getElementById('returnCustId').value;
+  const srcInv = document.getElementById('returnSourceInv').value.trim();
+  const reason = document.getElementById('returnReason').value.trim();
+  const date   = document.getElementById('returnDate').value;
+  const note   = document.getElementById('returnNote').value.trim();
+  const id     = document.getElementById('returnId').value;
+
+  // validate items
+  const validItems = _returnItems.filter(it => it.productId && it.qty > 0).map(it => {
+    const p = DB.getProductById(it.productId);
+    return { productId: it.productId, productName: p?.name || it.productName || '', qty: it.qty };
+  });
+
+  if (!custId || !srcInv || !validItems.length || !reason) {
+    document.getElementById('returnModalAlert').innerHTML =
+      '<div class="alert alert-danger py-1 small">กรุณากรอกข้อมูลให้ครบ (ลูกค้า, ใบกำกับ, สินค้า+จำนวนอย่างน้อย 1 รายการ, สาเหตุ)</div>';
+    return;
+  }
+
+  const images = _pendingImages.filter(Boolean);
+  const data = {
+    customerId: custId, sourceInvoice: srcInv,
+    items: validItems,
+    // keep legacy fields from first item for backwards compat
+    productId: validItems[0].productId, productName: validItems[0].productName, qty: validItems[0].qty,
+    reason, returnDate: date, note, images
+  };
+
+  if (id) {
+    DB.updateReturn(id, data);
+    DB.logActivity(session.userId, session.username, 'แก้ไขรายการคืน', { id, reason });
+  } else {
+    DB.addReturn({ id: Utils.uuid(), ...data, createdAt: new Date().toISOString() });
+    DB.logActivity(session.userId, session.username, 'บันทึกรายการคืน', { sourceInvoice: srcInv, reason });
+  }
+
+  bootstrap.Modal.getInstance(document.getElementById('returnModal')).hide();
+  render();
+  Utils.showAlert(`<i class="bi bi-check-circle me-1"></i>${id?'แก้ไข':'บันทึก'}รายการคืนสำเร็จ`);
+}
+
+// ── Deduct Modal ─────────────────────────────────────────────────────────────
+function openDeduct(returnId) {
+  const r    = DB.getReturnById(returnId);
+  const cust = DB.getCustomerById(r?.customerId);
+  if (!r || !cust) return;
+
+  document.getElementById('deductReturnId').value = returnId;
+
+  const invSel = document.getElementById('deductInvNum');
+  invSel.innerHTML = '<option value="">-- เลือกใบกำกับ --</option>';
+  const invs = DB.getInvoices().filter(i => i.customerId === r.customerId);
+  [...new Set(invs.map(i => i.invoiceNumber))].sort().reverse().forEach(n => {
+    invSel.innerHTML += `<option value="${n}">${n}</option>`;
+  });
+
+  const itemsSummary = _getReturnItems(r).map(it => {
+    const p = DB.getProductById(it.productId);
+    return `${p?.name||it.productName||'-'} ×${it.qty}`;
+  }).join(', ');
+  document.getElementById('deductInfo').innerHTML =
+    `<div class="border rounded p-2 bg-light small">
+      <strong>รายการคืน:</strong> ${itemsSummary} | สาเหตุ: ${r.reason}<br>
+      <strong>ต้นทาง:</strong> ${r.sourceInvoice} | ลูกค้า: ${cust.name}
+    </div>`;
+
+  new bootstrap.Modal(document.getElementById('deductModal')).show();
+}
+
+function saveDeduct() {
+  const returnId = document.getElementById('deductReturnId').value;
+  const invNum   = document.getElementById('deductInvNum').value;
+  if (!invNum) { alert('กรุณาเลือกใบกำกับ'); return; }
+  DB.updateReturn(returnId, { deductedInvoice: invNum, deductedAt: new Date().toISOString() });
+  DB.logActivity(session.userId, session.username, 'หักรายการคืนออกใบกำกับ', { returnId, invNum });
+  bootstrap.Modal.getInstance(document.getElementById('deductModal')).hide();
+  render();
+  Utils.showAlert(`<i class="bi bi-check-circle me-1"></i>บันทึกหักออกใบกำกับ ${invNum} แล้ว`);
+}
+
+// ── View ─────────────────────────────────────────────────────────────────────
+function viewReturn(id) {
+  const r    = DB.getReturnById(id);
+  const cust = DB.getCustomerById(r?.customerId);
+  if (!r) return;
+
+  const items = _getReturnItems(r);
+  const itemsHtml = items.length
+    ? `<table class="table table-sm table-bordered mb-0" style="font-size:13px">
+        <thead class="table-light"><tr><th>#</th><th>สินค้า</th><th class="text-center">จำนวน</th></tr></thead>
+        <tbody>${items.map((it,i) => {
+          const p = DB.getProductById(it.productId);
+          return `<tr><td class="text-muted">${i+1}</td><td>${p?.name||it.productName||'-'}</td><td class="text-center fw-semibold">${it.qty}</td></tr>`;
+        }).join('')}</tbody>
+      </table>`
+    : '<span class="text-muted small">ไม่มีรายการสินค้า</span>';
+
+  document.getElementById('viewReturnBody').innerHTML = `
+    <div class="row g-3">
+      <div class="col-md-6">
+        <div class="mb-2"><span class="text-muted small">ลูกค้า</span><div class="fw-bold">${cust?.name||'-'}</div></div>
+        <div class="mb-2"><span class="text-muted small">ใบกำกับต้นทาง</span><div class="fw-semibold text-primary">${r.sourceInvoice||'-'}</div></div>
+        <div class="mb-2"><span class="text-muted small">สาเหตุ</span><div><span class="badge bg-warning text-dark">${r.reason||'-'}</span></div></div>
+        <div class="mb-2"><span class="text-muted small">วันที่คืน</span><div>${r.returnDate||'-'}</div></div>
+        <div class="mb-2"><span class="text-muted small">หักออกใบกำกับ</span>
+          <div class="fw-semibold ${r.deductedInvoice?'text-success':'text-muted'}">${r.deductedInvoice||'ยังไม่ได้หัก'}</div></div>
+        ${r.note?`<div class="mb-2"><span class="text-muted small">หมายเหตุ</span><div>${r.note}</div></div>`:''}
+        <div class="mb-2"><span class="text-muted small">รายการสินค้า</span><div class="mt-1">${itemsHtml}</div></div>
+      </div>
+      <div class="col-md-6">
+        ${r.images?.length ? `
+        <div class="text-muted small mb-1">รูปภาพ (${r.images.length})</div>
+        <div class="d-flex flex-wrap gap-2">
+          ${r.images.map(src=>`<a href="${src}" target="_blank"><img src="${src}" style="height:100px;border-radius:6px;object-fit:cover"></a>`).join('')}
+        </div>` : '<div class="text-muted small">ไม่มีรูปภาพ</div>'}
+      </div>
+    </div>`;
+  new bootstrap.Modal(document.getElementById('viewReturnModal')).show();
+}
+
+// ── Delete ───────────────────────────────────────────────────────────────────
+function deleteReturn(id) {
+  if (!confirm('ลบรายการคืนสินค้านี้?')) return;
+  DB.deleteReturn(id);
+  DB.logActivity(session.userId, session.username, 'ลบรายการคืน', { id });
+  render();
+  Utils.showAlert('ลบรายการแล้ว', 'warning');
+}
+</script>
+</body>
+</html>

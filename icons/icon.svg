@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background rounded rect -->
+  <rect width="512" height="512" rx="90" fill="#0d6efd"/>
+  <!-- Water droplet shape -->
+  <path d="M256 88 C256 88 128 248 128 336 C128 407 186 464 256 464 C326 464 384 407 384 336 C384 248 256 88 256 88Z" fill="white" opacity="0.95"/>
+  <!-- Inner droplet highlight -->
+  <path d="M256 160 C256 160 175 272 175 336 C175 377 211 410 256 410 C301 410 337 377 337 336 C337 272 256 160 256 160Z" fill="#0d6efd" opacity="0.35"/>
+  <!-- Small shine -->
+  <ellipse cx="220" cy="280" rx="18" ry="28" fill="white" opacity="0.4" transform="rotate(-20, 220, 280)"/>
+</svg>

@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0d6efd">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ใบกำกับ">
+<title>สต๊อกฝาขวด PET</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+.color-dot { display:inline-block;width:14px;height:14px;border-radius:50%;border:1px solid #ccc;vertical-align:middle;margin-right:5px; }
+.img-thumb { max-height:80px;border-radius:6px;border:1px solid #dee2e6;cursor:pointer; }
+.img-fullscreen { position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:zoom-out; }
+.img-fullscreen img { max-width:95vw;max-height:95vh;border-radius:8px; }
+.stock-low  { background:#fff3cd; }
+.stock-zero { background:#f8d7da; }
+</style>
+</head>
+<body>
+<div id="navContainer"></div>
+<div class="page-wrap">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0 fw-bold"><i class="bi bi-box2-heart me-2 text-primary"></i>สต๊อกฝาขวด PET</h5>
+  </div>
+  <div id="alertBox" class="mb-2"></div>
+
+  <ul class="nav nav-tabs mb-3" id="mainTabs">
+    <li class="nav-item"><button class="nav-link active" data-tab="overview"><i class="bi bi-grid-3x3-gap me-1"></i>ภาพรวมสต๊อก</button></li>
+    <li class="nav-item"><button class="nav-link" data-tab="receive"><i class="bi bi-box-arrow-in-down me-1"></i>บันทึกรับฝา</button></li>
+    <li class="nav-item"><button class="nav-link" data-tab="monthly"><i class="bi bi-calendar3 me-1"></i>สรุปรายเดือน</button></li>
+    <li class="nav-item"><button class="nav-link" data-tab="colors"><i class="bi bi-palette me-1"></i>จัดการสีฝา</button></li>
+  </ul>
+
+  <!-- TAB: Overview -->
+  <div id="tab-overview">
+    <div class="row g-3 mb-3" id="stockCards"></div>
+    <div class="card">
+      <div class="card-header bg-white fw-semibold py-2 d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <span>ประวัติรับเข้า / ตัดออก</span>
+        <div class="d-flex gap-2 flex-wrap">
+          <select id="ovColorFilter" class="form-select form-select-sm" style="width:160px" onchange="renderOverviewHistory()">
+            <option value="">— ทุกสี —</option>
+          </select>
+          <select id="ovTypeFilter" class="form-select form-select-sm" style="width:140px" onchange="renderOverviewHistory()">
+            <option value="">— ทุกประเภท —</option>
+            <option value="in">รับเข้า</option>
+            <option value="out">ตัดออก (ใบกำกับ)</option>
+          </select>
+          <button class="btn btn-sm btn-outline-warning" onclick="syncDeductions()" title="ล้างยอดตัดเก่าทั้งหมด แล้วคำนวณใหม่จากใบกำกับทั้งหมด">
+            <i class="bi bi-arrow-repeat me-1"></i>Sync จากใบกำกับ
+          </button>
+          <button class="btn btn-sm btn-outline-danger" onclick="clearAllDeductions()" title="ลบประวัติการตัดออกทั้งหมด">
+            <i class="bi bi-trash me-1"></i>ล้างประวัติตัดออก
+          </button>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0">
+          <thead><tr>
+            <th>วันที่</th><th>สี</th><th>ประเภท</th>
+            <th class="text-end">จำนวน (ลัง)</th><th>อ้างอิง</th><th>หมายเหตุ</th><th></th>
+          </tr></thead>
+          <tbody id="overviewHistoryBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB: Receive -->
+  <div id="tab-receive" style="display:none">
+    <div class="card" style="max-width:600px">
+      <div class="card-header bg-white fw-semibold py-2">บันทึกรับฝาขวด PET เข้าสต๊อก</div>
+      <div class="card-body">
+        <div id="receiveAlert"></div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">สีฝา <span class="text-danger">*</span></label>
+          <select id="recColor" class="form-select">
+            <option value="">— เลือกสี —</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">จำนวน (ลัง) <span class="text-danger">*</span></label>
+          <input type="number" id="recQty" class="form-control" min="1" placeholder="0">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">วันที่รับ <span class="text-danger">*</span></label>
+          <input type="date" id="recDate" class="form-control">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">ผู้จำหน่าย / แหล่งที่มา</label>
+          <input type="text" id="recSupplier" class="form-control" placeholder="ชื่อผู้จำหน่าย">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">หมายเหตุ</label>
+          <input type="text" id="recNote" class="form-control" placeholder="หมายเหตุเพิ่มเติม">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold"><i class="bi bi-image me-1 text-primary"></i>รูปบิลรับสินค้า</label>
+          <input type="file" id="recImage" class="form-control" accept="image/*" onchange="loadReceiptImage(this)">
+          <div id="recImagePreview" class="mt-2"></div>
+        </div>
+        <button class="btn btn-success" onclick="saveReceipt()"><i class="bi bi-save me-1"></i>บันทึกรับเข้า</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB: Monthly Summary -->
+  <div id="tab-monthly" style="display:none">
+    <div class="d-flex gap-2 align-items-center mb-3 flex-wrap">
+      <label class="fw-semibold mb-0">เดือน:</label>
+      <input type="month" id="monthPicker" class="form-control form-control-sm" style="width:160px" onchange="renderMonthly()">
+      <select id="monthColorFilter" class="form-select form-select-sm" style="width:160px" onchange="renderMonthly()">
+        <option value="">— ทุกสี —</option>
+      </select>
+    </div>
+    <div class="row g-3 mb-3" id="monthlySummaryCards"></div>
+    <div class="card">
+      <div class="card-header bg-white fw-semibold py-2">รายการในเดือนที่เลือก</div>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0">
+          <thead><tr>
+            <th>วันที่</th><th>สี</th><th>ประเภท</th>
+            <th class="text-end">จำนวน</th><th>เลขที่บิล / ลูกค้า</th><th>หมายเหตุ</th>
+          </tr></thead>
+          <tbody id="monthlyBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB: Manage Colors -->
+  <div id="tab-colors" style="display:none">
+    <div class="row g-3">
+      <div class="col-md-5">
+        <div class="card">
+          <div class="card-header bg-white fw-semibold py-2">เพิ่ม / แก้ไขสีฝา</div>
+          <div class="card-body">
+            <div id="colorFormAlert"></div>
+            <input type="hidden" id="colorId">
+            <div class="mb-3">
+              <label class="form-label fw-semibold">ชื่อสี <span class="text-danger">*</span></label>
+              <input type="text" id="colorName" class="form-control" placeholder="เช่น สีแดง, สีฟ้า, Natural">
+            </div>
+            <div class="mb-3">
+              <label class="form-label fw-semibold">โค้ดสี (CSS)</label>
+              <div class="input-group">
+                <input type="color" id="colorCode" class="form-control form-control-color" value="#6c757d" style="width:48px">
+                <input type="text" id="colorCodeText" class="form-control" value="#6c757d" oninput="syncColorText(this.value)">
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label fw-semibold">สินค้าที่ใช้ฝาสีนี้</label>
+              <div class="text-muted small mb-1">เลือกสินค้าที่เป็นฝาขวด PET สีนี้ (เพื่อตัดสต๊อกอัตโนมัติ)</div>
+              <div id="colorProductList" style="max-height:200px;overflow-y:auto;border:1px solid #dee2e6;border-radius:6px;padding:8px"></div>
+            </div>
+            <div class="d-flex gap-2">
+              <button class="btn btn-primary" onclick="saveColor()"><i class="bi bi-save me-1"></i>บันทึก</button>
+              <button class="btn btn-outline-secondary" onclick="clearColorForm()">ล้าง</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-7">
+        <div class="card">
+          <div class="card-header bg-white fw-semibold py-2">รายการสีฝาทั้งหมด</div>
+          <div class="table-responsive">
+            <table class="table table-hover mb-0">
+              <thead><tr><th>สี</th><th>สินค้าที่ผูก</th><th class="text-end">สต๊อกปัจจุบัน</th><th></th></tr></thead>
+              <tbody id="colorListBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Lightbox -->
+<div id="lightbox" class="img-fullscreen" style="display:none" onclick="this.style.display='none'">
+  <img id="lightboxImg" src="">
+</div>
+
+<!-- Deduction Detail Modal -->
+<div class="modal fade" id="dedModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title fw-bold" id="dedModalTitle">รายละเอียดการตัดสต๊อก</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0">
+        <div class="table-responsive">
+          <table class="table table-sm mb-0">
+            <thead class="table-light"><tr>
+              <th>วันที่</th><th>เลขที่บิล</th><th>ลูกค้า</th><th class="text-end">จำนวนที่ตัด</th>
+            </tr></thead>
+            <tbody id="dedModalBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script>
+<script>
+const session = Auth.requirePage('cap_stock');
+DB.init();
+Nav.render('cap-stock');
+
+let recImageB64 = '';
+let dedModal;
+
+window.addEventListener('DOMContentLoaded', () => {
+  dedModal = new bootstrap.Modal(document.getElementById('dedModal'));
+
+  // Tab switching
+  document.querySelectorAll('#mainTabs .nav-link').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#mainTabs .nav-link').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      ['overview','receive','monthly','colors'].forEach(t =>
+        document.getElementById('tab-' + t).style.display = btn.dataset.tab === t ? '' : 'none');
+      if (btn.dataset.tab === 'overview') renderOverview();
+      if (btn.dataset.tab === 'receive')  renderReceiveForm();
+      if (btn.dataset.tab === 'monthly')  renderMonthly();
+      if (btn.dataset.tab === 'colors')   renderColorTab();
+    });
+  });
+
+  document.getElementById('recDate').value = Utils.todayInputValue();
+  const now = new Date();
+  document.getElementById('monthPicker').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+
+  renderOverview();
+  populateColorFilters();
+});
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function populateColorFilters() {
+  const colors = DB.getCapColors();
+  const opts = colors.map(c => `<option value="${c.id}">${c.color}</option>`).join('');
+  ['ovColorFilter','monthColorFilter'].forEach(id => {
+    const el = document.getElementById(id);
+    const prev = el.value;
+    el.innerHTML = '<option value="">— ทุกสี —</option>' + opts;
+    el.value = prev;
+  });
+}
+
+function colorDot(code, size = 14) {
+  return `<span style="display:inline-block;width:${size}px;height:${size}px;border-radius:50%;background:${code||'#6c757d'};border:1px solid #ccc;vertical-align:middle;margin-right:4px"></span>`;
+}
+
+// ── TAB: Overview ─────────────────────────────────────────────────────────────
+function renderOverview() {
+  const colors = DB.getCapColors();
+  // Summary cards
+  const cards = colors.map(c => {
+    const stock = DB.getCapCurrentStock(c.id);
+    const cls = stock <= 0 ? 'border-danger' : stock < 1000 ? 'border-warning' : '';
+    const textCls = stock <= 0 ? 'text-danger' : stock < 1000 ? 'text-warning' : 'text-success';
+    return `
+    <div class="col-6 col-md-3">
+      <div class="card text-center ${cls}">
+        <div class="card-body py-3">
+          <div style="font-size:28px;margin-bottom:4px">${colorDot(c.colorCode, 24)}${c.color}</div>
+          <div class="fw-bold fs-4 ${textCls}">${Utils.formatNumber(stock)}</div>
+          <div class="text-muted small">ลัง</div>
+          <button class="btn btn-sm btn-outline-info mt-2" onclick="showDedDetail('${c.id}','${c.color}')">
+            <i class="bi bi-list-ul me-1"></i>ดูรายการตัดออก
+          </button>
+        </div>
+      </div>
+    </div>`;
+  }).join('') || '<div class="col-12 text-muted text-center py-3">ยังไม่มีสีฝา — ไปที่แท็บ "จัดการสีฝา" เพื่อเพิ่ม</div>';
+  document.getElementById('stockCards').innerHTML = cards;
+  populateColorFilters();
+  renderOverviewHistory();
+}
+
+function renderOverviewHistory() {
+  const colorFilter = document.getElementById('ovColorFilter').value;
+  const typeFilter  = document.getElementById('ovTypeFilter').value;
+  const colors = DB.getCapColors();
+
+  let rows = [];
+
+  if (!typeFilter || typeFilter === 'in') {
+    DB.getCapReceipts().forEach(r => {
+      if (colorFilter && r.colorId !== colorFilter) return;
+      const c = colors.find(x => x.id === r.colorId);
+      rows.push({ date: r.date || r.createdAt, colorId: r.colorId, color: r.color, colorCode: c?.colorCode,
+        type: 'in', qty: r.qty, ref: r.supplier || '-', note: r.notes || '', id: r.id,
+        image: r.receiptImage, ts: r.createdAt });
+    });
+  }
+  if (!typeFilter || typeFilter === 'out') {
+    DB.getCapDeductions().forEach(d => {
+      if (colorFilter && d.colorId !== colorFilter) return;
+      const c = colors.find(x => x.id === d.colorId);
+      rows.push({ date: d.invoiceDate || d.createdAt, colorId: d.colorId, color: d.color, colorCode: c?.colorCode,
+        type: 'out', qty: d.qty, ref: d.invoiceNumber, note: d.customerName || '', id: d.id,
+        invNum: d.invoiceNumber, ts: d.createdAt });
+    });
+  }
+  rows.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+
+  const tbody = document.getElementById('overviewHistoryBody');
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">ไม่พบรายการ</td></tr>'; return; }
+
+  tbody.innerHTML = rows.map(r => `
+  <tr>
+    <td>${Utils.formatDateTH(r.date)}</td>
+    <td>${colorDot(r.colorCode)}${r.color}</td>
+    <td>${r.type === 'in'
+      ? '<span class="badge bg-success">รับเข้า</span>'
+      : '<span class="badge bg-warning text-dark">ตัดออก</span>'}</td>
+    <td class="text-end fw-semibold ${r.type==='in'?'text-success':'text-danger'}">${r.type==='in'?'+':'−'}${Utils.formatNumber(r.qty)}</td>
+    <td>${r.type === 'out'
+      ? `<a href="invoice-create.html?view=${r.ref}" class="text-decoration-none">${r.ref}</a>`
+      : (r.ref || '-')}</td>
+    <td class="text-muted small">${r.note}</td>
+    <td class="text-center">
+      ${r.type === 'in' && r.image
+        ? `<img src="${r.image}" class="img-thumb" style="max-height:36px" onclick="openLightbox('${r.id}')" data-src="${r.image}">`
+        : ''}
+      ${r.type === 'in'
+        ? `<button class="btn btn-sm btn-outline-danger py-0 px-1 ms-1" onclick="deleteReceipt('${r.id}')" title="ลบ"><i class="bi bi-trash"></i></button>`
+        : ''}
+    </td>
+  </tr>`).join('');
+}
+
+function openLightbox(id) {
+  const el = document.querySelector(`[data-src][onclick*="${id}"]`);
+  if (!el) return;
+  document.getElementById('lightboxImg').src = el.dataset.src;
+  document.getElementById('lightbox').style.display = 'flex';
+}
+
+function openLightboxSrc(src) {
+  document.getElementById('lightboxImg').src = src;
+  document.getElementById('lightbox').style.display = 'flex';
+}
+
+function clearAllDeductions() {
+  if (!confirm('ลบประวัติการตัดออกทั้งหมดใช่หรือไม่?\n(ยอดรับเข้าจะยังคงอยู่)')) return;
+  DB.saveCapDeductions([]);
+  DB.logActivity(session.userId, session.username, 'ล้างประวัติตัดสต๊อกฝาขวด', {});
+  Utils.showAlert('ล้างประวัติการตัดออกทั้งหมดแล้ว', 'warning');
+  renderOverview();
+}
+
+function syncDeductions() {
+  const colors = DB.getCapColors();
+  if (!colors.length) { Utils.showAlert('ยังไม่มีสีฝา — กรุณาตั้งค่าสีฝาและผูกสินค้าก่อน', 'warning'); return; }
+
+  const linked = colors.filter(c => c.productIds && c.productIds.length);
+  if (!linked.length) { Utils.showAlert('ยังไม่มีสีฝาที่ผูกกับสินค้า — ไปที่แท็บ "จัดการสีฝา" เพื่อผูกสินค้า', 'warning'); return; }
+
+  if (!confirm('Sync จะลบประวัติตัดออกทั้งหมดแล้วคำนวณใหม่จากใบกำกับทุกใบในระบบ\nยืนยันดำเนินการ?')) return;
+
+  // Clear existing deductions
+  DB.saveCapDeductions([]);
+
+  // Re-calculate from all invoices
+  const allInvoices = DB.getInvoices();
+  const invNums = [...new Set(allInvoices.map(i => i.invoiceNumber))];
+  const customers = DB.getCustomers();
+  let count = 0;
+
+  invNums.forEach(invNum => {
+    const pages = allInvoices.filter(i => i.invoiceNumber === invNum);
+    if (!pages.length) return;
+    const first = pages[0];
+    const allItems = pages.flatMap(p => p.items || []);
+    const cust = customers.find(c => c.id === first.customerId);
+
+    colors.forEach(color => {
+      if (!color.productIds || !color.productIds.length) return;
+      let totalQty = 0;
+      allItems.forEach(item => {
+        if (color.productIds.includes(item.productId)) {
+          totalQty += parseFloat(item.qty) || 0;
+        }
+      });
+      if (totalQty > 0) {
+        DB.addCapDeduction({
+          id:            Utils.uuid(),
+          colorId:       color.id,
+          color:         color.color,
+          colorCode:     color.colorCode || '#6c757d',
+          qty:           totalQty,
+          invoiceNumber: invNum,
+          customerId:    first.customerId,
+          customerName:  cust ? cust.name : '',
+          invoiceDate:   first.createdAt,
+          createdAt:     new Date().toISOString()
+        });
+        count++;
+      }
+    });
+  });
+
+  DB.logActivity(session.userId, session.username, 'Sync สต๊อกฝาขวดจากใบกำกับ', { invoiceCount: invNums.length, deductionCount: count });
+  Utils.showAlert(`Sync สำเร็จ — สร้างรายการตัดออก ${count} รายการ จาก ${invNums.length} ใบกำกับ`, 'success');
+  renderOverview();
+}
+
+function deleteReceipt(id) {
+  if (!confirm('ลบรายการรับเข้านี้ใช่หรือไม่?')) return;
+  DB.deleteCapReceipt(id);
+  DB.logActivity(session.userId, session.username, 'ลบรายการรับฝาขวด', { id });
+  renderOverview();
+}
+
+function showDedDetail(colorId, colorName) {
+  const deds = DB.getCapDeductions().filter(d => d.colorId === colorId);
+  document.getElementById('dedModalTitle').textContent = `รายการตัดออก — ${colorName}`;
+  if (!deds.length) {
+    document.getElementById('dedModalBody').innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">ยังไม่มีรายการตัดออก</td></tr>';
+  } else {
+    document.getElementById('dedModalBody').innerHTML = deds
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .map(d => `<tr>
+        <td>${Utils.formatDateTH(d.invoiceDate || d.createdAt)}</td>
+        <td><a href="invoice-create.html?view=${d.invoiceNumber}">${d.invoiceNumber}</a></td>
+        <td>${d.customerName || '-'}</td>
+        <td class="text-end text-danger fw-semibold">−${Utils.formatNumber(d.qty)}</td>
+      </tr>`).join('');
+  }
+  dedModal.show();
+}
+
+// ── TAB: Receive ──────────────────────────────────────────────────────────────
+function renderReceiveForm() {
+  const colors = DB.getCapColors();
+  document.getElementById('recColor').innerHTML = '<option value="">— เลือกสี —</option>' +
+    colors.map(c => `<option value="${c.id}">${colorDot(c.colorCode)}${c.color}</option>`).join('');
+}
+
+function loadReceiptImage(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const MAX = 1200;
+      const scale = img.width > MAX ? MAX / img.width : 1;
+      canvas.width  = Math.round(img.width  * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      recImageB64 = canvas.toDataURL('image/jpeg', 0.82);
+      document.getElementById('recImagePreview').innerHTML =
+        `<img src="${recImageB64}" class="img-thumb" onclick="openLightboxSrc('${recImageB64}')">
+         <button class="btn btn-sm btn-outline-danger ms-2 align-self-start" onclick="clearRecImage()"><i class="bi bi-x-lg"></i></button>`;
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearRecImage() {
+  recImageB64 = '';
+  document.getElementById('recImagePreview').innerHTML = '';
+  document.getElementById('recImage').value = '';
+}
+
+function saveReceipt() {
+  const colorId = document.getElementById('recColor').value;
+  const qty     = parseFloat(document.getElementById('recQty').value);
+  const date    = document.getElementById('recDate').value;
+  if (!colorId) { Utils.showAlert('กรุณาเลือกสีฝา', 'warning', 'receiveAlert'); return; }
+  if (!qty || qty <= 0) { Utils.showAlert('กรุณากรอกจำนวน', 'warning', 'receiveAlert'); return; }
+  if (!date) { Utils.showAlert('กรุณาเลือกวันที่', 'warning', 'receiveAlert'); return; }
+
+  const color = DB.getCapColors().find(c => c.id === colorId);
+  DB.addCapReceipt({
+    id:           Utils.uuid(),
+    colorId,
+    color:        color?.color || '',
+    qty,
+    date,
+    supplier:     document.getElementById('recSupplier').value.trim(),
+    notes:        document.getElementById('recNote').value.trim(),
+    receiptImage: recImageB64,
+    createdAt:    new Date().toISOString(),
+    createdBy:    session.name,
+    createdByUser: session.username
+  });
+  DB.logActivity(session.userId, session.username, 'รับฝาขวด PET', { color: color?.color, qty, date });
+  Utils.showAlert(`บันทึกรับ ${Utils.formatNumber(qty)} ลัง สี${color?.color} สำเร็จ`, 'success', 'receiveAlert');
+
+  document.getElementById('recQty').value = '';
+  document.getElementById('recSupplier').value = '';
+  document.getElementById('recNote').value = '';
+  clearRecImage();
+}
+
+// ── TAB: Monthly ──────────────────────────────────────────────────────────────
+function renderMonthly() {
+  const month       = document.getElementById('monthPicker').value;
+  const colorFilter = document.getElementById('monthColorFilter').value;
+  if (!month) return;
+
+  const [yr, mo] = month.split('-');
+  const prefix   = `${yr}-${mo}`;
+  const colors   = DB.getCapColors();
+
+  const receipts   = DB.getCapReceipts().filter(r =>
+    (r.date || r.createdAt || '').startsWith(prefix) &&
+    (!colorFilter || r.colorId === colorFilter));
+  const deductions = DB.getCapDeductions().filter(d =>
+    ((d.invoiceDate || d.createdAt) || '').startsWith(prefix) &&
+    (!colorFilter || d.colorId === colorFilter));
+
+  // Summary cards per color
+  const colorSet = [...new Set([
+    ...receipts.map(r => r.colorId),
+    ...deductions.map(d => d.colorId)
+  ])];
+  const summaryCards = colorSet.map(cid => {
+    const c     = colors.find(x => x.id === cid);
+    const inQty = receipts.filter(r => r.colorId === cid).reduce((s, r) => s + (r.qty||0), 0);
+    const outQty = deductions.filter(d => d.colorId === cid).reduce((s, d) => s + (d.qty||0), 0);
+    return `
+    <div class="col-6 col-md-3">
+      <div class="card text-center">
+        <div class="card-body py-2">
+          <div class="fw-semibold">${colorDot(c?.colorCode)}${c?.color || cid}</div>
+          <div class="text-success small">+${Utils.formatNumber(inQty)} รับเข้า</div>
+          <div class="text-danger small">−${Utils.formatNumber(outQty)} ตัดออก</div>
+          <div class="fw-bold ${inQty-outQty>=0?'text-primary':'text-danger'}">${Utils.formatNumber(inQty-outQty)} สุทธิ</div>
+        </div>
+      </div>
+    </div>`;
+  }).join('') || '<div class="col-12 text-muted text-center">ไม่มีรายการในเดือนนี้</div>';
+  document.getElementById('monthlySummaryCards').innerHTML = summaryCards;
+
+  // Detail rows
+  let rows = [
+    ...receipts.map(r => ({
+      date: r.date || r.createdAt, color: r.color, colorCode: colors.find(x=>x.id===r.colorId)?.colorCode,
+      type: 'in', qty: r.qty, ref: r.supplier || '-', note: r.notes || '', ts: r.createdAt
+    })),
+    ...deductions.map(d => ({
+      date: d.invoiceDate || d.createdAt, color: d.color, colorCode: colors.find(x=>x.id===d.colorId)?.colorCode,
+      type: 'out', qty: d.qty, ref: d.invoiceNumber, note: d.customerName || '', ts: d.createdAt
+    }))
+  ];
+  rows.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+
+  const tbody = document.getElementById('monthlyBody');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">ไม่มีรายการ</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(r => `
+  <tr>
+    <td>${Utils.formatDateTH(r.date)}</td>
+    <td>${colorDot(r.colorCode)}${r.color}</td>
+    <td>${r.type==='in'
+      ? '<span class="badge bg-success">รับเข้า</span>'
+      : '<span class="badge bg-warning text-dark">ตัดออก</span>'}</td>
+    <td class="text-end fw-semibold ${r.type==='in'?'text-success':'text-danger'}">${r.type==='in'?'+':'−'}${Utils.formatNumber(r.qty)}</td>
+    <td>${r.type==='out'
+      ? `<a href="invoice-create.html?view=${r.ref}" class="fw-semibold text-decoration-none">${r.ref}</a>`
+      : (r.ref||'-')}</td>
+    <td class="text-muted small">${r.note}</td>
+  </tr>`).join('');
+}
+
+// ── TAB: Colors ───────────────────────────────────────────────────────────────
+function renderColorTab() {
+  renderColorProductList();
+  renderColorList();
+}
+
+function renderColorProductList() {
+  const colorId = document.getElementById('colorId').value;
+  const color   = colorId ? DB.getCapColors().find(c => c.id === colorId) : null;
+  const linked  = color?.productIds || [];
+  document.getElementById('colorProductList').innerHTML = DB.getProducts().map(p => `
+    <div class="form-check">
+      <input class="form-check-input" type="checkbox" id="cprod-${p.id}" value="${p.id}"
+             ${linked.includes(p.id) ? 'checked' : ''}>
+      <label class="form-check-label small" for="cprod-${p.id}">${p.name}</label>
+    </div>`).join('') || '<span class="text-muted small">ยังไม่มีสินค้าในระบบ</span>';
+}
+
+function renderColorList() {
+  const colors   = DB.getCapColors();
+  const products = DB.getProducts();
+  const tbody    = document.getElementById('colorListBody');
+  if (!colors.length) {
+    tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">ยังไม่มีสีฝา</td></tr>';
+    return;
+  }
+  tbody.innerHTML = colors.map(c => {
+    const stock    = DB.getCapCurrentStock(c.id);
+    const prodNames = (c.productIds || []).map(pid => products.find(p => p.id === pid)?.name || pid).join(', ') || '-';
+    return `<tr>
+      <td>${colorDot(c.colorCode, 16)}<strong>${c.color}</strong></td>
+      <td class="small text-muted">${prodNames}</td>
+      <td class="text-end fw-semibold ${stock<=0?'text-danger':stock<1000?'text-warning':'text-success'}">${Utils.formatNumber(stock)}</td>
+      <td class="text-center">
+        <button class="btn btn-sm btn-outline-primary me-1" onclick="editColor('${c.id}')"><i class="bi bi-pencil"></i></button>
+        <button class="btn btn-sm btn-outline-danger" onclick="deleteColor('${c.id}')"><i class="bi bi-trash"></i></button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function syncColorText(val) {
+  document.getElementById('colorCode').value = val;
+}
+
+function editColor(id) {
+  const c = DB.getCapColors().find(x => x.id === id);
+  if (!c) return;
+  document.getElementById('colorId').value       = id;
+  document.getElementById('colorName').value     = c.color;
+  document.getElementById('colorCode').value     = c.colorCode || '#6c757d';
+  document.getElementById('colorCodeText').value = c.colorCode || '#6c757d';
+  renderColorProductList();
+  document.getElementById('colorName').focus();
+}
+
+function clearColorForm() {
+  document.getElementById('colorId').value       = '';
+  document.getElementById('colorName').value     = '';
+  document.getElementById('colorCode').value     = '#6c757d';
+  document.getElementById('colorCodeText').value = '#6c757d';
+  renderColorProductList();
+}
+
+function saveColor() {
+  const id        = document.getElementById('colorId').value;
+  const name      = document.getElementById('colorName').value.trim();
+  const colorCode = document.getElementById('colorCodeText').value.trim() || document.getElementById('colorCode').value;
+  if (!name) { Utils.showAlert('กรุณากรอกชื่อสี', 'warning', 'colorFormAlert'); return; }
+
+  const productIds = [...document.querySelectorAll('#colorProductList input:checked')].map(el => el.value);
+
+  if (id) {
+    DB.updateCapColor(id, { color: name, colorCode, productIds });
+  } else {
+    DB.addCapColor({ id: Utils.uuid(), color: name, colorCode, productIds, createdAt: new Date().toISOString() });
+  }
+  DB.logActivity(session.userId, session.username, id ? 'แก้ไขสีฝาขวด' : 'เพิ่มสีฝาขวด', { color: name });
+  Utils.showAlert(`บันทึกสี "${name}" สำเร็จ`, 'success', 'colorFormAlert');
+  clearColorForm();
+  renderColorList();
+  populateColorFilters();
+}
+
+function deleteColor(id) {
+  const c = DB.getCapColors().find(x => x.id === id);
+  if (!confirm(`ลบสี "${c?.color}" ใช่หรือไม่?\nประวัติรับเข้าและตัดออกจะยังคงอยู่`)) return;
+  DB.deleteCapColor(id);
+  renderColorList();
+  populateColorFilters();
+}
+
+// sync color picker ↔ text input
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('colorCode').addEventListener('input', function() {
+    document.getElementById('colorCodeText').value = this.value;
+  });
+});
+</script>
+</body>
+</html>

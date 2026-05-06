@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0d6efd">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ใบกำกับ">
+<title>นำเข้าข้อมูลจาก PDF</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<style>
+.drop-zone {
+  border: 3px dashed #0d6efd; border-radius: 12px; padding: 48px 24px;
+  text-align: center; cursor: pointer; transition: background .2s, border-color .2s;
+}
+.drop-zone:hover,.drop-zone.dragover { background: #e7f1ff; border-color: #0a58ca; }
+[data-bs-theme="dark"] .drop-zone:hover,
+[data-bs-theme="dark"] .drop-zone.dragover { background: rgba(13,110,253,.12); }
+.raw-text { font-family: monospace; font-size: 11px; max-height: 160px;
+  overflow-y: auto; white-space: pre-wrap; background: #f8f9fa; }
+[data-bs-theme="dark"] .raw-text { background: #1c2128; color: #c9d1d9; }
+.card-saved .card-header { background: #198754 !important; color: #fff !important; }
+.card-saved { border-color: #198754 !important; }
+.field-parsed  { border-color: #198754 !important; }
+.field-missing { border-color: #dc3545 !important; background: #fff8f8; }
+[data-bs-theme="dark"] .field-missing { background: #2a0a0a !important; }
+.conf-icon { font-size: 0.8rem; }
+.pdf-canvas-wrap {
+  background: #e9ecef;
+  border-radius: 0 0 0 12px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: 520px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8px;
+}
+.pdf-canvas-wrap canvas {
+  width: 100%;
+  height: auto;
+  display: block;
+  box-shadow: 0 2px 8px rgba(0,0,0,.18);
+}
+[data-bs-theme="dark"] .pdf-canvas-wrap {
+  background: #161b22;
+}
+@media (max-width: 991px) {
+  .pdf-canvas-wrap { max-height: 320px; border-radius: 0; }
+}
+</style>
+</head>
+<body>
+<div id="navContainer"></div>
+<div class="page-wrap">
+
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0 fw-bold">
+      <i class="bi bi-file-earmark-pdf me-2 text-danger"></i>นำเข้าข้อมูลใบกำกับจาก PDF
+    </h5>
+    <div class="d-flex gap-2">
+      <button class="btn btn-outline-secondary d-none" id="clearBtn" onclick="clearAll()">
+        <i class="bi bi-arrow-counterclockwise me-1"></i>ล้างทั้งหมด
+      </button>
+      <button class="btn btn-success d-none" id="saveAllBtn" onclick="saveSelectedInvoices()">
+        <i class="bi bi-save me-1"></i>บันทึกที่เลือก (<span id="selectedCount">0</span>)
+      </button>
+    </div>
+  </div>
+  <div id="alertBox" class="mb-3"></div>
+
+  <!-- Drop Zone -->
+  <div id="dropZone" class="drop-zone mb-4"
+       onclick="document.getElementById('pdfInput').click()"
+       ondrop="handleDrop(event)"
+       ondragover="event.preventDefault();this.classList.add('dragover')"
+       ondragleave="this.classList.remove('dragover')">
+    <i class="bi bi-file-earmark-pdf display-4 text-danger d-block mb-3"></i>
+    <div class="fw-semibold fs-5 mb-1">วาง PDF ที่นี่ หรือคลิกเพื่อเลือกไฟล์</div>
+    <div class="text-muted small">รองรับหลายไฟล์พร้อมกัน — แต่ละหน้าถูกอ่านแยกกัน</div>
+    <input type="file" id="pdfInput" accept=".pdf" multiple style="display:none"
+           onchange="handleFiles(this.files)">
+  </div>
+
+  <!-- Progress -->
+  <div id="progressWrap" class="d-none mb-3">
+    <div class="d-flex align-items-center gap-2 text-primary">
+      <div class="spinner-border spinner-border-sm"></div>
+      <span id="progressText">กำลังอ่าน PDF...</span>
+    </div>
+  </div>
+
+  <!-- Invoice Cards -->
+  <div id="invoiceCards"></div>
+</div>
+
+<!-- Customer Warning Modal -->
+<div class="modal fade" id="custWarnModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header bg-warning">
+        <h5 class="modal-title fw-semibold">
+          <i class="bi bi-exclamation-triangle-fill me-2"></i>ชื่อลูกค้าไม่อยู่ในฐานข้อมูล
+        </h5>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2">รายการต่อไปนี้มีชื่อลูกค้าที่<strong>ไม่พบในฐานข้อมูล</strong> และจะถูกข้ามการบันทึก:</p>
+        <div id="custWarnList" class="mb-3"></div>
+        <p class="mb-0 text-muted small">ต้องการบันทึกเฉพาะรายการที่ถูกต้อง หรือย้อนกลับไปแก้ไขชื่อลูกค้า?</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+          <i class="bi bi-arrow-left me-1"></i>ย้อนกลับแก้ไข
+        </button>
+        <button type="button" class="btn btn-warning" onclick="confirmSave()">
+          <i class="bi bi-save me-1"></i>บันทึกเฉพาะที่ถูกต้อง
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script><script src="idb.js"></script>
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const session = Auth.require();
+DB.init();
+Nav.render('pdf-import');
+
+let _cards = [];
+let _custs  = [];
+
+window.addEventListener('DOMContentLoaded', () => {
+  _custs = DB.getCustomers();
+});
+
+/* ─── File Handling ─────────────────────────────────────────────────────── */
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('dropZone').classList.remove('dragover');
+  const files = Array.from(e.dataTransfer.files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+  if (files.length) handleFiles(files);
+  else Utils.showAlert('กรุณาเลือกไฟล์ PDF เท่านั้น', 'warning');
+}
+
+async function handleFiles(filesInput) {
+  const files = Array.from(filesInput);
+  document.getElementById('clearBtn').classList.remove('d-none');
+  for (let i = 0; i < files.length; i++) {
+    setProgress(true, `กำลังอ่าน: ${files[i].name} (${i+1}/${files.length})`);
+    await processPDF(files[i]);
+  }
+  setProgress(false);
+  updateSaveBtn();
+}
+
+async function processPDF(file) {
+  try {
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    for (let pn = 1; pn <= pdf.numPages; pn++) {
+      const page    = await pdf.getPage(pn);
+
+      // Render page to canvas for visual preview
+      const viewport = page.getViewport({ scale: 1.8 });
+      const canvas   = document.createElement('canvas');
+      canvas.width   = viewport.width;
+      canvas.height  = viewport.height;
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+      const pageImageUrl = canvas.toDataURL('image/png');
+
+      const content = await page.getTextContent();
+      // Reconstruct text by grouping items on the same y-line (PDF coords bottom-up)
+      const lineMap = {};
+      for (const item of content.items) {
+        const y = Math.round(item.transform[5] / 4) * 4;
+        if (!lineMap[y]) lineMap[y] = [];
+        lineMap[y].push({ x: item.transform[4], s: item.str });
+      }
+      const text = Object.keys(lineMap).map(Number).sort((a,b)=>b-a)
+        .map(y => lineMap[y].sort((a,b)=>a.x-b.x).map(i=>i.s).join(' ').trim())
+        .filter(l => l.length > 0).join('\n');
+      if (text.trim().length < 10) continue;
+      // Extract customer name from filename: remove extension, then strip numbers & special chars
+      const fileHint = file.name
+        .replace(/\.pdf$/i, '')
+        .replace(/[^ก-๙a-zA-Z\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const parsed = parseInvoice(text, fileHint);
+      const ci     = _cards.length;
+      _cards.push({
+        ...parsed, saved: false,
+        _buf:           pdf.numPages === 1 ? buf : null,  // keep original for single-page
+        _pageImageUrl:  pageImageUrl,
+        _canvasW:       canvas.width,
+        _canvasH:       canvas.height,
+        _totalPdfPages: pdf.numPages,
+      });
+      renderCard(parsed, ci, file.name, pn, pdf.numPages, pageImageUrl);
+    }
+  } catch (err) {
+    document.getElementById('invoiceCards').insertAdjacentHTML('beforeend',
+      `<div class="alert alert-danger mb-3"><i class="bi bi-exclamation-triangle me-1"></i>
+       อ่านไฟล์ <strong>${esc(file.name)}</strong> ไม่สำเร็จ: ${esc(err.message)}</div>`);
+  }
+}
+
+function setProgress(show, txt) {
+  document.getElementById('progressWrap').classList.toggle('d-none', !show);
+  if (txt) document.getElementById('progressText').textContent = txt;
+}
+
+/* ─── Parser ────────────────────────────────────────────────────────────── */
+function parseInvoice(text, filenameCustHint) {
+  const r = {
+    invoiceNumber: '', invoiceDate: Utils.todayInputValue(),
+    customerId: '', customerName: '',
+    shippingMethod: 'จัดส่ง',
+    totalAmount: 0,
+    rawText: text,
+    fields: {}
+  };
+
+  // ── Invoice number: DDMMYY-NNN or any common pattern ──
+  const mNum = text.match(/\b(\d{6}-\d{3,4})\b/);
+  if (mNum) { r.invoiceNumber = mNum[1]; r.fields.invoiceNumber = true; }
+
+  // ── Date: DD/MM/YYYY or D/M/YYYY (BE → CE conversion) ──
+  const mDate = text.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (mDate) {
+    let y = parseInt(mDate[3]);
+    if (y > 2500) y -= 543;
+    r.invoiceDate = `${y}-${mDate[2].padStart(2,'0')}-${mDate[1].padStart(2,'0')}`;
+    r.fields.invoiceDate = true;
+  }
+
+  // ── Shipping method ──
+  if (text.includes('รับเอง'))  { r.shippingMethod = 'รับเอง';  r.fields.shippingMethod = true; }
+  else if (text.includes('จัดส่ง') || text.includes('ณัฐวุฒิ')) {
+    r.shippingMethod = text.includes('ณัฐวุฒิ') ? 'ณัฐวุฒิ' : 'จัดส่ง';
+    r.fields.shippingMethod = true;
+  }
+
+  // ── Customer: priority 1 — match from filename hint (before "_") ──
+  if (filenameCustHint) {
+    let bestC = null, bestLen = 0;
+    for (const c of _custs) {
+      if (c.name && c.name.length > bestLen &&
+          (c.name === filenameCustHint ||
+           filenameCustHint.includes(c.name) ||
+           c.name.includes(filenameCustHint))) {
+        bestC = c; bestLen = c.name.length;
+      }
+    }
+    if (bestC) {
+      r.customerId = bestC.id; r.customerName = bestC.name; r.fields.customerId = true;
+    } else {
+      // Not in DB yet — prefill the text field so user sees the hint
+      r.customerName = filenameCustHint;
+    }
+  }
+
+  // ── Customer: priority 2 — scan text (only if filename gave nothing) ──
+  if (!r.customerId) {
+    let bestC = null, bestLen = 0;
+    for (const c of _custs) {
+      if (c.name && c.name.length > bestLen && text.includes(c.name)) {
+        bestC = c; bestLen = c.name.length;
+      }
+    }
+    if (bestC) { r.customerId = bestC.id; r.customerName = bestC.name; r.fields.customerId = true; }
+  }
+
+  // ── Total amount ──
+  // Priority 1: label "รวมทั้งสิ้น" or "รวมทั้งหมด" or "ยอดรวม"
+  const totalLabels = [/รวมทั้งสิ้น[^\d]*([\d,]+(?:\.\d{1,2})?)/,
+                       /รวมทั้งหมด[^\d]*([\d,]+(?:\.\d{1,2})?)/,
+                       /ยอดรวม[^\d]*([\d,]+(?:\.\d{1,2})?)/,
+                       /total[^\d]*([\d,]+(?:\.\d{1,2})?)/i];
+  let foundTotal = false;
+  for (const re of totalLabels) {
+    const m = text.match(re);
+    if (m) {
+      r.totalAmount = parseFloat(m[1].replace(/,/g,'')) || 0;
+      if (r.totalAmount > 0) { r.fields.totalAmount = true; foundTotal = true; break; }
+    }
+  }
+  // Priority 2: largest number in the text ≥ 10
+  if (!foundTotal) {
+    const allNums = [...text.matchAll(/([\d,]+\.\d{2})/g)]
+      .map(m => parseFloat(m[1].replace(/,/g,'')))
+      .filter(n => n >= 10 && !isNaN(n));
+    if (allNums.length) {
+      r.totalAmount = Math.max(...allNums);
+      // only mark detected if the max stands out (not just any number)
+      if (r.totalAmount > 0) r.fields.totalAmount = false; // flagged as unconfirmed
+    }
+  }
+
+  return r;
+}
+
+/* ─── Card Rendering ────────────────────────────────────────────────────── */
+function fieldClass(detected) {
+  return detected ? 'field-parsed' : 'field-missing';
+}
+function fieldIcon(detected) {
+  return detected
+    ? '<i class="bi bi-check-circle-fill text-success conf-icon ms-1"></i>'
+    : '<i class="bi bi-exclamation-circle-fill text-danger conf-icon ms-1"></i>';
+}
+
+function confBadge(f) {
+  const detected = Object.values(f).filter(Boolean).length;
+  const total    = 5;
+  const [cls,lbl] = detected>=4?['success','อ่านได้ดี']:detected>=2?['warning','บางส่วน']:['danger','ต้องแก้ไข'];
+  return `<span class="badge bg-${cls}">${lbl} (${detected}/${total})</span>`;
+}
+
+function renderCard(data, ci, fname, pn, totalPdf, pageImageUrl) {
+  const wrap = document.createElement('div');
+  wrap.className = 'card mb-4'; wrap.id = `card_${ci}`;
+  wrap.innerHTML = `
+<div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+  <div class="d-flex align-items-center gap-2">
+    <div class="form-check mb-0">
+      <input class="form-check-input" type="checkbox" id="sel_${ci}" checked onchange="updateSaveBtn()">
+      <label class="form-check-label fw-semibold" for="sel_${ci}">
+        <i class="bi bi-file-earmark-pdf text-danger me-1"></i>${esc(fname)} หน้า ${pn}/${totalPdf}
+      </label>
+    </div>
+    ${confBadge(data.fields)}
+  </div>
+  <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#raw_${ci}">
+    <i class="bi bi-code-square me-1"></i>ข้อความดิบ
+  </button>
+</div>
+<div class="collapse" id="raw_${ci}">
+  <div class="card-body border-bottom p-2"><pre class="raw-text mb-0">${esc(data.rawText)}</pre></div>
+</div>
+<div class="row g-0">
+  <!-- PDF Visual Preview -->
+  <div class="col-lg-4 border-end">
+    <div class="pdf-canvas-wrap">
+      ${pageImageUrl
+        ? `<img src="${pageImageUrl}" alt="PDF preview หน้า ${pn}" style="width:100%;height:auto;display:block;box-shadow:0 2px 8px rgba(0,0,0,.18);">`
+        : `<div class="text-muted small p-3"><i class="bi bi-image me-1"></i>ไม่มี preview</div>`}
+    </div>
+  </div>
+  <!-- Form Fields -->
+  <div class="col-lg-8">
+    <div class="card-body">
+      <div class="row g-3">
+
+        <!-- เลขที่ใบกำกับ -->
+        <div class="col-sm-5">
+          <label class="form-label fw-semibold small">
+            เลขที่ใบกำกับ <span class="text-danger">*</span>${fieldIcon(data.fields.invoiceNumber)}
+          </label>
+          <input type="text" class="form-control ${fieldClass(data.fields.invoiceNumber)}"
+                 id="n_${ci}" value="${esc(data.invoiceNumber)}" placeholder="030569-001">
+        </div>
+
+        <!-- วันที่ (แสดงและรับเป็น พ.ศ. DD/MM/YYYY) -->
+        <div class="col-sm-4">
+          <label class="form-label fw-semibold small">
+            วันที่ (พ.ศ.)${fieldIcon(data.fields.invoiceDate)}
+          </label>
+          <input type="text" class="form-control ${fieldClass(data.fields.invoiceDate)}"
+                 id="d_${ci}" value="${ceToBeDisplay(data.invoiceDate)}"
+                 placeholder="DD/MM/YYYY">
+        </div>
+
+        <!-- ลูกค้า (พิมพ์ค้นหาได้) -->
+        <div class="col-12">
+          <label class="form-label fw-semibold small">
+            ลูกค้า <span class="text-danger">*</span>${fieldIcon(data.fields.customerId)}
+          </label>
+          <input type="text" class="form-control ${fieldClass(data.fields.customerId)}"
+                 id="c_${ci}" list="custList_${ci}"
+                 value="${esc(data.customerName)}"
+                 placeholder="พิมพ์ชื่อลูกค้า..."
+                 oninput="updateSaveBtn()">
+          <datalist id="custList_${ci}">
+            ${_custs.map(c => `<option value="${esc(c.name)}">`).join('')}
+          </datalist>
+        </div>
+
+        <!-- วิธีจัดส่ง -->
+        <div class="col-sm-5">
+          <label class="form-label fw-semibold small">
+            วิธีจัดส่ง${fieldIcon(data.fields.shippingMethod)}
+          </label>
+          <select class="form-select ${fieldClass(data.fields.shippingMethod)}" id="s_${ci}">
+            <option value="จัดส่ง"${data.shippingMethod==='จัดส่ง'?' selected':''}>จัดส่ง</option>
+            <option value="รับเอง"${data.shippingMethod==='รับเอง'?' selected':''}>รับเอง</option>
+            <option value="ณัฐวุฒิ"${data.shippingMethod==='ณัฐวุฒิ'?' selected':''}>ณัฐวุฒิ</option>
+          </select>
+        </div>
+
+        <!-- ยอดเงินรวม -->
+        <div class="col-sm-7">
+          <label class="form-label fw-semibold small">
+            ยอดเงินรวม (บาท) <span class="text-danger">*</span>${fieldIcon(data.fields.totalAmount)}
+          </label>
+          <div class="input-group">
+            <span class="input-group-text"><i class="bi bi-currency-exchange"></i></span>
+            <input type="number" class="form-control ${fieldClass(data.fields.totalAmount)}"
+                   id="t_${ci}" value="${data.totalAmount ? data.totalAmount.toFixed(2) : ''}"
+                   min="0" step="0.01" placeholder="0.00">
+            <span class="input-group-text">฿</span>
+          </div>
+        </div>
+
+        <!-- หมายเหตุ -->
+        <div class="col-12">
+          <label class="form-label fw-semibold small">หมายเหตุ</label>
+          <input type="text" class="form-control form-control-sm" id="note_${ci}"
+                 value="นำเข้าจาก pdf เก่า" placeholder="หมายเหตุ (ถ้ามี)">
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>`;
+  document.getElementById('invoiceCards').appendChild(wrap);
+}
+
+/* ─── Interactions ──────────────────────────────────────────────────────── */
+function updateSaveBtn() {
+  const n = _cards.filter((c,i) => {
+    const el = document.getElementById(`sel_${i}`);
+    return el && el.checked && !c.saved;
+  }).length;
+  document.getElementById('selectedCount').textContent = n;
+  document.getElementById('saveAllBtn').classList.toggle('d-none', n === 0);
+}
+
+/* ─── Save ──────────────────────────────────────────────────────────────── */
+function getCardData(ci) {
+  const custName = document.getElementById(`c_${ci}`).value.trim();
+  const cust     = findCustByName(custName) || {};
+  const dateText = document.getElementById(`d_${ci}`).value.trim();
+  const invoiceDate = beInputToCE(dateText) || Utils.todayInputValue();
+  const rawAmt   = parseFloat(document.getElementById(`t_${ci}`).value) || 0;
+  return {
+    invoiceNumber:  document.getElementById(`n_${ci}`).value.trim(),
+    invoiceDate,
+    customerId:     cust.id || '',
+    customerName:   cust.name || custName,
+    shippingMethod: document.getElementById(`s_${ci}`).value,
+    totalAmount:    parseFloat(rawAmt.toFixed(2)),
+    note:           document.getElementById(`note_${ci}`).value.trim(),
+  };
+}
+
+let _custWarnModal = null;
+
+function saveSelectedInvoices() {
+  // Collect selected cards with a typed name that's NOT in the DB
+  const unknowns = [];
+  for (let ci = 0; ci < _cards.length; ci++) {
+    const sel = document.getElementById(`sel_${ci}`);
+    if (!sel || !sel.checked || _cards[ci].saved) continue;
+    const custName = document.getElementById(`c_${ci}`).value.trim();
+    if (custName && !findCustByName(custName)) {
+      unknowns.push({ ci, custName });
+    }
+  }
+
+  if (unknowns.length) {
+    document.getElementById('custWarnList').innerHTML = unknowns.map(({ ci, custName }) =>
+      `<div class="d-flex align-items-center gap-2 p-2 mb-1 rounded border border-warning bg-warning bg-opacity-10">
+         <i class="bi bi-person-x-fill text-warning fs-5"></i>
+         <div>
+           <div class="fw-semibold small">การ์ด ${ci + 1}</div>
+           <div class="text-muted small">"${esc(custName)}" — ไม่พบในฐานข้อมูลลูกค้า</div>
+         </div>
+       </div>`
+    ).join('');
+    if (!_custWarnModal) _custWarnModal = new bootstrap.Modal(document.getElementById('custWarnModal'));
+    _custWarnModal.show();
+    return;
+  }
+
+  _doSave();
+}
+
+async function confirmSave() {
+  if (_custWarnModal) _custWarnModal.hide();
+  await _doSave();
+}
+
+async function _doSave() {
+  let saved = 0;
+  const errors = [];
+
+  for (let ci = 0; ci < _cards.length; ci++) {
+    const sel = document.getElementById(`sel_${ci}`);
+    if (!sel || !sel.checked || _cards[ci].saved) continue;
+
+    const d = getCardData(ci);
+    if (!d.invoiceNumber)    { errors.push(`การ์ด ${ci+1}: ต้องระบุเลขที่ใบกำกับ`); continue; }
+    if (!d.customerId)       { errors.push(`การ์ด ${ci+1}: ไม่พบลูกค้า "${esc(d.customerName)}" ในฐานข้อมูล`); continue; }
+    if (!(d.totalAmount > 0)){ errors.push(`การ์ด ${ci+1}: ต้องระบุยอดเงินรวม`); continue; }
+    if (DB.getInvoicesByNumber(d.invoiceNumber).length) {
+      errors.push(`${d.invoiceNumber}: มีอยู่ในระบบแล้ว`); continue;
+    }
+
+    const createdAt = d.invoiceDate
+      ? new Date(d.invoiceDate).toISOString()
+      : new Date().toISOString();
+
+    DB.addInvoice({
+      id:             Utils.uuid(),
+      invoiceNumber:  d.invoiceNumber,
+      page:           1,
+      totalPages:     1,
+      customerId:     d.customerId,
+      shippingMethod: d.shippingMethod,
+      items:          [],
+      totalAmount:    d.totalAmount,
+      note:           d.note,
+      createdAt,
+      createdBy:      session.name,
+      createdByUser:  session.username,
+      printCount:     0,
+      importedFrom:   'pdf',
+    });
+    DB.logActivity(session.userId, session.username, 'นำเข้าใบกำกับจาก PDF',
+      { invoiceNumber: d.invoiceNumber, customerName: d.customerName, totalAmount: d.totalAmount });
+
+    // Save PDF file (original or per-page render)
+    try { await savePdfForCard(ci, d); } catch(e) { console.warn('PDF save:', e); }
+
+    _cards[ci].saved = true;
+    sel.checked = false; sel.disabled = true;
+    const card = document.getElementById(`card_${ci}`);
+    card.classList.add('card-saved');
+    card.querySelector('.card-header')
+      .insertAdjacentHTML('beforeend',
+        '<span class="badge bg-white text-success ms-2"><i class="bi bi-check-circle-fill"></i> บันทึกแล้ว</span>');
+    saved++;
+  }
+
+  let msg = `บันทึกสำเร็จ ${saved} ใบ`;
+  if (errors.length) msg += `<br><small>${errors.map(e => `⚠️ ${e}`).join('<br>')}</small>`;
+  Utils.showAlert(msg, saved ? 'success' : 'warning');
+  updateSaveBtn();
+}
+
+function clearAll() {
+  _cards = [];
+  document.getElementById('invoiceCards').innerHTML = '';
+  document.getElementById('clearBtn').classList.add('d-none');
+  document.getElementById('saveAllBtn').classList.add('d-none');
+  document.getElementById('pdfInput').value = '';
+}
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function sanitizeFilename(s) {
+  return String(s||'').replace(/[\\/:*?"<>|\x00-\x1f]/g,'_').replace(/_+/g,'_').trim();
+}
+
+async function savePdfBlob(blob, filename) {
+  try {
+    const handle = await IDB.get('pdf_dir');
+    if (handle) {
+      const perm = await handle.requestPermission({ mode: 'readwrite' });
+      if (perm === 'granted') {
+        const fh = await handle.getFileHandle(filename, { create: true });
+        const w  = await fh.createWritable();
+        await w.write(blob); await w.close();
+        return true;
+      }
+    }
+  } catch(e) { console.warn('PDF folder save:', e); }
+  // Fallback: browser download
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 3000);
+  return false;
+}
+
+async function savePdfForCard(ci, d) {
+  const card = _cards[ci];
+  const fn = sanitizeFilename(d.customerName || 'unknown') + '_' +
+             sanitizeFilename(d.invoiceNumber) + '.pdf';
+
+  let blob;
+  if (card._buf) {
+    // Single-page PDF — use original file directly
+    blob = new Blob([card._buf], { type: 'application/pdf' });
+  } else {
+    // Multi-page PDF — create single-page PDF from pre-rendered canvas image
+    const { jsPDF } = window.jspdf;
+    const dpi  = 96 * 1.8;   // canvas was rendered at scale 1.8
+    const pdfW = (card._canvasW / dpi) * 25.4;
+    const pdfH = (card._canvasH / dpi) * 25.4;
+    const pdf  = new jsPDF({ orientation: pdfW < pdfH ? 'portrait' : 'landscape',
+                             unit: 'mm', format: [pdfW, pdfH] });
+    pdf.addImage(card._pageImageUrl, 'PNG', 0, 0, pdfW, pdfH);
+    blob = pdf.output('blob');
+  }
+
+  await savePdfBlob(blob, fn);
+}
+
+// Convert ISO date (CE) → DD/MM/YYYY display in BE year
+function ceToBeDisplay(isoDate) {
+  if (!isoDate) return '';
+  const [y, m, d] = isoDate.split('-');
+  return `${d}/${m}/${parseInt(y) + 543}`;
+}
+
+// Parse DD/MM/YYYY (BE or CE) typed by user → ISO CE string
+function beInputToCE(txt) {
+  const m = String(txt||'').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return null;
+  let y = parseInt(m[3]);
+  if (y > 2500) y -= 543;
+  return `${y}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+}
+
+// Find customer by exact name
+function findCustByName(name) {
+  return _custs.find(c => c.name === name.trim()) || null;
+}
+</script>
+</body>
+</html>

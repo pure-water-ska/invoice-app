@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0d6efd">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ใบกำกับ">
+<title>ประวัติการใช้งาน</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="navContainer"></div>
+<div class="page-wrap">
+  <h5 class="mb-3 fw-bold"><i class="bi bi-clock-history me-2 text-primary"></i>ประวัติการใช้งาน</h5>
+
+  <ul class="nav nav-tabs mb-3" id="historyTabs">
+    <li class="nav-item"><a class="nav-link active" href="#" onclick="switchTab('activity',this)"><i class="bi bi-list-ul me-1"></i>ประวัติการทำรายการ</a></li>
+    <li class="nav-item"><a class="nav-link" href="#" onclick="switchTab('login',this)"><i class="bi bi-box-arrow-in-right me-1"></i>ประวัติการ Login</a></li>
+  </ul>
+
+  <!-- Filters -->
+  <div class="card mb-3">
+    <div class="card-body py-2">
+      <div class="row g-2">
+        <div class="col-md-3">
+          <select id="filterUser" class="form-select form-select-sm">
+            <option value="">— ผู้ใช้ทั้งหมด —</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <div class="input-group input-group-sm">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input type="text" id="searchText" class="form-control" placeholder="ค้นหา...">
+          </div>
+        </div>
+        <div class="col-md-2">
+          <input type="date" id="filterFrom" class="form-control form-control-sm">
+        </div>
+        <div class="col-md-2">
+          <input type="date" id="filterTo" class="form-control form-control-sm">
+        </div>
+        <div class="col-md-2" id="activityFilterExt">
+          <select id="filterAction" class="form-select form-select-sm">
+            <option value="">— ทุกประเภท —</option>
+          </select>
+        </div>
+        <div class="col-md-2 d-none" id="loginFilterExt">
+          <select id="filterSuccess" class="form-select form-select-sm">
+            <option value="">— ทุกผลลัพธ์ —</option>
+            <option value="true">สำเร็จ</option>
+            <option value="false">ล้มเหลว</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <select id="filterRows" class="form-select form-select-sm">
+            <option value="50">แสดง 50 รายการ</option>
+            <option value="100">แสดง 100 รายการ</option>
+            <option value="200">แสดง 200 รายการ</option>
+            <option value="0">แสดงทั้งหมด</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Activity log -->
+  <div id="tabActivity">
+    <div class="card">
+      <div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
+        <span class="fw-semibold">ประวัติการทำรายการ</span>
+        <span class="badge bg-secondary" id="activityCount">0 รายการ</span>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-hover table-sm mb-0">
+          <thead><tr>
+            <th>#</th><th>วันที่/เวลา</th><th>ผู้ใช้</th><th>ชื่อ</th>
+            <th>การกระทำ</th><th>รายละเอียด</th>
+          </tr></thead>
+          <tbody id="activityTable"><tr><td colspan="6" class="text-center text-muted py-4">ยังไม่มีประวัติ</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Login history -->
+  <div id="tabLogin" style="display:none">
+    <div class="card">
+      <div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
+        <span class="fw-semibold">ประวัติการ Login</span>
+        <span class="badge bg-secondary" id="loginCount">0 รายการ</span>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-hover table-sm mb-0">
+          <thead><tr>
+            <th>#</th><th>วันที่/เวลา</th><th>ผู้ใช้</th><th class="text-center">ผลลัพธ์</th>
+          </tr></thead>
+          <tbody id="loginTable"><tr><td colspan="4" class="text-center text-muted py-4">ยังไม่มีประวัติ</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script>
+<script>
+const session = Auth.require();
+DB.init();
+Nav.render('history');
+let currentTab = 'activity';
+
+const ACTION_ICONS = {
+  'เข้าสู่ระบบ': 'bi-box-arrow-in-right text-success',
+  'ออกจากระบบ': 'bi-box-arrow-right text-secondary',
+  'สร้างใบกำกับ': 'bi-receipt text-primary',
+  'ลบใบกำกับ': 'bi-receipt text-danger',
+  'บันทึกชำระเงิน': 'bi-cash-coin text-success',
+  'ลบรายการชำระ': 'bi-cash-coin text-danger',
+  'เพิ่มลูกค้า': 'bi-person-plus text-success',
+  'แก้ไขลูกค้า': 'bi-person-gear text-primary',
+  'ลบลูกค้า': 'bi-person-dash text-danger',
+  'เพิ่มสินค้า': 'bi-box text-success',
+  'แก้ไขสินค้า': 'bi-box text-primary',
+  'ลบสินค้า': 'bi-box text-danger',
+  'จัดการราคาสินค้า': 'bi-tags text-info',
+  'เพิ่มผู้ใช้': 'bi-person-plus text-success',
+  'แก้ไขผู้ใช้': 'bi-person-gear text-primary',
+  'ลบผู้ใช้': 'bi-person-dash text-danger',
+  'เปลี่ยนรหัสผ่าน': 'bi-key text-warning',
+  'พิมพ์ใบกำกับ': 'bi-printer text-info',
+};
+
+window.addEventListener('DOMContentLoaded', () => {
+  const users = DB.getUsers();
+  const userSel = document.getElementById('filterUser');
+  users.forEach(u => userSel.innerHTML += `<option value="${u.username}">${u.name} (${u.username})</option>`);
+
+  // Populate action filter with unique action values
+  const actions = [...new Set(DB.getActivity().map(a => a.action))].sort();
+  actions.forEach(a => {
+    document.getElementById('filterAction').innerHTML += `<option value="${a}">${a}</option>`;
+  });
+
+  ['filterUser','searchText','filterFrom','filterTo','filterRows','filterAction','filterSuccess'].forEach(id => {
+    document.getElementById(id).addEventListener('input', renderCurrent);
+    document.getElementById(id).addEventListener('change', renderCurrent);
+  });
+  render();
+});
+
+function switchTab(tab, el) {
+  currentTab = tab;
+  document.querySelectorAll('#historyTabs .nav-link').forEach(a => a.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('tabActivity').style.display = tab === 'activity' ? '' : 'none';
+  document.getElementById('tabLogin').style.display = tab === 'login' ? '' : 'none';
+  // Show/hide tab-specific filters
+  document.getElementById('activityFilterExt').classList.toggle('d-none', tab !== 'activity');
+  document.getElementById('loginFilterExt').classList.toggle('d-none', tab !== 'login');
+  renderCurrent();
+  return false;
+}
+
+function renderCurrent() { currentTab === 'activity' ? renderActivity() : renderLogin(); }
+function render() { renderActivity(); renderLogin(); }
+
+function getFilters() {
+  return {
+    user: document.getElementById('filterUser').value,
+    q: document.getElementById('searchText').value.toLowerCase(),
+    from: document.getElementById('filterFrom').value,
+    to: document.getElementById('filterTo').value,
+    limit: parseInt(document.getElementById('filterRows').value) || 0,
+    action: document.getElementById('filterAction').value,
+    success: document.getElementById('filterSuccess').value,
+  };
+}
+
+function applyFilters(list, f, textFn) {
+  return list.filter(item => {
+    const d = new Date(item.timestamp);
+    if (f.user && item.username !== f.user) return false;
+    if (f.q && !textFn(item).toLowerCase().includes(f.q)) return false;
+    if (f.from && d < new Date(f.from)) return false;
+    if (f.to && d > new Date(f.to + 'T23:59:59')) return false;
+    return true;
+  });
+}
+
+function renderActivity() {
+  const f = getFilters();
+  let list = DB.getActivity();
+  if (!Auth.isAdmin()) list = list.filter(l => l.userId === session.userId);
+  list = applyFilters(list, f, item => item.action + ' ' + JSON.stringify(item.details||{}));
+  if (f.action) list = list.filter(item => item.action === f.action);
+  document.getElementById('activityCount').textContent = list.length + ' รายการ';
+  const shown = f.limit > 0 ? list.slice(0, f.limit) : list;
+  const tbody = document.getElementById('activityTable');
+  if (!shown.length) { tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">ไม่พบรายการ</td></tr>'; return; }
+  tbody.innerHTML = shown.map((item, i) => {
+    const icon = ACTION_ICONS[item.action] || 'bi-circle text-muted';
+    const details = item.details || {};
+    const detailStr = Object.entries(details).map(([k,v]) => `${k}: ${v}`).join(' | ');
+    return `<tr>
+      <td class="text-muted">${i+1}</td>
+      <td style="white-space:nowrap">${Utils.formatDateTimeTH(item.timestamp)}</td>
+      <td><span class="badge bg-light text-dark border">${item.username}</span></td>
+      <td class="text-muted small">${item.username ? (DB.getUserByUsername(item.username)||{}).name || '' : ''}</td>
+      <td><i class="bi ${icon} me-1"></i>${item.action}</td>
+      <td class="text-muted small">${detailStr}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderLogin() {
+  const f = getFilters();
+  let list = DB.getLogins();
+  if (!Auth.isAdmin()) list = list.filter(l => l.userId === session.userId);
+  list = applyFilters(list, f, item => item.username);
+  if (f.success !== '') list = list.filter(item => String(item.success) === f.success);
+  document.getElementById('loginCount').textContent = list.length + ' รายการ';
+  const shown = f.limit > 0 ? list.slice(0, f.limit) : list;
+  const tbody = document.getElementById('loginTable');
+  if (!shown.length) { tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">ไม่พบรายการ</td></tr>'; return; }
+  tbody.innerHTML = shown.map((item, i) => `
+    <tr>
+      <td class="text-muted">${i+1}</td>
+      <td style="white-space:nowrap">${Utils.formatDateTimeTH(item.timestamp)}</td>
+      <td>
+        <span class="badge bg-light text-dark border">${item.username}</span>
+        <span class="text-muted small ms-1">${(DB.getUserByUsername(item.username)||{}).name||''}</span>
+      </td>
+      <td class="text-center">
+        ${item.success
+          ? '<span class="badge bg-success"><i class="bi bi-check me-1"></i>สำเร็จ</span>'
+          : '<span class="badge bg-danger"><i class="bi bi-x me-1"></i>ล้มเหลว</span>'}
+      </td>
+    </tr>`).join('');
+}
+</script>
+</body>
+</html>

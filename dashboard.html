@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0d6efd">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ใบกำกับ">
+<title>Dashboard</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="navContainer"></div>
+<div class="page-wrap">
+
+  <!-- Admin label edit button -->
+  <div id="adminLabelBar" class="d-none text-end mb-2">
+    <button class="btn btn-sm btn-outline-secondary" onclick="openLabelModal()">
+      <i class="bi bi-pencil-square me-1"></i>แก้ไขชื่อ Dashboard
+    </button>
+  </div>
+
+  <!-- Stat Cards -->
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+      <div class="stat-card" style="background:linear-gradient(135deg,#0d6efd,#0a58ca)">
+        <div class="d-flex justify-content-between align-items-start">
+          <div><div class="stat-value" id="statInvToday">0</div><div class="stat-label" id="lbl-stat0">ใบกำกับวันนี้</div></div>
+          <i class="bi bi-receipt stat-icon"></i>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="stat-card" style="background:linear-gradient(135deg,#198754,#146c43)">
+        <div class="d-flex justify-content-between align-items-start">
+          <div><div class="stat-value" id="statPaid">0</div><div class="stat-label" id="lbl-stat1">ชำระแล้ว</div></div>
+          <i class="bi bi-check-circle stat-icon"></i>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="stat-card" style="background:linear-gradient(135deg,#dc3545,#b02a37)">
+        <div class="d-flex justify-content-between align-items-start">
+          <div><div class="stat-value" id="statUnpaid">0</div><div class="stat-label" id="lbl-stat2">ค้างชำระ</div></div>
+          <i class="bi bi-exclamation-circle stat-icon"></i>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="stat-card" style="background:linear-gradient(135deg,#fd7e14,#ca6510)">
+        <div class="d-flex justify-content-between align-items-start">
+          <div><div class="stat-value" id="statCustomers">0</div><div class="stat-label" id="lbl-stat3">ลูกค้าทั้งหมด</div></div>
+          <i class="bi bi-people stat-icon"></i>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Revenue summary -->
+  <div class="row g-3 mb-4">
+    <div class="col-md-4">
+      <div class="card h-100">
+        <div class="card-body text-center">
+          <div class="text-muted small mb-1" id="lbl-rev0">ยอดขายวันนี้</div>
+          <div class="fs-4 fw-bold text-primary" id="revenueToday">฿0.00</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card h-100">
+        <div class="card-body text-center">
+          <div class="text-muted small mb-1" id="lbl-rev1">ยอดขายเดือนนี้</div>
+          <div class="fs-4 fw-bold text-success" id="revenueMonth">฿0.00</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card h-100">
+        <div class="card-body text-center">
+          <div class="text-muted small mb-1" id="lbl-rev2">ยอดค้างชำระรวม</div>
+          <div class="fs-4 fw-bold text-danger" id="revenueUnpaid">฿0.00</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <!-- Recent Invoices -->
+    <div class="col-lg-7">
+      <div class="card">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
+          <span class="fw-semibold"><i class="bi bi-receipt me-1 text-primary"></i><span id="lbl-sec0">ใบกำกับล่าสุด</span></span>
+          <a href="invoices.html" class="btn btn-sm btn-outline-primary" id="lbl-btn0">ดูทั้งหมด</a>
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-hover mb-0 table-sm">
+              <thead><tr>
+                <th>เลขที่</th><th>ลูกค้า</th><th>วันที่</th>
+                <th class="text-end">ยอด</th><th class="text-center">สถานะ</th>
+              </tr></thead>
+              <tbody id="recentInvoices"><tr><td colspan="5" class="text-center text-muted py-3">ยังไม่มีข้อมูล</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Unpaid Invoices -->
+    <div class="col-lg-5">
+      <div class="card">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
+          <span class="fw-semibold"><i class="bi bi-exclamation-circle me-1 text-danger"></i><span id="lbl-sec1">ค้างชำระ</span></span>
+          <a href="payments.html" class="btn btn-sm btn-outline-danger" id="lbl-btn1">จัดการ</a>
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-hover mb-0 table-sm">
+              <thead><tr><th>เลขที่</th><th>ลูกค้า</th><th class="text-end">ค้าง</th></tr></thead>
+              <tbody id="unpaidList"><tr><td colspan="3" class="text-center text-muted py-3">ไม่มีรายการค้างชำระ</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Label Edit Modal -->
+<div class="modal fade" id="labelModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-pencil-square me-1"></i>แก้ไขชื่อ Dashboard</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small mb-3">แก้ไขชื่อที่แสดงบน Dashboard — เว้นว่างเพื่อใช้ชื่อเริ่มต้น</p>
+        <div class="row g-3">
+          <div class="col-12"><h6 class="fw-semibold text-secondary border-bottom pb-1">การ์ดสถิติ</h6></div>
+          <div class="col-md-6"><label class="form-label form-label-sm">การ์ดที่ 1 (น้ำเงิน)</label><input type="text" class="form-control form-control-sm" id="edit-stat0" placeholder="ใบกำกับวันนี้"></div>
+          <div class="col-md-6"><label class="form-label form-label-sm">การ์ดที่ 2 (เขียว)</label><input type="text" class="form-control form-control-sm" id="edit-stat1" placeholder="ชำระแล้ว"></div>
+          <div class="col-md-6"><label class="form-label form-label-sm">การ์ดที่ 3 (แดง)</label><input type="text" class="form-control form-control-sm" id="edit-stat2" placeholder="ค้างชำระ"></div>
+          <div class="col-md-6"><label class="form-label form-label-sm">การ์ดที่ 4 (ส้ม)</label><input type="text" class="form-control form-control-sm" id="edit-stat3" placeholder="ลูกค้าทั้งหมด"></div>
+
+          <div class="col-12 mt-2"><h6 class="fw-semibold text-secondary border-bottom pb-1">การ์ดยอดขาย</h6></div>
+          <div class="col-md-4"><label class="form-label form-label-sm">ยอดขาย 1</label><input type="text" class="form-control form-control-sm" id="edit-rev0" placeholder="ยอดขายวันนี้"></div>
+          <div class="col-md-4"><label class="form-label form-label-sm">ยอดขาย 2</label><input type="text" class="form-control form-control-sm" id="edit-rev1" placeholder="ยอดขายเดือนนี้"></div>
+          <div class="col-md-4"><label class="form-label form-label-sm">ยอดขาย 3</label><input type="text" class="form-control form-control-sm" id="edit-rev2" placeholder="ยอดค้างชำระรวม"></div>
+
+          <div class="col-12 mt-2"><h6 class="fw-semibold text-secondary border-bottom pb-1">หัวข้อส่วน / ปุ่ม</h6></div>
+          <div class="col-md-6"><label class="form-label form-label-sm">หัวข้อตาราง 1</label><input type="text" class="form-control form-control-sm" id="edit-sec0" placeholder="ใบกำกับล่าสุด"></div>
+          <div class="col-md-6"><label class="form-label form-label-sm">ปุ่มตาราง 1</label><input type="text" class="form-control form-control-sm" id="edit-btn0" placeholder="ดูทั้งหมด"></div>
+          <div class="col-md-6"><label class="form-label form-label-sm">หัวข้อตาราง 2</label><input type="text" class="form-control form-control-sm" id="edit-sec1" placeholder="ค้างชำระ"></div>
+          <div class="col-md-6"><label class="form-label form-label-sm">ปุ่มตาราง 2</label><input type="text" class="form-control form-control-sm" id="edit-btn1" placeholder="จัดการ"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary btn-sm" onclick="resetLabels()"><i class="bi bi-arrow-counterclockwise me-1"></i>คืนค่าเริ่มต้น</button>
+        <button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+        <button class="btn btn-primary" onclick="saveLabels()"><i class="bi bi-save me-1"></i>บันทึก</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script>
+<script>
+const session = Auth.require();
+DB.init();
+Nav.render('dashboard');
+
+const LABEL_DEFAULTS = {
+  'stat0': 'ใบกำกับวันนี้',
+  'stat1': 'ชำระแล้ว',
+  'stat2': 'ค้างชำระ',
+  'stat3': 'ลูกค้าทั้งหมด',
+  'rev0':  'ยอดขายวันนี้',
+  'rev1':  'ยอดขายเดือนนี้',
+  'rev2':  'ยอดค้างชำระรวม',
+  'sec0':  'ใบกำกับล่าสุด',
+  'btn0':  'ดูทั้งหมด',
+  'sec1':  'ค้างชำระ',
+  'btn1':  'จัดการ'
+};
+
+function getLabels() {
+  const s = DB.getSettings();
+  return s.dashboardLabels || {};
+}
+
+function applyLabels() {
+  const saved = getLabels();
+  Object.keys(LABEL_DEFAULTS).forEach(key => {
+    const el = document.getElementById('lbl-' + key);
+    if (el) el.textContent = saved[key] || LABEL_DEFAULTS[key];
+  });
+}
+
+let labelModal;
+window.addEventListener('DOMContentLoaded', () => {
+  labelModal = new bootstrap.Modal(document.getElementById('labelModal'));
+  applyLabels();
+  if (Auth.isAdmin && Auth.isAdmin()) {
+    document.getElementById('adminLabelBar').classList.remove('d-none');
+  }
+  load();
+});
+
+function openLabelModal() {
+  const saved = getLabels();
+  Object.keys(LABEL_DEFAULTS).forEach(key => {
+    const el = document.getElementById('edit-' + key);
+    if (el) el.value = saved[key] || '';
+  });
+  labelModal.show();
+}
+
+function saveLabels() {
+  const labels = {};
+  Object.keys(LABEL_DEFAULTS).forEach(key => {
+    const el = document.getElementById('edit-' + key);
+    const val = el ? el.value.trim() : '';
+    if (val) labels[key] = val;
+  });
+  const s = DB.getSettings();
+  s.dashboardLabels = labels;
+  DB.saveSettings(s);
+  applyLabels();
+  labelModal.hide();
+}
+
+function resetLabels() {
+  Object.keys(LABEL_DEFAULTS).forEach(key => {
+    const el = document.getElementById('edit-' + key);
+    if (el) el.value = '';
+  });
+}
+
+function getInvoiceStatus(inv) {
+  const paid = DB.getInvoicePaidAmount(inv.invoiceNumber);
+  const total = parseFloat(inv.totalAmount) || 0;
+  if (paid <= 0) return 'pending';
+  if (paid >= total) return 'paid';
+  return 'partial';
+}
+
+function statusBadge(status) {
+  const map = { pending:'badge-pending', partial:'badge-partial', paid:'badge-paid' };
+  const label = { pending:'ค้างชำระ', partial:'ชำระบางส่วน', paid:'ชำระแล้ว' };
+  return `<span class="badge ${map[status]||'bg-secondary'}">${label[status]||status}</span>`;
+}
+
+function load() {
+  const invoices = DB.getInvoices();
+  const customers = DB.getCustomers();
+  const today = new Date(); today.setHours(0,0,0,0);
+  const thisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+
+  // Stats
+  const todayInvs = invoices.filter(i => new Date(i.createdAt) >= today);
+  const uniqueToday = [...new Set(todayInvs.map(i => i.invoiceNumber))].length;
+  document.getElementById('statInvToday').textContent = uniqueToday;
+  document.getElementById('statCustomers').textContent = customers.length;
+
+  let paidCount = 0, unpaidCount = 0;
+  let revenueToday = 0, revenueMonth = 0, revenueUnpaid = 0;
+  const uniqueInvNums = [...new Set(invoices.map(i => i.invoiceNumber))];
+
+  uniqueInvNums.forEach(num => {
+    const pages = invoices.filter(i => i.invoiceNumber === num);
+    const first = pages[0];
+    const total = parseFloat(first.totalAmount) || 0;
+    const paid = DB.getInvoicePaidAmount(num);
+    const status = paid <= 0 ? 'pending' : paid >= total ? 'paid' : 'partial';
+    const created = new Date(first.createdAt);
+
+    if (status === 'paid') paidCount++;
+    else { unpaidCount++; revenueUnpaid += total - paid; }
+
+    if (created >= today) revenueToday += total;
+    if (created >= thisMonth) revenueMonth += total;
+  });
+
+  document.getElementById('statPaid').textContent = paidCount;
+  document.getElementById('statUnpaid').textContent = unpaidCount;
+  document.getElementById('revenueToday').textContent = '฿' + Utils.formatNumber(revenueToday);
+  document.getElementById('revenueMonth').textContent = '฿' + Utils.formatNumber(revenueMonth);
+  document.getElementById('revenueUnpaid').textContent = '฿' + Utils.formatNumber(revenueUnpaid);
+
+  // Recent invoices (unique numbers, last 10)
+  const recent = [];
+  const seen = new Set();
+  for (const inv of invoices) {
+    if (!seen.has(inv.invoiceNumber)) { seen.add(inv.invoiceNumber); recent.push(inv); }
+    if (recent.length >= 10) break;
+  }
+
+  const tbody = document.getElementById('recentInvoices');
+  if (recent.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">ยังไม่มีข้อมูล</td></tr>'; return; }
+  tbody.innerHTML = recent.map(inv => {
+    const cust = customers.find(c => c.id === inv.customerId);
+    const status = getInvoiceStatus(inv);
+    return `<tr class="cursor-pointer" onclick="location.href='invoices.html?num=${inv.invoiceNumber}'">
+      <td><a href="invoices.html?num=${inv.invoiceNumber}" class="text-decoration-none fw-semibold">${inv.invoiceNumber}</a></td>
+      <td>${cust ? cust.name : '-'}</td>
+      <td>${Utils.formatDateTH(inv.createdAt)}</td>
+      <td class="text-end">฿${Utils.formatNumber(inv.totalAmount)}</td>
+      <td class="text-center">${statusBadge(status)}</td>
+    </tr>`;
+  }).join('');
+
+  // Unpaid list
+  const unpaidInvs = [];
+  const seen2 = new Set();
+  for (const inv of invoices) {
+    if (seen2.has(inv.invoiceNumber)) continue;
+    seen2.add(inv.invoiceNumber);
+    const total = parseFloat(inv.totalAmount) || 0;
+    const paid = DB.getInvoicePaidAmount(inv.invoiceNumber);
+    if (paid < total) unpaidInvs.push({ ...inv, remaining: total - paid });
+  }
+  unpaidInvs.sort((a,b) => b.remaining - a.remaining);
+
+  const tbody2 = document.getElementById('unpaidList');
+  if (unpaidInvs.length === 0) { tbody2.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-3">ไม่มีรายการค้างชำระ</td></tr>'; return; }
+  tbody2.innerHTML = unpaidInvs.slice(0,8).map(inv => {
+    const cust = customers.find(c => c.id === inv.customerId);
+    return `<tr onclick="location.href='payments.html?inv=${inv.invoiceNumber}'" style="cursor:pointer">
+      <td><span class="fw-semibold">${inv.invoiceNumber}</span></td>
+      <td>${cust ? cust.name : '-'}</td>
+      <td class="text-end text-danger fw-semibold">฿${Utils.formatNumber(inv.remaining)}</td>
+    </tr>`;
+  }).join('');
+}
+
+load();
+</script>
+</body>
+</html>

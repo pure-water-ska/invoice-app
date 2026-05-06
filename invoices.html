@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0d6efd">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ใบกำกับ">
+<title>ใบกำกับสินค้า</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="navContainer"></div>
+<div class="page-wrap">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0 fw-bold"><i class="bi bi-receipt me-2 text-primary"></i>รายการใบกำกับสินค้า</h5>
+    <a href="invoice-create.html" class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i>สร้างใบใหม่</a>
+  </div>
+  <div id="alertBox" class="mb-2"></div>
+
+  <!-- Filters -->
+  <div class="card mb-3">
+    <div class="card-body py-2">
+      <div class="row g-2">
+        <div class="col-md-3">
+          <div class="input-group input-group-sm">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input type="text" id="searchInput" class="form-control" placeholder="เลขที่ใบกำกับ...">
+          </div>
+        </div>
+        <div class="col-md-3">
+          <select id="filterCustomer" class="form-select form-select-sm">
+            <option value="">— ลูกค้าทั้งหมด —</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <select id="filterStatus" class="form-select form-select-sm">
+            <option value="">— สถานะทั้งหมด —</option>
+            <option value="pending">ค้างชำระ</option>
+            <option value="partial">ชำระบางส่วน</option>
+            <option value="paid">ชำระแล้ว</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <input type="date" id="filterFrom" class="form-control form-control-sm" placeholder="จากวันที่">
+        </div>
+        <div class="col-md-2">
+          <input type="date" id="filterTo" class="form-control form-control-sm" placeholder="ถึงวันที่">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Summary -->
+  <div class="row g-2 mb-3">
+    <div class="col-4"><div class="card text-center py-2"><div class="fw-bold text-primary" id="sumTotal">฿0</div><div class="small text-muted">ยอดรวม</div></div></div>
+    <div class="col-4"><div class="card text-center py-2"><div class="fw-bold text-success" id="sumPaid">฿0</div><div class="small text-muted">ชำระแล้ว</div></div></div>
+    <div class="col-4"><div class="card text-center py-2"><div class="fw-bold text-danger" id="sumUnpaid">฿0</div><div class="small text-muted">ค้างชำระ</div></div></div>
+  </div>
+
+  <div class="card">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead>
+          <tr>
+            <th>เลขที่</th><th>วันที่</th><th>ลูกค้า</th>
+            <th>จัดส่ง</th><th class="text-end">ยอดรวม</th>
+            <th class="text-end">ชำระแล้ว</th><th class="text-end">ค้าง</th>
+            <th class="text-center">สถานะ</th><th class="text-center">จัดการ</th>
+          </tr>
+        </thead>
+        <tbody id="invoiceTable"><tr><td colspan="9" class="text-center text-muted py-4">ยังไม่มีใบกำกับ</td></tr></tbody>
+      </table>
+    </div>
+    <div id="invPagination" class="d-flex justify-content-between align-items-center px-3 py-2 border-top small text-muted" style="display:none!important"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script>
+<script>
+const session = Auth.require();
+DB.init();
+Nav.render('invoices');
+
+window.addEventListener('DOMContentLoaded', () => {
+  const customers = DB.getCustomers();
+  const custSel = document.getElementById('filterCustomer');
+  custSel.innerHTML = '<option value="">— ลูกค้าทั้งหมด —</option>' +
+    customers.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+
+  const params = new URLSearchParams(location.search);
+  if (params.get('cust')) custSel.value = params.get('cust');
+  if (params.get('num')) document.getElementById('searchInput').value = params.get('num');
+
+  ['searchInput','filterCustomer','filterStatus','filterFrom','filterTo'].forEach(id =>
+    document.getElementById(id).addEventListener('change', () => { _invPage = 1; render(); }));
+  document.getElementById('searchInput').addEventListener('input', () => { _invPage = 1; render(); });
+  render();
+});
+
+const INV_PAGE_SIZE = 30;
+let _invPage = 1;
+
+function statusInfo(paid, total) {
+  if (paid >= total && total > 0) return { key:'paid', label:'ชำระแล้ว', cls:'badge-paid' };
+  if (paid > 0) return { key:'partial', label:'ชำระบางส่วน', cls:'badge-partial' };
+  return { key:'pending', label:'ค้างชำระ', cls:'badge-pending' };
+}
+
+function render() {
+  const q = document.getElementById('searchInput').value.toLowerCase();
+  const fc = document.getElementById('filterCustomer').value;
+  const fs = document.getElementById('filterStatus').value;
+  const from = document.getElementById('filterFrom').value;
+  const to   = document.getElementById('filterTo').value;
+
+  const allInvoices = DB.getInvoices();
+  const customers = DB.getCustomers();
+
+  const seen = new Map();
+  for (const inv of allInvoices) {
+    if (!seen.has(inv.invoiceNumber)) seen.set(inv.invoiceNumber, inv);
+  }
+
+  let list = [...seen.values()];
+  list = list.filter(inv => {
+    const cust = customers.find(c => c.id === inv.customerId);
+    const paid = DB.getInvoicePaidAmount(inv.invoiceNumber);
+    const total = parseFloat(inv.totalAmount) || 0;
+    const si = statusInfo(paid, total);
+    const d = new Date(inv.createdAt);
+    if (q && !inv.invoiceNumber.toLowerCase().includes(q) && !(cust && cust.name.toLowerCase().includes(q))) return false;
+    if (fc && inv.customerId !== fc) return false;
+    if (fs && si.key !== fs) return false;
+    if (from && d < new Date(from)) return false;
+    if (to && d > new Date(to + 'T23:59:59')) return false;
+    return true;
+  });
+
+  list.sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  // Summary totals (all filtered, not just current page)
+  let sumTotal = 0, sumPaid = 0;
+  list.forEach(inv => {
+    const total = parseFloat(inv.totalAmount) || 0;
+    const paid = DB.getInvoicePaidAmount(inv.invoiceNumber);
+    sumTotal += total; sumPaid += Math.min(paid, total);
+  });
+  document.getElementById('sumTotal').textContent = '฿' + Utils.formatNumber(sumTotal);
+  document.getElementById('sumPaid').textContent  = '฿' + Utils.formatNumber(sumPaid);
+  document.getElementById('sumUnpaid').textContent = '฿' + Utils.formatNumber(Math.max(0, sumTotal - sumPaid));
+
+  const tbody = document.getElementById('invoiceTable');
+  if (list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">ไม่พบใบกำกับ</td></tr>';
+    document.getElementById('invPagination').style.display = 'none';
+    return;
+  }
+
+  // Pagination
+  const totalPages = Math.ceil(list.length / INV_PAGE_SIZE);
+  if (_invPage > totalPages) _invPage = totalPages;
+  const pageList = list.slice((_invPage - 1) * INV_PAGE_SIZE, _invPage * INV_PAGE_SIZE);
+
+  tbody.innerHTML = pageList.map(inv => {
+    const cust = customers.find(c => c.id === inv.customerId);
+    const total = parseFloat(inv.totalAmount) || 0;
+    const paid = DB.getInvoicePaidAmount(inv.invoiceNumber);
+    const remaining = Math.max(0, total - paid);
+    const si = statusInfo(paid, total);
+    const pages = allInvoices.filter(i => i.invoiceNumber === inv.invoiceNumber).length;
+    return `<tr>
+      <td><a href="invoice-create.html?view=${inv.invoiceNumber}" class="fw-semibold text-decoration-none">${inv.invoiceNumber}</a>
+        ${pages > 1 ? `<span class="badge bg-secondary ms-1">${pages} หน้า</span>` : ''}
+      </td>
+      <td>${Utils.formatDateTH(inv.createdAt)}</td>
+      <td>${cust ? cust.name : '-'}</td>
+      <td><span class="badge bg-light text-dark border">${inv.shippingMethod||'-'}</span></td>
+      <td class="text-end">฿${Utils.formatNumber(total)}</td>
+      <td class="text-end text-success">฿${Utils.formatNumber(paid)}</td>
+      <td class="text-end ${remaining>0?'text-danger fw-semibold':'text-muted'}">฿${Utils.formatNumber(remaining)}</td>
+      <td class="text-center"><span class="badge ${si.cls}">${si.label}</span></td>
+      <td class="text-center">
+        <div class="btn-group btn-group-sm">
+          <a class="btn btn-outline-primary" href="invoice-create.html?view=${inv.invoiceNumber}" title="ดู/พิมพ์"><i class="bi bi-eye"></i></a>
+          <a class="btn btn-outline-warning" href="invoice-create.html?edit=${inv.invoiceNumber}" title="แก้ไข"><i class="bi bi-pencil"></i></a>
+          <a class="btn btn-outline-success" href="payments.html?inv=${inv.invoiceNumber}" title="ชำระเงิน"><i class="bi bi-cash-coin"></i></a>
+          <button class="btn btn-outline-danger" onclick="deleteInvoice('${inv.invoiceNumber}')" title="ลบ"><i class="bi bi-trash"></i></button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  // Render pagination bar
+  const pg = document.getElementById('invPagination');
+  if (totalPages <= 1) { pg.style.display = 'none'; return; }
+  pg.style.display = '';
+  pg.innerHTML = `
+    <span>แสดง ${(_invPage-1)*INV_PAGE_SIZE+1}–${Math.min(_invPage*INV_PAGE_SIZE, list.length)} จาก ${list.length} รายการ</span>
+    <div class="d-flex gap-1 align-items-center">
+      <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_invPage=1;render()" ${_invPage===1?'disabled':''}>«</button>
+      <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_invPage--;render()" ${_invPage===1?'disabled':''}>‹</button>
+      <span class="px-2">หน้า ${_invPage} / ${totalPages}</span>
+      <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_invPage++;render()" ${_invPage===totalPages?'disabled':''}>›</button>
+      <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_invPage=${totalPages};render()" ${_invPage===totalPages?'disabled':''}>»</button>
+    </div>`;
+}
+
+function deleteInvoice(num) {
+  if (!confirm(`ลบใบกำกับ "${num}" และข้อมูลทั้งหมดใช่หรือไม่?\nการลบไม่สามารถกู้คืนได้`)) return;
+  const all = DB.getInvoices().filter(i => i.invoiceNumber !== num);
+  DB.saveInvoices(all);
+  DB.removeCapDeductionsByInvoice(num);
+  DB.logActivity(session.userId, session.username, 'ลบใบกำกับ', { invoiceNumber: num });
+  Utils.showAlert(`ลบใบกำกับ ${num} แล้ว`, 'warning');
+  render();
+}
+</script>
+</body>
+</html>
