@@ -165,7 +165,7 @@ const Nav = {
     const adminLinks = [
       { id: 'users',           href: 'users.html',          icon: 'person-gear',             label: 'จัดการผู้ใช้' },
       { id: 'pdf-import',      href: 'pdf-import.html',     icon: 'file-earmark-pdf',        label: 'นำเข้า PDF' },
-      { id: 'excel-import',    href: 'excel-import.html',   icon: 'file-earmark-excel',      label: 'นำเข้า Excel' },
+      { id: 'price-import',    href: 'price-import.html',   icon: 'file-earmark-excel',      label: 'นำเข้าราคา Excel' },
       { id: 'customer-import', href: 'customer-import.html',icon: 'person-lines-fill',       label: 'นำเข้าลูกค้า' },
       { id: 'snapshots',       href: 'snapshots.html',      icon: 'layers',                  label: 'Snapshots' },
       { id: 'troubleshoot',    href: 'troubleshoot.html',   icon: 'tools',                   label: 'วินิจฉัยระบบ' },
@@ -223,6 +223,10 @@ const Nav = {
       <ul class="navbar-nav ms-auto align-items-center">
         <li class="nav-item me-1" id="syncBadgeItem" style="display:none">
           <span id="syncStatusBadge" class="badge bg-secondary ms-2 py-1 px-2" style="font-size:10px">☁ Sync</span>
+        </li>
+        <li class="nav-item me-1" id="driveBadgeItem" style="display:none">
+          <span id="driveBadge" class="badge bg-secondary ms-1 py-1 px-2" style="font-size:10px;cursor:pointer"
+                onclick="location.href='settings.html'" title="Google Drive — คลิกเพื่อตั้งค่า">☁ Drive</span>
         </li>
         <li class="nav-item me-1">
           <button class="btn btn-link nav-link px-2 py-1" onclick="Nav.toggleDark()" title="สลับ Dark / Light Mode" style="font-size:1.1rem">

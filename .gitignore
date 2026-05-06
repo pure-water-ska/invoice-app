@@ -1,6 +1,9 @@
 # Firebase config (contains credentials — never commit)
 firebase-config.js
 
+# Google Drive config (contains Client ID — never commit)
+drive-config.js
+
 # OS
 .DS_Store
 Thumbs.db

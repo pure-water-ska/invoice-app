@@ -29,7 +29,8 @@ const APP_SHELL = [
   './troubleshoot.html',
   './snapshots.html',
   './pdf-import.html',
-  './excel-import.html',
+  './price-import.html',
+  './drive-store.js',
   './customer-import.html',
   // Scripts & styles
   './utils.js',
