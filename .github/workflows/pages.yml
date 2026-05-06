@@ -1,0 +1,71 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:   # allow manual trigger
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout source
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. Inject firebase-config.js from GitHub Secrets
+      #    ตั้งค่า Secrets ที่: Repo → Settings → Secrets and variables → Actions
+      #    ชื่อ secret ที่ต้องสร้าง:
+      #      FIREBASE_API_KEY, FIREBASE_AUTH_DOMAIN, FIREBASE_PROJECT_ID,
+      #      FIREBASE_STORAGE_BUCKET, FIREBASE_MESSAGING_SENDER_ID, FIREBASE_APP_ID,
+      #      FIREBASE_ORG_ID, FIREBASE_TEAM_EMAIL, FIREBASE_TEAM_PASSWORD
+      - name: Inject Firebase config
+        if: ${{ secrets.FIREBASE_API_KEY != '' }}
+        run: |
+          cat > firebase-config.js << 'JSEOF'
+          const FIREBASE_CONFIG = {
+            apiKey:            "${{ secrets.FIREBASE_API_KEY }}",
+            authDomain:        "${{ secrets.FIREBASE_AUTH_DOMAIN }}",
+            projectId:         "${{ secrets.FIREBASE_PROJECT_ID }}",
+            storageBucket:     "${{ secrets.FIREBASE_STORAGE_BUCKET }}",
+            messagingSenderId: "${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}",
+            appId:             "${{ secrets.FIREBASE_APP_ID }}",
+            orgId:             "${{ secrets.FIREBASE_ORG_ID }}",
+            teamEmail:         "${{ secrets.FIREBASE_TEAM_EMAIL }}",
+            teamPassword:      "${{ secrets.FIREBASE_TEAM_PASSWORD }}",
+          };
+          JSEOF
+
+      # 3. Update Service Worker cache version with build timestamp
+      #    → ทุก deploy ใหม่จะ bust cache เก่า, browser จะดาวน์โหลดไฟล์ใหม่ทั้งหมด
+      - name: Update SW cache version
+        run: |
+          BUILD_TS=$(date -u +%Y%m%dT%H%M%S)
+          sed -i "s/const CACHE_VERSION  = .*/const CACHE_VERSION  = '${BUILD_TS}';/" sw.js
+          echo "Cache version: ${BUILD_TS}"
+
+      # 4. Upload and deploy
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

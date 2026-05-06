@@ -1,0 +1,25 @@
+# Firebase config (contains credentials — never commit)
+firebase-config.js
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Node (if using build tools)
+node_modules/
+package-lock.json
+
+# Env
+.env
+.env.local

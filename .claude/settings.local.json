@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/APINUN_JP/Downloads/**)",
+      "Bash(python -c ' *)",
+      "Bash(pip install *)",
+      "Bash(python -c \"from pypdf import PdfReader; print\\('ok'\\)\")",
+      "Bash(node -e ' *)"
+    ]
+  }
+}
