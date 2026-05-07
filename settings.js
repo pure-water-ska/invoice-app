@@ -79,9 +79,10 @@ function loadCompanySettings() {
 }
 
 function updatePreview() {
+  const phone = document.getElementById('phone').value;
   document.getElementById('prev_name').textContent    = document.getElementById('companyName').value;
   document.getElementById('prev_address').textContent = document.getElementById('address').value;
-  document.getElementById('prev_phone').textContent   = 'โทร. ' + document.getElementById('phone').value;
+  document.getElementById('prev_phone').textContent   = phone ? 'โทร. ' + phone : '';
 }
 
 function saveCompanySettings() {
@@ -93,7 +94,6 @@ function saveCompanySettings() {
     phone:       document.getElementById('phone').value.trim(),
     taxId:       document.getElementById('taxId').value.trim()
   };
-  if (!upd.companyName) { Utils.showAlert('กรุณากรอกชื่อบริษัท/ร้าน', 'warning'); return; }
   DB.saveSettings(upd);
   DB.logActivity(session.userId, session.username, 'แก้ไขตั้งค่าระบบ', {});
   Utils.showAlert('บันทึกการตั้งค่าสำเร็จ');
