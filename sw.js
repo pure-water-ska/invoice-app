@@ -3,7 +3,7 @@
 // ⚠️  เมื่อ deploy version ใหม่ ให้อัปเดต CACHE_VERSION ให้ตรงกับ APP_VERSION ใน utils.js
 //     เพื่อให้ browser ล้าง cache เก่าและดาวน์โหลดไฟล์ใหม่ทั้งหมด
 
-const CACHE_VERSION  = 'v1.2.6';
+const CACHE_VERSION  = 'v1.2.7';
 const STATIC_CACHE   = `wt-static-${CACHE_VERSION}`;
 const RUNTIME_CACHE  = `wt-runtime-${CACHE_VERSION}`;
 

@@ -133,26 +133,16 @@ const Sync = {
       });
 
     } else if (colName) {
-      // ── Collection write (per-record upsert + deletion of removed records) ──
-      // NOTE: colRef.select() is Admin SDK only — use colRef.get() for web SDK
+      // ── Collection write: upsert each record as its own Firestore doc ──────
       const arr    = Array.isArray(val) ? val : [];
       const colRef = base.collection(colName);
-      const localIds = new Set(arr.filter(r => r.id).map(r => r.id));
 
-      // Fetch existing Firestore doc IDs (needed to detect deletions)
-      let firestoreIds = new Set();
-      try {
-        const idSnap = await colRef.get();
-        firestoreIds = new Set(idSnap.docs.map(d => d.id));
-      } catch (e) {
-        console.warn('[Sync] could not fetch existing IDs for', colName, ':', e.message);
-      }
-
+      // Upsert only — no deletion (keeps writes fast; deleted records are
+      // excluded from _pullAll because _pullAll overwrites localStorage in full)
       let batch = this._db.batch();
       let ops   = 0;
       const commit = async () => { await batch.commit(); batch = this._db.batch(); ops = 0; };
 
-      // Upsert new / changed records
       for (const record of arr) {
         if (!record.id) continue;
         batch.set(colRef.doc(record.id), {
@@ -162,15 +152,24 @@ const Sync = {
         }, { merge: true });
         if (++ops >= 490) await commit();
       }
-
-      // Delete records removed from localStorage
-      for (const id of firestoreIds) {
-        if (!localIds.has(id)) {
-          batch.delete(colRef.doc(id));
-          if (++ops >= 490) await commit();
-        }
-      }
       if (ops > 0) await batch.commit();
+
+      // Purge records that were removed locally (deleted invoices/payments)
+      // We identify them by comparing IDs in Firestore vs local array.
+      // Done as a background task so it doesn't slow down the main write.
+      const localIds = new Set(arr.filter(r => r.id).map(r => r.id));
+      colRef.get().then(snap => {
+        const toDelete = snap.docs.filter(d => !localIds.has(d.id));
+        if (!toDelete.length) return;
+        let delBatch = this._db.batch();
+        let delOps   = 0;
+        const commitDel = async () => { await delBatch.commit(); delBatch = this._db.batch(); delOps = 0; };
+        for (const d of toDelete) {
+          delBatch.delete(d.ref);
+          if (++delOps >= 490) commitDel();
+        }
+        if (delOps > 0) delBatch.commit();
+      }).catch(() => {}); // background — ignore errors
     }
 
     localStorage.setItem(this._lastSyncKey, new Date().toISOString());
@@ -195,11 +194,21 @@ const Sync = {
       try {
         const snap = await base.collection(colName).get();
         if (!snap.empty) {
+          // Firestore has data → overwrite localStorage
           const arr = snap.docs.map(d => {
             const { _by, _ts, ...rec } = d.data();
             return rec;
           });
           localStorage.setItem(lsKey, JSON.stringify(arr));
+        } else {
+          // Firestore empty → bootstrap: push local data up to Firestore
+          try {
+            const localArr = JSON.parse(localStorage.getItem(lsKey) || '[]');
+            if (Array.isArray(localArr) && localArr.length > 0) {
+              console.log(`[Sync] Bootstrap: pushing ${localArr.length} ${colName} records to Firestore`);
+              await this._writeKey(lsKey, localArr);
+            }
+          } catch (be) { console.warn('[Sync] bootstrap push failed:', colName, be.message); }
         }
       } catch (e) { console.warn('[Sync] pull col:', colName, e.message); }
     });
@@ -352,6 +361,36 @@ const Sync = {
       this._badge('online');
     } catch (e) {
       console.error('[Sync] manual pull failed:', e);
+      this._badge('error');
+    }
+  },
+
+  // ── Push ALL local data to Firestore (force full upload) ──────────────────
+  async pushAll() {
+    if (!this.ready) { console.warn('[Sync] pushAll called before ready'); return; }
+    this._badge('pending');
+    console.log('[Sync] pushAll: uploading all local data to Firestore...');
+    try {
+      const allKeys = [
+        ...Object.keys(this.COLLECTIONS),
+        ...Object.keys(this.DOCUMENTS),
+      ];
+      for (const key of allKeys) {
+        try {
+          const raw = localStorage.getItem(key);
+          if (!raw) continue;
+          const val = JSON.parse(raw);
+          await this._writeKey(key, val);
+          console.log('[Sync] pushAll:', key, '✓');
+        } catch (e) {
+          console.warn('[Sync] pushAll error for', key, ':', e.message);
+        }
+      }
+      this._badge('online');
+      localStorage.setItem(this._lastSyncKey, new Date().toISOString());
+      console.log('[Sync] pushAll complete ✓');
+    } catch (e) {
+      console.error('[Sync] pushAll failed:', e);
       this._badge('error');
     }
   },
