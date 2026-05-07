@@ -102,19 +102,44 @@
     s.onerror = errCb || function(){};
     document.head.appendChild(s);
   }
+
+  // Show / update the sync badge (works even before sync.js loads)
+  function setSyncBadge(text, cls) {
+    // Badge item might not be in DOM yet if Nav.render() hasn't run — retry
+    function tryShow() {
+      const bi = document.getElementById('syncBadgeItem');
+      const badge = document.getElementById('syncStatusBadge');
+      if (!bi || !badge) { setTimeout(tryShow, 200); return; }
+      bi.style.display = '';
+      badge.textContent = text;
+      badge.className = 'badge ' + cls + ' ms-2 py-1 px-2';
+      badge.style.fontSize = '10px';
+    }
+    tryShow();
+  }
+
   const FB_VER = '10.7.1';
   const FB_BASE = `https://www.gstatic.com/firebasejs/${FB_VER}`;
+
   // Try loading firebase-config.js; if it doesn't exist, stop (offline-only mode)
   loadScript('./firebase-config.js', function() {
     if (typeof FIREBASE_CONFIG === 'undefined' || !FIREBASE_CONFIG.apiKey ||
         FIREBASE_CONFIG.apiKey.startsWith('AIzaSy...')) return; // not configured
+
+    // Firebase IS configured — show badge immediately
+    setSyncBadge('⏳ Connecting…', 'bg-warning text-dark');
+
+    function onSDKError() {
+      setSyncBadge('⚠ Sync ✗', 'bg-danger');
+    }
+
     loadScript(`${FB_BASE}/firebase-app-compat.js`, function() {
       loadScript(`${FB_BASE}/firebase-auth-compat.js`, function() {
         loadScript(`${FB_BASE}/firebase-firestore-compat.js`, function() {
-          loadScript('./sync.js');
-        });
-      });
-    });
+          loadScript('./sync.js', null, onSDKError);
+        }, onSDKError);
+      }, onSDKError);
+    }, onSDKError);
   }, function() { /* firebase-config.js not found — local-only mode, OK */ });
 })();
 
