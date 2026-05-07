@@ -64,7 +64,7 @@ body {
 
   .invoice-preview { border: none !important; border-radius: 0 !important; padding: 5mm !important; box-shadow: none !important; background: transparent !important; }
   .inv-header-table { border: none !important; }
-  .inv-page { min-height: 148mm; width: 210mm; box-sizing: border-box; }
+  .inv-page { height: 210mm; width: 148mm; box-sizing: border-box; overflow: hidden; }
   .inv-table { width: 100%; border-collapse: collapse; font-size: 9pt; }
   .inv-table th, .inv-table td { border: 1px solid #333; padding: 2px 4px; }
   /* ── ลบขอบด้านนอกสุดของตารางรายการ — แสดงเฉพาะเส้นแบ่งภายใน ── */
