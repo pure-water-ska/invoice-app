@@ -63,6 +63,7 @@ body {
   #printArea      { display: block !important; }
 
   .invoice-preview { border: none !important; border-radius: 0 !important; padding: 0 !important; box-shadow: none !important; background: transparent !important; }
+  .inv-header-table { border: none !important; }
   .inv-page { min-height: 198mm; }
   .inv-table { width: 100%; border-collapse: collapse; font-size: 9pt; }
   .inv-table th, .inv-table td { border: 1px solid #333; padding: 2px 4px; }
