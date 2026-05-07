@@ -52,7 +52,7 @@ body {
   body { background: #fff !important; font-family: 'Sarabun', 'TH Sarabun New', sans-serif; font-size: 10pt; margin: 0; padding: 0; }
   .no-print { display: none !important; }
   .page-break { page-break-before: always; }
-  @page { size: A5 portrait; margin: 5mm; }
+  @page { size: A5 portrait; margin: 0; }
   #printArea { color: #000 !important; }
   #printArea * { color: inherit; }
   .page-wrap { padding: 0 !important; margin: 0 !important; max-width: none !important; }
@@ -62,9 +62,9 @@ body {
   #invoicePreview { display: none !important; }
   #printArea      { display: block !important; }
 
-  .invoice-preview { border: none !important; border-radius: 0 !important; padding: 0 !important; box-shadow: none !important; background: transparent !important; }
+  .invoice-preview { border: none !important; border-radius: 0 !important; padding: 5mm !important; box-shadow: none !important; background: transparent !important; }
   .inv-header-table { border: none !important; }
-  .inv-page { min-height: 198mm; }
+  .inv-page { min-height: 148mm; width: 210mm; box-sizing: border-box; }
   .inv-table { width: 100%; border-collapse: collapse; font-size: 9pt; }
   .inv-table th, .inv-table td { border: 1px solid #333; padding: 2px 4px; }
   .inv-table th { background: #ddd !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
