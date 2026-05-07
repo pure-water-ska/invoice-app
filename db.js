@@ -309,17 +309,25 @@ const DB = {
     if (this.getPricing().length === 0) {
       this._seedPricing();
     }
-    if (!this.getSettings().companyName || this.getSettings().companyName === 'บริษัท/ร้าน ของคุณ') {
+    // ── migrate company info (replace placeholder / old demo values) ──────────
+    const OLD_NAMES = ['บริษัท/ร้าน ของคุณ', 'บริษัท โกลด์สตาร์วอเตอร์เทคโนโลยี จำกัด'];
+    const cur = this.getSettings();
+    if (!cur.companyName || OLD_NAMES.includes(cur.companyName)) {
       this.saveSettings({
-        companyName: 'บริษัท โกลด์สตาร์วอเตอร์เทคโนโลยี จำกัด',
-        address: '91 ถ.บ้านพรุธานี10 ต.บ้านพรุ อ.หาดใหญ่ จ.สงขลา',
-        phone: '063-4962764, 096-6292544',
-        taxId: '',
-        logoText: ''
+        ...cur,
+        companyName: 'เพียวจตุรพร',
+        address:     '21 หมู่ 2 ถนนถวัลย์ ตำบลบ้านพรุ อำเภอหาดใหญ่ จังหวัดสงขลา 90250',
+        phone:       '082-2965453',
+        taxId:       '0992000796640',
+        showHeader:  true,
       });
     }
-    // Default: auto backup enabled daily if never configured
+    // ── add showHeader default for existing installs that never had it ────────
     const cfg = this.getSettings();
+    if (cfg.showHeader === undefined) {
+      this.saveSettings({ ...cfg, showHeader: true });
+    }
+    // ── Default: auto backup enabled daily if never configured ────────────────
     if (!cfg.autoBackup) {
       this.saveSettings({ ...cfg, autoBackup: { enabled: true, interval: 'daily', lastBackupAt: null } });
     }
