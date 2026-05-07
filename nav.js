@@ -222,7 +222,9 @@ const Nav = {
       </ul>
       <ul class="navbar-nav ms-auto align-items-center">
         <li class="nav-item me-1" id="syncBadgeItem" style="display:none">
-          <span id="syncStatusBadge" class="badge bg-secondary ms-2 py-1 px-2" style="font-size:10px">☁ Sync</span>
+          <span id="syncStatusBadge" class="badge bg-secondary ms-2 py-1 px-2"
+                style="font-size:10px;cursor:pointer" title="คลิกเพื่อดึงข้อมูลล่าสุดจาก Cloud"
+                onclick="if(window.Sync&&Sync.ready){Sync.pull().then(()=>{if(typeof render==='function')render();})}">☁ Sync</span>
         </li>
         <li class="nav-item me-1" id="driveBadgeItem" style="display:none">
           <span id="driveBadge" class="badge bg-secondary ms-1 py-1 px-2" style="font-size:10px;cursor:pointer"

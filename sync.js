@@ -75,9 +75,7 @@ const Sync = {
       // Real-time listeners
       this._setupListeners();
 
-      // Flush any queued writes from offline period
-      await this._flushQueue();
-
+      // Mark ready BEFORE flushing queue — so _flushQueue() can proceed
       this.ready = true;
       this._badge('online');
       // Show sync badge in navbar
@@ -85,6 +83,9 @@ const Sync = {
       if (bi) bi.style.display = '';
 
       console.log(`[Sync] ✓ Ready (org: ${this._orgId}, uid: ${this._uid})`);
+
+      // Flush any queued writes from offline / pre-init period
+      await this._flushQueue();
 
     } catch (e) {
       console.error('[Sync] Init failed:', e.message || e);
@@ -113,6 +114,7 @@ const Sync = {
     this._writeKey(key, val).catch(e => {
       console.warn('[Sync] push failed, queuing:', key, e.message);
       this._enqueue(key, val);
+      this._badge('pending');
     });
   },
 
@@ -131,18 +133,23 @@ const Sync = {
       });
 
     } else if (colName) {
-      // ── Collection write (diff-based to minimise writes) ────────────────
-      const arr = Array.isArray(val) ? val : [];
+      // ── Collection write (per-record upsert + deletion of removed records) ──
+      // NOTE: colRef.select() is Admin SDK only — use colRef.get() for web SDK
+      const arr    = Array.isArray(val) ? val : [];
       const colRef = base.collection(colName);
+      const localIds = new Set(arr.filter(r => r.id).map(r => r.id));
 
-      // Fetch current IDs in Firestore
-      const snap = await colRef.select().get();   // .select() = IDs only, fast
-      const firestoreIds = new Set(snap.docs.map(d => d.id));
-      const localIds     = new Set(arr.filter(r => r.id).map(r => r.id));
+      // Fetch existing Firestore doc IDs (needed to detect deletions)
+      let firestoreIds = new Set();
+      try {
+        const idSnap = await colRef.get();
+        firestoreIds = new Set(idSnap.docs.map(d => d.id));
+      } catch (e) {
+        console.warn('[Sync] could not fetch existing IDs for', colName, ':', e.message);
+      }
 
       let batch = this._db.batch();
       let ops   = 0;
-
       const commit = async () => { await batch.commit(); batch = this._db.batch(); ops = 0; };
 
       // Upsert new / changed records
@@ -156,7 +163,7 @@ const Sync = {
         if (++ops >= 490) await commit();
       }
 
-      // Delete removed records
+      // Delete records removed from localStorage
       for (const id of firestoreIds) {
         if (!localIds.has(id)) {
           batch.delete(colRef.doc(id));
@@ -208,9 +215,12 @@ const Sync = {
     let ignoreUntil = Date.now() + this._skipInitialMs;
 
     const shouldSkip = (meta) => {
-      // Skip if within initial window OR if the write came from this tab
+      // Skip during initial window (avoids double-processing _pullAll data)
       if (Date.now() < ignoreUntil) return true;
-      if (meta?.hasPendingWrites)    return true;   // our own write in progress
+      // Skip our own pending writes (will fire again when server confirms)
+      if (meta?.hasPendingWrites) return true;
+      // Skip events served from local cache (only process server-confirmed events)
+      if (meta?.fromCache) return true;
       return false;
     };
 
@@ -330,6 +340,19 @@ const Sync = {
   _triggerRerender() {
     if (typeof window.render === 'function') {
       try { window.render(); } catch {}
+    }
+  },
+
+  // ── Manual pull (user-triggered refresh from Firestore) ───────────────────
+  async pull() {
+    if (!this.ready) return;
+    this._badge('pending');
+    try {
+      await this._pullAll();
+      this._badge('online');
+    } catch (e) {
+      console.error('[Sync] manual pull failed:', e);
+      this._badge('error');
     }
   },
 
