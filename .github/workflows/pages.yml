@@ -26,41 +26,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      # 2. Inject firebase-config.js from GitHub Secrets
-      #    ตั้งค่า Secrets ที่: Repo → Settings → Secrets and variables → Actions
-      #    ชื่อ secret ที่ต้องสร้าง:
-      #      FIREBASE_API_KEY, FIREBASE_AUTH_DOMAIN, FIREBASE_PROJECT_ID,
-      #      FIREBASE_STORAGE_BUCKET, FIREBASE_MESSAGING_SENDER_ID, FIREBASE_APP_ID,
-      #      FIREBASE_ORG_ID, FIREBASE_TEAM_EMAIL, FIREBASE_TEAM_PASSWORD
-      - name: Inject Firebase config
+      # 2. Inject Firebase teamPassword from GitHub Secret
+      #    firebase-config.js (ไม่มี password) อยู่ใน repo แล้ว — ต้องตั้งค่าเพียง secret เดียว:
+      #      FIREBASE_TEAM_PASSWORD  ← ตั้งค่าที่: Repo → Settings → Secrets and variables → Actions
+      - name: Inject Firebase teamPassword
         env:
-          FIREBASE_API_KEY:            ${{ secrets.FIREBASE_API_KEY }}
-          FIREBASE_AUTH_DOMAIN:        ${{ secrets.FIREBASE_AUTH_DOMAIN }}
-          FIREBASE_PROJECT_ID:         ${{ secrets.FIREBASE_PROJECT_ID }}
-          FIREBASE_STORAGE_BUCKET:     ${{ secrets.FIREBASE_STORAGE_BUCKET }}
-          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
-          FIREBASE_APP_ID:             ${{ secrets.FIREBASE_APP_ID }}
-          FIREBASE_ORG_ID:             ${{ secrets.FIREBASE_ORG_ID }}
-          FIREBASE_TEAM_EMAIL:         ${{ secrets.FIREBASE_TEAM_EMAIL }}
-          FIREBASE_TEAM_PASSWORD:      ${{ secrets.FIREBASE_TEAM_PASSWORD }}
+          FIREBASE_TEAM_PASSWORD: ${{ secrets.FIREBASE_TEAM_PASSWORD }}
         run: |
-          if [ -n "$FIREBASE_API_KEY" ]; then
-            cat > firebase-config.js << JSEOF
-          const FIREBASE_CONFIG = {
-            apiKey:            "$FIREBASE_API_KEY",
-            authDomain:        "$FIREBASE_AUTH_DOMAIN",
-            projectId:         "$FIREBASE_PROJECT_ID",
-            storageBucket:     "$FIREBASE_STORAGE_BUCKET",
-            messagingSenderId: "$FIREBASE_MESSAGING_SENDER_ID",
-            appId:             "$FIREBASE_APP_ID",
-            orgId:             "$FIREBASE_ORG_ID",
-            teamEmail:         "$FIREBASE_TEAM_EMAIL",
-            teamPassword:      "$FIREBASE_TEAM_PASSWORD",
-          };
-          JSEOF
-            echo "Firebase config injected from secrets"
+          if [ -n "$FIREBASE_TEAM_PASSWORD" ]; then
+            sed -i "s|teamPassword: \"\"|teamPassword: \"$FIREBASE_TEAM_PASSWORD\"|" firebase-config.js
+            echo "Firebase teamPassword injected from secret"
           else
-            echo "No FIREBASE_API_KEY secret found — using firebase-config.js from repo"
+            echo "No FIREBASE_TEAM_PASSWORD secret — will use anonymous auth on GitHub Pages"
           fi
 
       # 3. Inject drive-config.js from GitHub Secrets

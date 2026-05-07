@@ -1,5 +1,5 @@
-# Firebase config (contains credentials — never commit)
-firebase-config.js
+# Firebase credentials — local dev only, contains teamPassword (never commit)
+firebase-credentials.js
 
 # Claude Code local settings
 .claude/

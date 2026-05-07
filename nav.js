@@ -139,6 +139,13 @@
       return;
     }
 
+    // Try loading local credentials override (firebase-credentials.js)
+    // This file is gitignored and only exists on local dev machines.
+    // On GitHub Pages the teamPassword is injected by CI instead.
+    // 404 is normal on GitHub Pages — ignore error silently.
+    loadScript('./firebase-credentials.js', startFirebaseSDK, startFirebaseSDK);
+
+    function startFirebaseSDK() {
     // Firebase IS configured — show badge immediately
     setSyncBadge('⏳ Connecting…', 'bg-warning text-dark');
 
@@ -153,6 +160,7 @@
         }, onSDKError);
       }, onSDKError);
     }, onSDKError);
+    } // end startFirebaseSDK
   }, function() {
     hideSyncBadge(); // firebase-config.js not found — local-only mode, hide badge
   });
