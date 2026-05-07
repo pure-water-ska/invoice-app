@@ -306,8 +306,178 @@ const Nav = {
     _checkOverdueAlert();
     _checkStorageAlert();
     DB.runAutoBackup(s.username);
+
+    // Show connection modal once per login session
+    if (sessionStorage.getItem('justLoggedIn')) {
+      sessionStorage.removeItem('justLoggedIn');
+      setTimeout(_showConnectionModal, 500);
+    }
   }
 };
+
+// ── Connection modal (shown once per session, right after login) ──────────────
+function _showConnectionModal() {
+  if (sessionStorage.getItem('connModalDone')) return;
+
+  const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+  const bg     = isDark ? '#1c2128' : '#ffffff';
+  const txt    = isDark ? '#c9d1d9' : '#212529';
+  const brd    = isDark ? '#30363d' : '#dee2e6';
+  const rowBg  = isDark ? '#0d1117' : '#f8f9fa';
+
+  const fbConfigured = (typeof FIREBASE_CONFIG !== 'undefined') &&
+                       FIREBASE_CONFIG.apiKey &&
+                       !FIREBASE_CONFIG.apiKey.startsWith('AIzaSy...');
+  const drConfigured = (typeof GOOGLE_CLIENT_ID !== 'undefined') &&
+                       typeof GOOGLE_CLIENT_ID === 'string' &&
+                       GOOGLE_CLIENT_ID.includes('.apps.');
+
+  function rowHtml(id, icon, title, stText, stColor) {
+    return `
+    <div style="display:flex;align-items:center;gap:.75rem;padding:.75rem 1rem;
+                border:1px solid ${brd};border-radius:10px;margin-bottom:.75rem;background:${rowBg}">
+      <span style="font-size:1.4rem;width:2rem;text-align:center;line-height:1">${icon}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:13px;color:${txt}">${title}</div>
+        <div id="cm-${id}-st" style="font-size:12px;color:${stColor};margin-top:2px">${stText}</div>
+      </div>
+      <button id="cm-${id}-btn" class="btn btn-sm btn-primary"
+              style="display:none;flex-shrink:0;font-size:12px;padding:3px 10px">เชื่อมต่อ</button>
+    </div>`;
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'connModal';
+  overlay.style.cssText =
+    'position:fixed;inset:0;z-index:99994;background:rgba(0,0,0,.55);' +
+    'display:flex;align-items:center;justify-content:center;padding:1rem';
+
+  overlay.innerHTML = `
+  <div style="background:${bg};border-radius:14px;padding:1.5rem;max-width:400px;
+              width:100%;box-shadow:0 16px 48px rgba(0,0,0,.3)">
+    <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:1.25rem">
+      <i class="bi bi-plug-fill" style="color:#0d6efd;font-size:1.1rem"></i>
+      <span style="font-weight:700;font-size:1rem;color:${txt}">การเชื่อมต่อระบบ</span>
+    </div>
+    ${rowHtml('fb', '☁️', 'Firebase Sync', fbConfigured ? '⏳ กำลังเชื่อมต่อ...' : '— ไม่ได้ตั้งค่า', fbConfigured ? '#d97706' : '#9ca3af')}
+    ${rowHtml('dr', '📁', 'Google Drive',  drConfigured ? '⏳ กำลังตรวจสอบ...'  : '— ไม่ได้ตั้งค่า', drConfigured ? '#d97706' : '#9ca3af')}
+    <div id="cm-offline-row" style="display:none;margin-top:.25rem">
+      <button id="cm-offline-btn" class="btn btn-secondary btn-sm w-100">
+        <i class="bi bi-wifi-off me-1"></i>ทำงานออฟไลน์
+      </button>
+    </div>
+    <div id="cm-offline-msg" style="display:none;text-align:center;font-size:12px;
+         color:#6c757d;padding:.6rem 0 0;line-height:1.6">
+      <i class="bi bi-info-circle me-1"></i>ระบบจะอัพเดทข้อมูลเมื่อระบบกลับมาออนไลน์
+    </div>
+  </div>`;
+
+  document.body.appendChild(overlay);
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  function setSt(id, text, color) {
+    const el = document.getElementById('cm-' + id + '-st');
+    if (el) { el.textContent = text; el.style.color = color; }
+  }
+  function showBtn(id, label, cls) {
+    const el = document.getElementById('cm-' + id + '-btn');
+    if (!el) return;
+    el.style.display = label ? '' : 'none';
+    if (label) { el.textContent = label; el.className = 'btn btn-sm ' + cls; el.style.fontSize = '12px'; }
+  }
+  function showOfflineBtn() {
+    var r = document.getElementById('cm-offline-row');
+    if (r) r.style.display = '';
+  }
+  function closeModal() {
+    sessionStorage.setItem('connModalDone', '1');
+    overlay.style.transition = 'opacity .3s';
+    overlay.style.opacity = '0';
+    setTimeout(function() { if (overlay.parentNode) overlay.remove(); }, 350);
+  }
+  function checkAllDone() {
+    var fbOk = !fbConfigured || (window.Sync && Sync.ready);
+    var drOk = !drConfigured || (window.DriveStore && DriveStore.ready);
+    if (fbOk && drOk) setTimeout(closeModal, 700);
+  }
+
+  // ── ทำงานออฟไลน์ button ────────────────────────────────────────────────────
+  document.getElementById('cm-offline-btn').addEventListener('click', function() {
+    this.style.display = 'none';
+    document.getElementById('cm-offline-msg').style.display = '';
+    setTimeout(closeModal, 2200);
+  });
+
+  // ── Drive connect button ───────────────────────────────────────────────────
+  var drBtn = document.getElementById('cm-dr-btn');
+  if (drBtn) {
+    drBtn.addEventListener('click', function() {
+      drBtn.disabled = true; drBtn.textContent = '...';
+      setSt('dr', '⏳ กำลังเชื่อมต่อ...', '#d97706');
+      if (window.DriveStore) {
+        DriveStore.signIn()
+          .then(function() {
+            setSt('dr', '✓ เชื่อมต่อแล้ว', '#16a34a'); showBtn('dr', '', '');
+            checkAllDone();
+          })
+          .catch(function() {
+            setSt('dr', '✗ เชื่อมต่อไม่ได้', '#dc2626');
+            showBtn('dr', 'ลองใหม่', 'btn-danger'); drBtn.disabled = false;
+            showOfflineBtn();
+          });
+      }
+    });
+  }
+
+  // ── Firebase polling + retry button ───────────────────────────────────────
+  var fbTimerRef = { t: null };
+  var fbPolls = 0;
+  function startFbPoll() {
+    return setInterval(function() {
+      fbPolls++;
+      if (window.Sync && Sync.ready) {
+        clearInterval(fbTimerRef.t);
+        setSt('fb', '✓ เชื่อมต่อแล้ว', '#16a34a'); showBtn('fb', '', '');
+        checkAllDone();
+      } else if (fbPolls >= 24) { // ~12 seconds
+        clearInterval(fbTimerRef.t);
+        setSt('fb', '✗ เชื่อมต่อไม่ได้', '#dc2626');
+        showBtn('fb', 'ลองใหม่', 'btn-danger');
+        showOfflineBtn();
+      }
+    }, 500);
+  }
+  var fbBtn = document.getElementById('cm-fb-btn');
+  if (fbBtn) {
+    fbBtn.addEventListener('click', function() {
+      setSt('fb', '⏳ กำลังเชื่อมต่อ...', '#d97706'); showBtn('fb', '', '');
+      fbPolls = 0; clearInterval(fbTimerRef.t); fbTimerRef.t = startFbPoll();
+    });
+  }
+  if (fbConfigured) fbTimerRef.t = startFbPoll();
+
+  // ── Drive polling (detect auto-reconnect) ─────────────────────────────────
+  var drPolls = 0, drResolved = false;
+  var drTimer = setInterval(function() {
+    drPolls++;
+    if (!drConfigured) { clearInterval(drTimer); return; }
+    if (window.DriveStore && DriveStore.ready) {
+      clearInterval(drTimer); drResolved = true;
+      setSt('dr', '✓ เชื่อมต่อแล้ว', '#16a34a'); showBtn('dr', '', '');
+      checkAllDone();
+    } else if (drPolls >= 8) { // 4 seconds — show connect button
+      clearInterval(drTimer);
+      if (!drResolved) {
+        setSt('dr', 'ยังไม่ได้เชื่อมต่อ', '#6b7280');
+        showBtn('dr', 'เชื่อมต่อ', 'btn-success');
+        showOfflineBtn();
+      }
+    }
+  }, 500);
+
+  // ── Both not configured → show offline option right away ──────────────────
+  if (!fbConfigured && !drConfigured) showOfflineBtn();
+}
 
 function _checkStorageAlert() {
   try {

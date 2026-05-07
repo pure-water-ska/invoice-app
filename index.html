@@ -80,6 +80,7 @@
     if (!u || !p) { Utils.showAlert('กรุณากรอกชื่อผู้ใช้และรหัสผ่าน', 'warning'); return; }
     const result = Auth.login(u, p);
     if (result.ok) {
+      sessionStorage.setItem('justLoggedIn', '1');
       window.location.href = 'dashboard.html';
     } else {
       Utils.showAlert(result.msg, 'danger');
