@@ -67,6 +67,14 @@ body {
   .inv-page { min-height: 148mm; width: 210mm; box-sizing: border-box; }
   .inv-table { width: 100%; border-collapse: collapse; font-size: 9pt; }
   .inv-table th, .inv-table td { border: 1px solid #333; padding: 2px 4px; }
+  /* ── ลบขอบด้านนอกสุดของตารางรายการ — แสดงเฉพาะเส้นแบ่งภายใน ── */
+  .inv-table thead tr:first-child th,
+  .inv-table thead tr:first-child td { border-top: none !important; }
+  .inv-table tfoot tr:last-child td  { border-bottom: none !important; }
+  .inv-table th:first-child,
+  .inv-table td:first-child          { border-left: none !important; }
+  .inv-table th:last-child,
+  .inv-table td:last-child           { border-right: none !important; }
   .inv-table th { background: #ddd !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .inv-table tfoot tr { background: #fffde7 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
