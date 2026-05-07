@@ -118,6 +118,17 @@
         <hr>
         <h6 class="fw-semibold mb-3">บันทึกการชำระใหม่</h6>
 
+        <!-- Pending payments staging list -->
+        <div id="pendingPaymentsList" class="mb-3" style="display:none">
+          <div class="d-flex align-items-center mb-2">
+            <h6 class="fw-semibold text-primary mb-0 me-2">
+              <i class="bi bi-list-check me-1"></i>รายการที่รอบันทึก
+            </h6>
+            <span id="pendingCount" class="badge bg-primary">0</span>
+          </div>
+          <div id="pendingPaymentsContainer"></div>
+        </div>
+
         <!-- Date warning -->
         <div id="payDateAlert" class="mb-2" style="display:none">
           <div class="alert alert-warning py-2 mb-0">
@@ -189,6 +200,11 @@
             <label class="form-label fw-semibold">ธนาคาร (เช็ค)</label>
             <input type="text" id="payChequeBank" class="form-control" list="bankDatalist" placeholder="พิมพ์ชื่อธนาคาร..." autocomplete="off">
           </div>
+          <div class="col-md-6 pay-cheque" style="display:none">
+            <label class="form-label fw-semibold">วันที่บนเช็ค</label>
+            <input type="date" id="payChequeDate" class="form-control">
+          </div>
+          <div class="col-md-6 pay-cheque" style="display:none"></div>
           <div class="col-12 pay-cheque" style="display:none">
             <label class="form-label fw-semibold"><i class="bi bi-image me-1 text-primary"></i>รูปเช็ค</label>
             <input type="file" id="payChequeImage" class="form-control" accept="image/*" onchange="loadPayImage(this,'chequeImagePreview')">
@@ -211,7 +227,12 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
-        <button class="btn btn-success" onclick="savePayment()"><i class="bi bi-save me-1"></i>บันทึกชำระ</button>
+        <button class="btn btn-outline-primary" onclick="addPaymentEntry()">
+          <i class="bi bi-plus-circle me-1"></i>เพิ่มรายการ
+        </button>
+        <button class="btn btn-success" onclick="savePayment()">
+          <i class="bi bi-save me-1"></i>บันทึกทั้งหมด
+        </button>
       </div>
     </div>
   </div>
@@ -384,7 +405,8 @@ Nav.render('payments');
 let payModal, overpayModal, methodModal, cancelPayModal, dateConfirmModal, imgUpdateModal;
 let pendingOverpayData = null;
 let payImages = { transfer: '', cheque: '', signed: '' };
-let _pendingPaymentData = null;   // holds data while waiting for date confirmation
+let _pendingPaymentData = null;   // holds data (array) while waiting for date confirmation
+let _pendingPayments    = [];     // staging list for multi-payment entry
 let _imgUpdateB64 = '';           // holds resized image for imgUpdateModal
 
 window.addEventListener('DOMContentLoaded', () => {
@@ -494,11 +516,15 @@ function openPayModal(invNum, custId) {
   document.getElementById('payAccountName').value      = '';
   document.getElementById('paySourceBank').value       = '';
   document.getElementById('payDestBank').value         = '';
-  document.getElementById('payChequeNo').value         = '';
-  document.getElementById('payChequeBank').value       = '';
-  document.getElementById('payAmount').value           = '';
-  document.getElementById('payDate').value             = Utils.todayInputValue();
+  document.getElementById('payChequeNo').value          = '';
+  document.getElementById('payChequeBank').value        = '';
+  document.getElementById('payChequeDate').value        = '';
+  document.getElementById('payAmount').value            = '';
+  document.getElementById('payDate').value              = Utils.todayInputValue();
   document.getElementById('payDateAlert').style.display = 'none';
+  _pendingPayments = [];
+  document.getElementById('pendingPaymentsList').style.display    = 'none';
+  document.getElementById('pendingPaymentsContainer').innerHTML   = '';
   payImages = { transfer: '', cheque: '', signed: '' };
   ['transferImagePreview','chequeImagePreview','signedImagePreview'].forEach(id =>
     document.getElementById(id).innerHTML = '');
@@ -697,7 +723,7 @@ function renderExistingPayments(invNum) {
             <span class="text-muted small ms-2">${Utils.formatDateTimeTH(p.createdAt)}</span>
             ${p.cashCollector ? `<span class="text-muted small">(${p.cashCollector})</span>` : ''}
             ${p.sourceBank    ? `<span class="text-muted small"> ${Utils.getBankName(p.sourceBank)} → ${Utils.getBankName(p.destBank)}</span>` : ''}
-            ${p.chequeNo      ? `<span class="text-muted small"> เช็ค#${p.chequeNo}</span>` : ''}
+            ${p.chequeNo  ? `<span class="text-muted small"> เช็ค#${p.chequeNo}${p.chequeDate ? ' วันที่เช็ค ' + Utils.formatDateTH(p.chequeDate) : ''}</span>` : ''}
             ${p.notes         ? `<span class="text-muted small"> | ${p.notes}</span>` : ''}
             ${isCancelled && p.cancelNote
               ? `<div class="text-danger small mt-1"><i class="bi bi-chat-left-text me-1"></i>เหตุผลยกเลิก: ${p.cancelNote}</div>` : ''}
@@ -905,6 +931,7 @@ function collectPaymentData() {
     transferDate:   document.getElementById('payTransferDate').value  || '',
     chequeNo:       document.getElementById('payChequeNo').value      || '',
     chequeBank:     document.getElementById('payChequeBank').value    || '',
+    chequeDate:     document.getElementById('payChequeDate').value    || '',
     transferImage:  payImages.transfer,
     chequeImage:    payImages.cheque,
     signedImage:    payImages.signed,
@@ -917,55 +944,168 @@ function collectPaymentData() {
   };
 }
 
-function savePayment() {
+// ── Multi-payment staging ─────────────────────────────────────────────────────
+function renderPendingPayments() {
+  const listDiv   = document.getElementById('pendingPaymentsList');
+  const container = document.getElementById('pendingPaymentsContainer');
+  const countEl   = document.getElementById('pendingCount');
+  if (!_pendingPayments.length) { listDiv.style.display = 'none'; return; }
+  listDiv.style.display = '';
+  countEl.textContent = _pendingPayments.length;
+
+  container.innerHTML = _pendingPayments.map((p, i) => {
+    const chequeInfo = [
+      p.chequeNo   ? 'เช็ค#' + p.chequeNo : '',
+      p.chequeDate ? 'วันที่เช็ค ' + Utils.formatDateTH(p.chequeDate) : '',
+    ].filter(Boolean).join(' ');
+    return '<div class="d-flex justify-content-between align-items-center border rounded p-2 mb-1 bg-light">' +
+      '<div>' +
+        '<span class="badge bg-primary me-1">' + p.method + '</span>' +
+        '<strong>฿' + Utils.formatNumber(p.amount) + '</strong>' +
+        '<span class="text-muted small ms-2">' + Utils.formatDateTH(p.payDate) + '</span>' +
+        (chequeInfo ? '<span class="text-muted small ms-1">' + chequeInfo + '</span>' : '') +
+        (p.notes ? '<span class="text-muted small ms-1">| ' + p.notes + '</span>' : '') +
+      '</div>' +
+      '<button class="btn btn-sm btn-outline-danger" onclick="removePendingPayment(' + i + ')">' +
+        '<i class="bi bi-x-lg"></i>' +
+      '</button>' +
+    '</div>';
+  }).join('');
+
+  // Update summary to reflect pending totals
+  const invNum = document.getElementById('payInvNumHidden').value;
+  const inv    = DB.getInvoices().find(i => i.invoiceNumber === invNum);
+  const total  = parseFloat(inv?.totalAmount) || 0;
+  const alreadyPaid  = DB.getInvoicePaidAmount(invNum);
+  const pendingTotal = _pendingPayments.reduce((s, p) => s + p.amount, 0);
+  const rem    = total - alreadyPaid - pendingTotal;
+  document.getElementById('invSummary').innerHTML =
+    'ยอดรวม: <strong>฿' + Utils.formatNumber(total) + '</strong> &nbsp;|&nbsp;' +
+    'ชำระแล้ว: <strong class="text-success">฿' + Utils.formatNumber(alreadyPaid) + '</strong> &nbsp;|&nbsp;' +
+    'รอบันทึก: <strong class="text-primary">฿' + Utils.formatNumber(pendingTotal) + '</strong> &nbsp;|&nbsp;' +
+    'ค้าง: <strong class="' + (rem > 0 ? 'text-danger' : 'text-success') + '">฿' + Utils.formatNumber(Math.max(0, rem)) + '</strong>';
+  if (rem > 0.005) document.getElementById('payAmount').value = rem.toFixed(2);
+  else             document.getElementById('payAmount').value = '';
+}
+
+function removePendingPayment(index) {
+  _pendingPayments.splice(index, 1);
+  if (_pendingPayments.length) {
+    renderPendingPayments();
+  } else {
+    document.getElementById('pendingPaymentsList').style.display = 'none';
+    // Restore original summary
+    const invNum = document.getElementById('payInvNumHidden').value;
+    const inv    = DB.getInvoices().find(i => i.invoiceNumber === invNum);
+    const total  = parseFloat(inv?.totalAmount) || 0;
+    const paid   = DB.getInvoicePaidAmount(invNum);
+    const rem    = total - paid;
+    document.getElementById('invSummary').innerHTML =
+      'ยอดรวม: <strong>฿' + Utils.formatNumber(total) + '</strong> &nbsp;|&nbsp;' +
+      'ชำระแล้ว: <strong class="text-success">฿' + Utils.formatNumber(paid) + '</strong> &nbsp;|&nbsp;' +
+      'ค้างชำระ: <strong class="text-danger">฿' + Utils.formatNumber(rem) + '</strong>';
+    if (rem > 0) document.getElementById('payAmount').value = rem.toFixed(2);
+  }
+}
+
+function addPaymentEntry() {
   const data = collectPaymentData();
   if (!data) return;
+  _pendingPayments.push(data);
 
-  // Check if pay date is before invoice date — require confirmation
-  const payDate = data.payDate;
+  // Clear form for next entry
+  document.getElementById('payMethod').value         = '';
+  document.getElementById('payAmount').value         = '';
+  document.getElementById('payNote').value           = '';
+  document.getElementById('payCashCollector').value  = '';
+  document.getElementById('paySourceBank').value     = '';
+  document.getElementById('payDestBank').value       = '';
+  document.getElementById('payAccountName').value    = '';
+  document.getElementById('payTransferDate').value   = Utils.nowInputValue();
+  document.getElementById('payChequeNo').value       = '';
+  document.getElementById('payChequeBank').value     = '';
+  document.getElementById('payChequeDate').value     = '';
+  payImages = { transfer: '', cheque: '', signed: '' };
+  ['transferImagePreview','chequeImagePreview','signedImagePreview'].forEach(id =>
+    document.getElementById(id).innerHTML = '');
+  ['payTransferImage','payChequeImage','paySignedImage'].forEach(id =>
+    document.getElementById(id).value = '');
+  onMethodChange();
+  renderPendingPayments();
+}
+
+// ── Save payment (with date confirmation) ─────────────────────────────────────
+function savePayment() {
+  const method = document.getElementById('payMethod').value;
+  const amount = parseFloat(document.getElementById('payAmount').value);
+  const hasCurrentForm = !!(method && amount > 0);
+
+  let allPayments = [..._pendingPayments];
+  if (hasCurrentForm) {
+    const data = collectPaymentData();
+    if (!data) return;
+    allPayments.push(data);
+  }
+  if (!allPayments.length) {
+    Utils.showAlert('กรุณากรอกข้อมูลการชำระอย่างน้อย 1 รายการ', 'warning', 'modalAlert');
+    return;
+  }
+
+  // Check date issues for any entry
   const invDate = window._currentInvDate || '';
-  if (payDate && invDate && payDate < invDate) {
-    _pendingPaymentData = data;
+  const badDated = invDate ? allPayments.filter(p => p.payDate && p.payDate < invDate) : [];
+  if (badDated.length) {
+    _pendingPaymentData = allPayments;
+    const p = badDated[0];
     document.getElementById('dateConfirmMsg').textContent =
-      `วันที่ชำระ (${Utils.formatDateTH(payDate)}) อยู่ก่อนวันที่ออกใบกำกับ (${Utils.formatDateTH(invDate)})` +
-      ` — หากวันที่ถูกต้องกรุณากด "ยืนยัน"`;
+      'วันที่ชำระ (' + Utils.formatDateTH(p.payDate) + ') อยู่ก่อนวันที่ออกใบกำกับ (' + Utils.formatDateTH(invDate) + ')' +
+      ' — หากวันที่ถูกต้องกรุณากด "ยืนยัน"';
     dateConfirmModal.show();
     return;
   }
 
-  doSavePayment(data);
+  doSaveAllPayments(allPayments);
 }
 
 function confirmSavePayment() {
   dateConfirmModal.hide();
-  if (_pendingPaymentData) doSavePayment(_pendingPaymentData);
+  if (_pendingPaymentData) {
+    const payments = Array.isArray(_pendingPaymentData) ? _pendingPaymentData : [_pendingPaymentData];
+    doSaveAllPayments(payments);
+  }
   _pendingPaymentData = null;
 }
 
-function doSavePayment(data) {
-  const inv        = DB.getInvoices().find(i => i.invoiceNumber === data.invoiceNumber);
+function doSaveAllPayments(payments) {
+  if (!payments.length) return;
+  const invNum     = payments[0].invoiceNumber;
+  const inv        = DB.getInvoices().find(i => i.invoiceNumber === invNum);
   const total      = parseFloat(inv?.totalAmount) || 0;
-  const alreadyPaid = DB.getInvoicePaidAmount(data.invoiceNumber);
-  const newPaid    = alreadyPaid + data.amount;
-  const diff       = newPaid - total;
+  const alreadyPaid = DB.getInvoicePaidAmount(invNum);
 
-  DB.addPayment(data);
-  DB.logActivity(session.userId, session.username, 'บันทึกชำระเงิน',
-    { invoiceNumber: data.invoiceNumber, method: data.method, amount: data.amount });
+  let newPaid = alreadyPaid;
+  for (const data of payments) {
+    DB.addPayment(data);
+    DB.logActivity(session.userId, session.username, 'บันทึกชำระเงิน',
+      { invoiceNumber: data.invoiceNumber, method: data.method, amount: data.amount });
+    newPaid += data.amount;
+  }
+  _pendingPayments = [];
   payModal.hide();
 
+  const diff   = newPaid - total;
   if (Math.abs(diff) > 0.01) {
-    pendingOverpayData = { custId: data.customerId, invNum: data.invoiceNumber, diff };
+    pendingOverpayData = { custId: payments[0].customerId, invNum, diff };
     const isOver = diff > 0;
-    document.getElementById('overpayBody').innerHTML = `
-      <p>ยอดชำระ <strong>฿${Utils.formatNumber(newPaid)}</strong>
-      ${isOver ? `<span class="text-danger">เกินกว่า</span>` : `<span class="text-warning">ขาดจาก</span>`}
-      ยอดใบกำกับ <strong>฿${Utils.formatNumber(total)}</strong></p>
-      <p>ส่วนต่าง: <strong class="${isOver?'text-danger':'text-warning'}">฿${Utils.formatNumber(Math.abs(diff))}</strong></p>
-      <p>ต้องการบันทึกส่วนต่างนี้ลงในใบกำกับสินค้าใหม่หรือไม่?</p>`;
+    document.getElementById('overpayBody').innerHTML =
+      '<p>ยอดชำระ <strong>฿' + Utils.formatNumber(newPaid) + '</strong> ' +
+      (isOver ? '<span class="text-danger">เกินกว่า</span>' : '<span class="text-warning">ขาดจาก</span>') +
+      ' ยอดใบกำกับ <strong>฿' + Utils.formatNumber(total) + '</strong></p>' +
+      '<p>ส่วนต่าง: <strong class="' + (isOver ? 'text-danger' : 'text-warning') + '">฿' + Utils.formatNumber(Math.abs(diff)) + '</strong></p>' +
+      '<p>ต้องการบันทึกส่วนต่างนี้ลงในใบกำกับสินค้าใหม่หรือไม่?</p>';
     overpayModal.show();
   } else {
-    Utils.showAlert('บันทึกชำระเงินสำเร็จ', 'success');
+    Utils.showAlert('บันทึกชำระเงิน ' + payments.length + ' รายการสำเร็จ', 'success');
     render();
   }
 }
