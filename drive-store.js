@@ -28,13 +28,13 @@ const DriveStore = {
 
   // ── Initialize ─────────────────────────────────────────────────────────────
   async init() {
-    if (typeof GOOGLE_CLIENT_ID === 'undefined' || !GOOGLE_CLIENT_ID ||
-        GOOGLE_CLIENT_ID.endsWith('.apps.googleusercontent.com') === false &&
-        !GOOGLE_CLIENT_ID.includes('.apps.')) {
-      // silently skip — no config
+    // อ่าน GOOGLE_CLIENT_ID จาก window scope (โหลดจาก drive-config.js)
+    const cid = (typeof GOOGLE_CLIENT_ID !== 'undefined') ? GOOGLE_CLIENT_ID : '';
+    if (!cid || !cid.includes('.apps.')) {
+      // ไม่มี config → silent no-op
       return;
     }
-    this._clientId = GOOGLE_CLIENT_ID;
+    this._clientId = cid;
 
     try {
       await this._openIDB();
@@ -49,7 +49,18 @@ const DriveStore = {
 
   // ── Sign In (shows Google popup) ───────────────────────────────────────────
   async signIn() {
-    if (!this._clientId) throw new Error('ยังไม่ได้ตั้งค่า GOOGLE_CLIENT_ID');
+    // อ่านค่าใหม่อีกครั้ง เผื่อ init() รันก่อน drive-config.js โหลดเสร็จ
+    if (!this._clientId) {
+      const cid = (typeof GOOGLE_CLIENT_ID !== 'undefined') ? GOOGLE_CLIENT_ID : '';
+      if (cid && cid.includes('.apps.')) {
+        this._clientId = cid;
+        // init IDB/GIS ถ้ายังไม่ได้ทำ
+        if (!this._idb) await this._openIDB();
+        await this._loadGIS();
+      } else {
+        throw new Error('ยังไม่ได้ตั้งค่า GOOGLE_CLIENT_ID — สร้างไฟล์ drive-config.js ก่อน');
+      }
+    }
     await this._loadGIS();
 
     return new Promise((resolve, reject) => {

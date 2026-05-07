@@ -3,40 +3,24 @@
 // ⚠️  เมื่อ deploy version ใหม่ ให้อัปเดต CACHE_VERSION ให้ตรงกับ APP_VERSION ใน utils.js
 //     เพื่อให้ browser ล้าง cache เก่าและดาวน์โหลดไฟล์ใหม่ทั้งหมด
 
-const CACHE_VERSION  = 'v1.0.0';
+const CACHE_VERSION  = 'v1.2.5';
 const STATIC_CACHE   = `wt-static-${CACHE_VERSION}`;
 const RUNTIME_CACHE  = `wt-runtime-${CACHE_VERSION}`;
 
 // ── App shell: ไฟล์ที่ pre-cache ตอน install ──────────────────────────────────
+// ⚠️  ห้าม pre-cache ไฟล์ HTML ที่นี่!
+//     เหตุผล: cache.add() ในช่วง install จะถูก intercept โดย SW เก่า (ที่ยังเป็น controller)
+//     ซึ่งอาจส่งกลับ HTML ที่ truncated/stale จาก cache เก่า
+//     HTML จะถูก cache โดยอัตโนมัติครั้งแรกที่โหลดผ่าน Network-First fetch handler
 const APP_SHELL = [
-  // Pages
-  './index.html',
-  './dashboard.html',
-  './invoices.html',
-  './invoice-create.html',
-  './payments.html',
-  './customers.html',
-  './products.html',
-  './pricing.html',
-  './reports.html',
-  './versions.html',
-  './cap-stock.html',
-  './returns.html',
-  './users.html',
-  './settings.html',
-  './history.html',
-  './help.html',
-  './troubleshoot.html',
-  './snapshots.html',
-  './pdf-import.html',
-  './price-import.html',
-  './drive-store.js',
-  './customer-import.html',
-  // Scripts & styles
+  // Scripts & styles (safe to pre-cache — small, never served from old SW cache)
   './utils.js',
   './db.js',
   './auth.js',
   './nav.js',
+  './idb.js',
+  './drive-store.js',
+  './settings.js',
   './style.css',
   './manifest.json',
   // CDN — Bootstrap
@@ -98,23 +82,33 @@ self.addEventListener('fetch', (event) => {
   const isFont      = url.hostname.includes('fonts.g');
 
   if (isLocalFile) {
-    // ── Local files: Cache-First ──────────────────────────────────────────────
-    event.respondWith(
-      caches.match(request).then((cached) => {
-        if (cached) return cached;
-        return fetch(request).then((response) => {
-          if (response && response.status === 200) {
-            caches.open(STATIC_CACHE).then(c => c.put(request, response.clone()));
-          }
-          return response;
-        }).catch(() => {
-          // Offline fallback for HTML pages
-          if (request.destination === 'document') {
-            return caches.match('./index.html');
-          }
-        });
-      })
-    );
+    const isHTML = request.destination === 'document' ||
+                   url.pathname.endsWith('.html');
+
+    if (isHTML) {
+      // ── HTML pages: Network-Only, no caching ─────────────────────────────────
+      // ไม่ cache HTML เพราะการ clone response + cache.put() พร้อมกับ stream ที่ browser
+      // อ่านอยู่ทำให้เกิด ERR_CONNECTION_RESET บน Live Server ไฟล์ใหญ่
+      // cache:'no-store' = bypass HTTP cache, ไม่ clone, ไม่ cache ใน SW
+      event.respondWith(
+        fetch(new Request(request.url, { cache: 'no-store' }))
+          .catch(() => caches.match(request).then(c => c || caches.match('./index.html')))
+      );
+    } else {
+      // ── JS/CSS/other local: Cache-First ──────────────────────────────────────
+      event.respondWith(
+        caches.match(request).then((cached) => {
+          if (cached) return cached;
+          return fetch(request).then((response) => {
+            if (response && response.status === 200) {
+              const cloned = response.clone();
+              caches.open(STATIC_CACHE).then(c => c.put(request, cloned));
+            }
+            return response;
+          }).catch(() => null);
+        })
+      );
+    }
 
   } else if (isCDN || isFont) {
     // ── CDN/Fonts: Stale-While-Revalidate ────────────────────────────────────

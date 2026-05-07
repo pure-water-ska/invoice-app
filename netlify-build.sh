@@ -30,7 +30,18 @@ else
   echo "  (App will run in local-only mode)"
 fi
 
-# ── 2. Update Service Worker cache version with build timestamp ───────────────
+# ── 2. Inject drive-config.js ────────────────────────────────────────────────
+if [ -n "$GOOGLE_CLIENT_ID" ]; then
+  echo "✓ Injecting drive-config.js..."
+  cat > drive-config.js << JSEOF
+const GOOGLE_CLIENT_ID = "${GOOGLE_CLIENT_ID}";
+JSEOF
+  echo "✓ drive-config.js created"
+else
+  echo "⚠ GOOGLE_CLIENT_ID not set — Google Drive disabled"
+fi
+
+# ── 3. Update Service Worker cache version with build timestamp ───────────────
 BUILD_TS=$(date -u +%Y%m%dT%H%M%S)
 if [ -f "sw.js" ]; then
   sed -i "s/const CACHE_VERSION  = .*/const CACHE_VERSION  = '${BUILD_TS}';/" sw.js
