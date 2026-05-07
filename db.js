@@ -40,11 +40,12 @@ const DB = {
   // ─── SETTINGS ────────────────────────────────────────────────────────────────
   getSettings() {
     return this._getObj(this.K.SETTINGS, {
-      companyName: 'บริษัท/ร้าน ของคุณ',
-      address: '91 ถ.บ้านพรุธานี10 ต.บ้านพรุ อ.หาดใหญ่ จ.สงขลา',
-      phone: '063-4962764, 096-6292544',
-      taxId: '',
-      logoText: ''
+      companyName: 'เพียวจตุรพร',
+      address: '21 หมู่ 2 ถนนถวัลย์ ตำบลบ้านพรุ อำเภอหาดใหญ่ จังหวัดสงขลา 90250',
+      phone: '082-2965453',
+      taxId: '0992000796640',
+      logoText: '',
+      showHeader: true,
     });
   },
   saveSettings(s) { this._set(this.K.SETTINGS, s); },

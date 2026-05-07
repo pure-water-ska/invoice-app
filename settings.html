@@ -125,7 +125,7 @@
     <div class="card-body">
       <div class="row g-3">
         <div class="col-12">
-          <label class="form-label fw-semibold">ชื่อบริษัท/ร้าน <span class="form-control">*</span></label>
+          <label class="form-label fw-semibold">ชื่อบริษัท/ร้าน</label>
           <input type="text" id="companyName" class="form-control">
         </div>
         <div class="col-12">
@@ -140,6 +140,15 @@
           <label class="form-label fw-semibold">เลขประจำตัวผู้เสียภาษี</label>
           <input type="text" id="taxId" class="form-control" placeholder="13 หลัก">
         </div>
+        <div class="col-12">
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="showHeader" role="switch">
+            <label class="form-check-label fw-semibold" for="showHeader">
+              แสดงหัวกระดาษในใบกำกับสินค้า
+              <span class="text-muted fw-normal small ms-1">(ชื่อบริษัท ที่อยู่ เบอร์โทร)</span>
+            </label>
+          </div>
+        </div>
       </div>
       <button class="btn btn-primary mt-3" onclick="saveCompanySettings()">
         <i class="bi bi-save me-1"></i>บันทึกข้อมูลบริษัท
@@ -152,12 +161,19 @@
     <div class="card-header bg-light fw-semibold py-2">ตัวอย่างหัวใบกำกับสินค้า</div>
     <div class="card-body">
       <div class="border rounded p-3 bg-white" style="font-family:'Sarabun',sans-serif">
+        <div id="prev_header_row" class="row border-bottom pb-2 mb-2">
+          <div class="col-8">
+            <div id="prev_name" class="fw-bold" style="font-size:14px"></div>
+            <div id="prev_address" style="font-size:11px;color:#555"></div>
+            <div id="prev_phone" style="font-size:11px;color:#555"></div>
+          </div>
+          <div class="col-4 text-end" style="font-size:11px;color:#555">
+            <div><i class="bi bi-image text-muted"></i> โลโก้</div>
+          </div>
+        </div>
         <div class="row">
           <div class="col-8">
             <div class="fw-bold" style="font-size:15px">ใบกำกับสินค้า</div>
-            <div id="prev_name" style="font-size:13px;margin-top:4px"></div>
-            <div id="prev_address" style="font-size:11px;color:#555"></div>
-            <div id="prev_phone" style="font-size:11px;color:#555"></div>
           </div>
           <div class="col-4 text-end">
             <div style="font-size:12px"><strong>เลขที่</strong> 030569-001</div>

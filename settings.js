@@ -17,6 +17,7 @@ window.addEventListener('DOMContentLoaded', () => {
   ['companyName','address','phone'].forEach(id =>
     document.getElementById(id).addEventListener('input', updatePreview)
   );
+  document.getElementById('showHeader').addEventListener('change', updatePreview);
 });
 
 /* ─── Folder Settings ──────────────────────────────────────────────────── */
@@ -71,18 +72,22 @@ async function saveBackupToFolder(content, filename) {
 /* ─── Company Settings ──────────────────────────────────────────────────── */
 function loadCompanySettings() {
   const cfg = DB.getSettings();
-  document.getElementById('companyName').value = cfg.companyName || '';
-  document.getElementById('address').value     = cfg.address     || '';
-  document.getElementById('phone').value       = cfg.phone       || '';
-  document.getElementById('taxId').value       = cfg.taxId       || '';
+  document.getElementById('companyName').value  = cfg.companyName || '';
+  document.getElementById('address').value      = cfg.address     || '';
+  document.getElementById('phone').value        = cfg.phone       || '';
+  document.getElementById('taxId').value        = cfg.taxId       || '';
+  document.getElementById('showHeader').checked = cfg.showHeader !== false; // default true
   updatePreview();
 }
 
 function updatePreview() {
-  const phone = document.getElementById('phone').value;
+  const phone      = document.getElementById('phone').value;
+  const showHeader = document.getElementById('showHeader').checked;
+  const headerRow  = document.getElementById('prev_header_row');
   document.getElementById('prev_name').textContent    = document.getElementById('companyName').value;
   document.getElementById('prev_address').textContent = document.getElementById('address').value;
   document.getElementById('prev_phone').textContent   = phone ? 'โทร. ' + phone : '';
+  if (headerRow) headerRow.style.display = showHeader ? '' : 'none';
 }
 
 function saveCompanySettings() {
@@ -92,7 +97,8 @@ function saveCompanySettings() {
     companyName: document.getElementById('companyName').value.trim(),
     address:     document.getElementById('address').value.trim(),
     phone:       document.getElementById('phone').value.trim(),
-    taxId:       document.getElementById('taxId').value.trim()
+    taxId:       document.getElementById('taxId').value.trim(),
+    showHeader:  document.getElementById('showHeader').checked,
   };
   DB.saveSettings(upd);
   DB.logActivity(session.userId, session.username, 'แก้ไขตั้งค่าระบบ', {});
