@@ -382,9 +382,11 @@ async function doPrint() {
     Utils.showAlert(`<i class="bi bi-file-earmark-pdf me-1 text-danger"></i>ใช้ PDF ที่บันทึกไว้: <strong>${_freshRaw.file}</strong>`);
   } else {
     let _pdfBody = '';
-    pages.forEach((page, pi) => {
-      if (pi > 0) _pdfBody += '<div class="page-break"></div>';
-      _pdfBody += buildInvoicePage(page, cust, cfg, page.page, totalPages, 'ต้นฉบับ', reprintCount, editCount);
+    ['ต้นฉบับ', 'สำเนา'].forEach((ct, ci) => {
+      pages.forEach((page, pi) => {
+        if (ci > 0 || pi > 0) _pdfBody += '<div class="page-break"></div>';
+        _pdfBody += buildInvoicePage(page, cust, cfg, page.page, totalPages, ct, reprintCount, editCount);
+      });
     });
     PdfGen.run(_pdfBody, _fn).catch(e => console.warn('PDF save error:', e));
   }
@@ -852,7 +854,7 @@ function previewInvoice() {
       createdBy: session.name,
       createdByUser: session.username
     };
-    previewHtml += buildInvoicePage(tempPage, cust, cfg, pi + 1, chunks.length, '', existingMeta.printCount || 0, editCount);
+    previewHtml += buildInvoicePage(tempPage, cust, cfg, pi + 1, chunks.length, 'Preview Only', existingMeta.printCount || 0, editCount);
   });
 
   const actionBtns = editMode
@@ -936,9 +938,11 @@ async function saveInvoice(shouldPrint = false) {
   const _cust = DB.getCustomerById(customerId);
   const _cfg  = DB.getSettings();
   let _pdfBody = '';
-  _pgs.forEach((pg, pi) => {
-    if (pi > 0) _pdfBody += '<div class="page-break"></div>';
-    _pdfBody += buildInvoicePage(pg, _cust, _cfg, pg.page, _pgs.length, '', 0, 0);
+  ['ต้นฉบับ', 'สำเนา'].forEach((ct, ci) => {
+    _pgs.forEach((pg, pi) => {
+      if (ci > 0 || pi > 0) _pdfBody += '<div class="page-break"></div>';
+      _pdfBody += buildInvoicePage(pg, _cust, _cfg, pg.page, _pgs.length, ct, 0, 0);
+    });
   });
   const _fn = PdfGen.sanitize(_cust ? _cust.name : 'unknown') + '_' + PdfGen.sanitize(invNumber) + '.pdf';
   Utils.showAlert('<i class="bi bi-hourglass-split me-1"></i>กำลังสร้าง PDF...', 'info');
@@ -1098,9 +1102,11 @@ async function saveInvoiceEdit(shouldPrint = false) {
   const _eCust = DB.getCustomerById(customerId);
   const _eCfg  = DB.getSettings();
   let _ePdfBody = '';
-  _ePgs.forEach((pg, pi) => {
-    if (pi > 0) _ePdfBody += '<div class="page-break"></div>';
-    _ePdfBody += buildInvoicePage(pg, _eCust, _eCfg, pg.page, _ePgs.length, '', 0, newEditCount);
+  ['ต้นฉบับ', 'สำเนา'].forEach((ct, ci) => {
+    _ePgs.forEach((pg, pi) => {
+      if (ci > 0 || pi > 0) _ePdfBody += '<div class="page-break"></div>';
+      _ePdfBody += buildInvoicePage(pg, _eCust, _eCfg, pg.page, _ePgs.length, ct, 0, newEditCount);
+    });
   });
   const _eFn = PdfGen.sanitize(_eCust ? _eCust.name : 'unknown') + '_' + PdfGen.sanitize(currentInvNum) + '.pdf';
   Utils.showAlert('<i class="bi bi-hourglass-split me-1"></i>กำลังสร้าง PDF...', 'info');
@@ -1223,8 +1229,8 @@ async function renderPreview(pages) {
   // ── Default: HTML preview ─────────────────────────────────────────────────
   let html = '';
   pages.forEach((page, pi) => {
-    if (pi > 0) html += '<div class="page-break"></div>';
-    html += buildInvoicePage(page, cust, cfg, page.page, totalPages, '', reprintCount, editCount);
+    if (pi > 0) html += '<div style="margin-top:12px"></div>';
+    html += buildInvoicePage(page, cust, cfg, page.page, totalPages, 'Preview Only', reprintCount, editCount);
   });
 
   document.getElementById('invoicePreview').innerHTML = html + statusHtml + buildHistorySection(firstPage);
@@ -1262,7 +1268,7 @@ function buildInvoicePage(page, cust, cfg, pageNum, totalPages, copyType = '', r
   const wmHtml = copyType ? `
     <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;overflow:hidden;z-index:999">
       <span class="inv-wm" style="transform:rotate(-30deg);font-size:56pt;font-weight:bold;opacity:0.07;white-space:nowrap;
-                   color:${copyType==='ต้นฉบับ'?'#00f':'#f00'};
+                   color:${copyType==='ต้นฉบับ'?'#00f':copyType==='สำเนา'?'#f00':'#888'};
                    -webkit-print-color-adjust:exact;print-color-adjust:exact">${copyType}</span>
     </div>` : '';
 
