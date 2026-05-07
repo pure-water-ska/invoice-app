@@ -1340,7 +1340,7 @@ function buildInvoicePage(page, cust, cfg, pageNum, totalPages, copyType = '', r
       <tbody>${rowsHtml}</tbody>
       <tfoot>
         <tr style="background:#fffde7;-webkit-print-color-adjust:exact;print-color-adjust:exact">
-          <td colspan="5" style="font-size:10px;color:#000;font-style:italic;padding:4px 8px;white-space:normal;text-align:center">${Utils.numberToThaiWords(parseFloat(page.totalAmount)||0)}</td>
+          <td colspan="5" style="font-size:12px;font-weight:600;color:#000;font-style:italic;padding:4px 8px;white-space:normal;text-align:center">${Utils.numberToThaiWords(parseFloat(page.totalAmount)||0)}</td>
           <td style="text-align:right;font-weight:bold;padding:4px 6px;color:#000;white-space:nowrap">รวมทั้งสิ้น</td>
           <td style="text-align:right;font-weight:bold;padding:4px 8px;color:#000;white-space:nowrap">${Utils.formatNumber(page.totalAmount||0)}</td>
         </tr>
