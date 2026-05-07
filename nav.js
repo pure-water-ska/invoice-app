@@ -121,10 +121,23 @@
   const FB_VER = '10.7.1';
   const FB_BASE = `https://www.gstatic.com/firebasejs/${FB_VER}`;
 
+  // Hide badge helper (for when Firebase is not configured)
+  function hideSyncBadge() {
+    function tryHide() {
+      const bi = document.getElementById('syncBadgeItem');
+      if (!bi) { setTimeout(tryHide, 200); return; }
+      bi.style.display = 'none';
+    }
+    tryHide();
+  }
+
   // Try loading firebase-config.js; if it doesn't exist, stop (offline-only mode)
   loadScript('./firebase-config.js', function() {
     if (typeof FIREBASE_CONFIG === 'undefined' || !FIREBASE_CONFIG.apiKey ||
-        FIREBASE_CONFIG.apiKey.startsWith('AIzaSy...')) return; // not configured
+        FIREBASE_CONFIG.apiKey.startsWith('AIzaSy...')) {
+      hideSyncBadge(); // Not configured — hide badge
+      return;
+    }
 
     // Firebase IS configured — show badge immediately
     setSyncBadge('⏳ Connecting…', 'bg-warning text-dark');
@@ -140,7 +153,9 @@
         }, onSDKError);
       }, onSDKError);
     }, onSDKError);
-  }, function() { /* firebase-config.js not found — local-only mode, OK */ });
+  }, function() {
+    hideSyncBadge(); // firebase-config.js not found — local-only mode, hide badge
+  });
 })();
 
 // CDN fallback check — runs after all scripts load
@@ -246,12 +261,12 @@ const Nav = {
       </li>` : ''}
       </ul>
       <ul class="navbar-nav ms-auto align-items-center">
-        <li class="nav-item me-1" id="syncBadgeItem" style="display:none">
+        <li class="nav-item me-1" id="syncBadgeItem">
           <span id="syncStatusBadge" class="badge bg-secondary ms-2 py-1 px-2"
                 style="font-size:10px;cursor:pointer" title="คลิก: ดึงข้อมูลจาก Cloud | Shift+คลิก: อัปโหลดทุกอย่างขึ้น Cloud"
                 onclick="if(!window.Sync||!Sync.ready)return;
                   if(event.shiftKey){if(confirm('อัปโหลดข้อมูลทั้งหมดจากเครื่องนี้ขึ้น Cloud ใช่หรือไม่?'))Sync.pushAll().then(()=>{if(typeof render==='function')render();});}
-                  else{Sync.pull().then(()=>{if(typeof render==='function')render();});}">☁ Sync</span>
+                  else{Sync.pull().then(()=>{if(typeof render==='function')render();});}">⏳ Sync</span>
         </li>
         <li class="nav-item me-1" id="driveBadgeItem" style="display:none">
           <span id="driveBadge" class="badge bg-secondary ms-1 py-1 px-2" style="font-size:10px;cursor:pointer"

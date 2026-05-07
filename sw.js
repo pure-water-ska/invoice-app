@@ -3,7 +3,7 @@
 // ⚠️  เมื่อ deploy version ใหม่ ให้อัปเดต CACHE_VERSION ให้ตรงกับ APP_VERSION ใน utils.js
 //     เพื่อให้ browser ล้าง cache เก่าและดาวน์โหลดไฟล์ใหม่ทั้งหมด
 
-const CACHE_VERSION  = 'v1.2.7';
+const CACHE_VERSION  = 'v1.2.8';
 const STATIC_CACHE   = `wt-static-${CACHE_VERSION}`;
 const RUNTIME_CACHE  = `wt-runtime-${CACHE_VERSION}`;
 
@@ -14,10 +14,11 @@ const RUNTIME_CACHE  = `wt-runtime-${CACHE_VERSION}`;
 //     HTML จะถูก cache โดยอัตโนมัติครั้งแรกที่โหลดผ่าน Network-First fetch handler
 const APP_SHELL = [
   // Scripts & styles (safe to pre-cache — small, never served from old SW cache)
+  // ⚠️  nav.js and sync.js are intentionally excluded — served Network-Only (see fetch handler)
+  //     so badge/sync fixes are ALWAYS picked up immediately without a SW update cycle.
   './utils.js',
   './db.js',
   './auth.js',
-  './nav.js',
   './idb.js',
   './drive-store.js',
   './settings.js',
@@ -85,11 +86,14 @@ self.addEventListener('fetch', (event) => {
     const isHTML = request.destination === 'document' ||
                    url.pathname.endsWith('.html');
 
-    if (isHTML) {
-      // ── HTML pages: Network-Only, no caching ─────────────────────────────────
-      // ไม่ cache HTML เพราะการ clone response + cache.put() พร้อมกับ stream ที่ browser
-      // อ่านอยู่ทำให้เกิด ERR_CONNECTION_RESET บน Live Server ไฟล์ใหญ่
-      // cache:'no-store' = bypass HTTP cache, ไม่ clone, ไม่ cache ใน SW
+    // nav.js and sync.js are always fetched from network so badge/sync fixes
+    // take effect immediately without requiring users to go through an SW update cycle.
+    const isNetworkOnly = isHTML ||
+                          url.pathname.endsWith('/nav.js') ||
+                          url.pathname.endsWith('/sync.js');
+
+    if (isNetworkOnly) {
+      // ── HTML / nav.js / sync.js: Network-Only, no caching ────────────────────
       event.respondWith(
         fetch(new Request(request.url, { cache: 'no-store' }))
           .catch(() => caches.match(request).then(c => c || caches.match('./index.html')))
