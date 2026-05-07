@@ -131,13 +131,25 @@ const PdfGen = {
   },
 
   _wrapHtml(bodyHtml) {
+    // A5 portrait at 96 DPI: 148mm × 210mm ≈ 559px × 794px
+    // @media print CSS does NOT apply inside html2canvas iframe (screen rendering only)
+    // so we must replicate print-equivalent layout rules here as screen CSS.
     return `<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 <style>
-body{margin:0;padding:6px;background:#fff;font-family:'Sarabun','TH Sarabun New',sans-serif}
+body{margin:0;padding:0;background:#fff;font-family:'Sarabun','TH Sarabun New',sans-serif}
 .no-print{display:none!important}
 *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+/* Replicate @media print layout for html2canvas rendering */
+.invoice-preview{border:none!important;border-radius:0!important;box-shadow:none!important;padding:5mm!important}
+.inv-header-table{border:none!important}
+.inv-table th:first-child,.inv-table td:first-child{border-left:none!important}
+.inv-table th:last-child,.inv-table td:last-child{border-right:none!important}
+.inv-table thead tr:first-child th,.inv-table thead tr:first-child td{border-top:none!important}
+.inv-table tfoot tr:last-child td{border-bottom:none!important}
+/* Force A5 page height (794px = 210mm at 96dpi) so flex:1 spacer pushes footer to bottom */
+.inv-page{height:794px!important;box-sizing:border-box!important}
 </style>
 </head><body>${bodyHtml}</body></html>`;
   },
@@ -145,8 +157,9 @@ body{margin:0;padding:6px;background:#fff;font-family:'Sarabun','TH Sarabun New'
   async _buildBlob(bodyHtml) {
     // A5 portrait: 148mm × 210mm ≈ 559px × 794px at 96 DPI
     const A5_W = 559;
+    const A5_H = 794;
     const iframe = document.createElement('iframe');
-    iframe.style.cssText = `position:fixed;left:-9999px;top:0;width:${A5_W}px;height:1px;border:none;background:#fff;`;
+    iframe.style.cssText = `position:fixed;left:-9999px;top:0;width:${A5_W}px;height:${A5_H}px;border:none;background:#fff;`;
     document.body.appendChild(iframe);
     try {
       iframe.contentDocument.open();
@@ -155,7 +168,8 @@ body{margin:0;padding:6px;background:#fff;font-family:'Sarabun','TH Sarabun New'
       // Wait for fonts + layout
       await new Promise(r => setTimeout(r, 1200));
       const body = iframe.contentDocument.body;
-      iframe.style.height = (body.scrollHeight + 20) + 'px';
+      // Use at least A5_H so footer stays at bottom; multi-page invoices grow beyond A5_H
+      iframe.style.height = Math.max(body.scrollHeight, A5_H) + 'px';
 
       const canvas = await html2canvas(body, {
         scale: 1.5, useCORS: true, allowTaint: true, logging: false,
