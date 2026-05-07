@@ -1173,16 +1173,20 @@ function buildInvoicePage(page, cust, cfg, pageNum, totalPages, copyType = '', r
     </div>` : '';
 
   const showHdr = cfg.showHeader !== false;
-  const companyHeaderHtml = showHdr ? `
-    <tr>
-      <td colspan="2" style="padding:5px 8px;border-bottom:1px solid #ccc">
-        <div style="font-size:15px;font-weight:700;color:#000">${cfg.companyName||''}</div>
-        ${cfg.address ? `<div style="font-size:11px;color:#444;margin-top:1px">${cfg.address}</div>` : ''}
-        <div style="font-size:11px;color:#444;margin-top:1px">
-          ${cfg.phone ? `โทร. ${cfg.phone}` : ''}${cfg.phone && cfg.taxId ? '&ensp;|&ensp;' : ''}${cfg.taxId ? `เลขผู้เสียภาษี ${cfg.taxId}` : ''}
-        </div>
-      </td>
-    </tr>` : '';
+  let companyHeaderHtml = '';
+  if (showHdr) {
+    const addrLine  = cfg.address ? '<div style="font-size:11px;color:#444;margin-top:1px">' + cfg.address + '</div>' : '';
+    const phonePart = cfg.phone   ? 'โทร. ' + cfg.phone : '';
+    const sep       = cfg.phone && cfg.taxId ? '&ensp;|&ensp;' : '';
+    const taxPart   = cfg.taxId   ? 'เลขผู้เสียภาษี ' + cfg.taxId : '';
+    const contactLine = (phonePart || taxPart)
+      ? '<div style="font-size:11px;color:#444;margin-top:1px">' + phonePart + sep + taxPart + '</div>' : '';
+    companyHeaderHtml =
+      '<tr><td colspan="2" style="padding:5px 8px;border-bottom:1px solid #ccc">' +
+      '<div style="font-size:15px;font-weight:700;color:#000">' + (cfg.companyName || '') + '</div>' +
+      addrLine + contactLine +
+      '</td></tr>';
+  }
 
   return `
   <div class="invoice-preview inv-page" style="position:relative;display:flex;flex-direction:column;font-family:'Sarabun','TH Sarabun New',sans-serif;padding:10px">
