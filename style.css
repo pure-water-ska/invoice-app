@@ -71,6 +71,8 @@ body {
   .inv-table th, .inv-table td { border: 1px solid #333; padding: 2px 4px; }
   .inv-table th { background: #ddd !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .inv-table tfoot tr { background: #fffde7 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  /* Watermark visible when printing */
+  .inv-wm { opacity: 0.10 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
 
 /* ── Invoice preview (on-screen) ── */

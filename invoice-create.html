@@ -99,12 +99,15 @@
     </div>
   </div>
 
-  <div class="d-flex gap-2 mb-4 no-print">
-    <button class="btn btn-success btn-lg" onclick="saveInvoice()"><i class="bi bi-save me-1"></i>บันทึกใบกำกับ</button>
+  <div class="d-flex gap-2 mb-3 no-print" id="saveBtnRow">
+    <button class="btn btn-primary btn-lg" id="previewBtn" onclick="previewInvoice()"><i class="bi bi-eye me-1"></i>ดูตัวอย่าง</button>
     <button class="btn btn-outline-secondary" onclick="clearForm()"><i class="bi bi-arrow-counterclockwise me-1"></i>ล้างข้อมูล</button>
   </div>
 
-  <!-- Invoice Preview (both view + print) -->
+  <!-- Live preview + action buttons (create/edit mode) -->
+  <div id="previewArea" class="no-print"></div>
+
+  <!-- Invoice Preview (view mode) -->
   <div id="invoicePreview"></div>
 
 </div>
@@ -147,6 +150,8 @@ body{margin:0;padding:0;background:#fff;font-family:'Sarabun','TH Sarabun New',s
 .inv-table{border:1.5px solid #444!important;border-collapse:collapse}
 /* Force A5 page height (794px = 210mm at 96dpi) so flex:1 spacer pushes footer to bottom */
 .inv-page{height:794px!important;box-sizing:border-box!important}
+/* Increase watermark opacity for PDF rendering (0.07 is too faint for JPEG compression) */
+.inv-wm{opacity:0.18!important}
 </style>
 </head><body>${bodyHtml}</body></html>`;
   },
@@ -182,6 +187,7 @@ body{margin:0;padding:0;background:#fff;font-family:'Sarabun','TH Sarabun New',s
 
       let yOff = 0, pageNum = 0;
       while (yOff < canvas.height) {
+        if (canvas.height - yOff < 15) break; // skip near-empty trailing slice
         if (pageNum > 0) pdf.addPage();
         const sliceH = Math.min(a5PxH, canvas.height - yOff);
         const tmp = document.createElement('canvas');
@@ -304,6 +310,7 @@ async function loadView(invNum) {
   document.getElementById('pageTitle').textContent = `ใบกำกับ: ${invNum}`;
   document.getElementById('editForm').style.display = 'none';
   document.getElementById('editTable').style.display = 'none';
+  document.getElementById('saveBtnRow').style.display = 'none';
   document.querySelectorAll('#toolbarBtns .save-btn').forEach(b => b.remove());
 
   const pages = DB.getInvoices().filter(i => i.invoiceNumber === invNum);
@@ -318,6 +325,13 @@ async function loadView(invNum) {
   `;
 
   await renderPreview(pages);
+
+  // Auto-print if flagged by saveInvoice(true) / saveInvoiceEdit(true)
+  const _ap = sessionStorage.getItem('autoPrint');
+  if (_ap === invNum) {
+    sessionStorage.removeItem('autoPrint');
+    setTimeout(() => doPrint(), 800);
+  }
 }
 
 async function doPrint() {
@@ -348,7 +362,11 @@ async function doPrint() {
     });
   });
 
-  // Build PDF HTML (ต้นฉบับ only) and auto-save — reuse fresh PDF if just saved
+  // Print first — immediately, no waiting for PDF
+  document.getElementById('printArea').innerHTML = html;
+  window.print();
+
+  // Save PDF in background after print dialog opens
   const _custName = cust ? cust.name : 'unknown';
   const _fn = [
     PdfGen.sanitize(_custName),
@@ -368,12 +386,8 @@ async function doPrint() {
       if (pi > 0) _pdfBody += '<div class="page-break"></div>';
       _pdfBody += buildInvoicePage(page, cust, cfg, page.page, totalPages, 'ต้นฉบับ', reprintCount, editCount);
     });
-    Utils.showAlert('<i class="bi bi-hourglass-split me-1"></i>กำลังสร้าง PDF...', 'info');
-    await PdfGen.run(_pdfBody, _fn);
+    PdfGen.run(_pdfBody, _fn).catch(e => console.warn('PDF save error:', e));
   }
-
-  document.getElementById('printArea').innerHTML = html;
-  window.print();
 }
 
 function deleteThis() {
@@ -796,8 +810,71 @@ function clearForm() {
   Utils.showAlert('ล้างข้อมูลแล้ว', 'info');
 }
 
-async function saveInvoice() {
-  if (editMode) { await saveInvoiceEdit(); return; }
+function previewInvoice() {
+  const customerId     = document.getElementById('invCustomer').value;
+  const shippingMethod = document.getElementById('invShipping').value;
+  const dateVal        = document.getElementById('invDate').value;
+  if (!customerId)     { Utils.showAlert('กรุณาเลือกลูกค้า', 'warning'); return; }
+  if (!shippingMethod) { Utils.showAlert('กรุณาเลือกวิธีจัดส่ง', 'warning'); return; }
+
+  const activeItems = items.filter(item => {
+    if (!item.name) return false;
+    const qty = parseFloat(item.qty) || 0;
+    const rem = parseFloat(item.remainder) || 0;
+    return qty !== 0 || rem !== 0;
+  });
+  if (activeItems.length === 0) { Utils.showAlert('กรุณากรอกรายการสินค้าอย่างน้อย 1 รายการ', 'warning'); return; }
+
+  const cust        = DB.getCustomerById(customerId);
+  const cfg         = DB.getSettings();
+  const totalAmount = activeItems.reduce((s, item) => s + calcTotal(item), 0);
+  const createdAt   = dateVal ? new Date(dateVal).toISOString() : new Date().toISOString();
+  const previewInvNum = editMode ? currentInvNum : DB.peekNextInvoiceNumber();
+  const existingMeta  = editMode ? (DB.getInvoices().find(i => i.invoiceNumber === currentInvNum) || {}) : {};
+  const editCount     = editMode ? ((existingMeta.editCount || 0) + 1) : 0;
+
+  // Split into pages
+  const chunks = [];
+  for (let i = 0; i < activeItems.length; i += ROWS_PER_PAGE) chunks.push(activeItems.slice(i, i + ROWS_PER_PAGE));
+
+  let previewHtml = '';
+  chunks.forEach((chunk, pi) => {
+    if (pi > 0) previewHtml += '<div style="margin-top:12px"></div>';
+    const tempPage = {
+      invoiceNumber: previewInvNum,
+      page: pi + 1,
+      totalPages: chunks.length,
+      customerId,
+      shippingMethod,
+      items: chunk,
+      totalAmount,
+      createdAt,
+      createdBy: session.name,
+      createdByUser: session.username
+    };
+    previewHtml += buildInvoicePage(tempPage, cust, cfg, pi + 1, chunks.length, '', existingMeta.printCount || 0, editCount);
+  });
+
+  const actionBtns = editMode
+    ? `<button class="btn btn-success btn-lg" onclick="saveInvoice(false)"><i class="bi bi-save me-1"></i>บันทึกการแก้ไข</button>
+       <button class="btn btn-primary btn-lg" onclick="saveInvoice(true)"><i class="bi bi-printer me-1"></i>บันทึก & พิมพ์</button>`
+    : `<button class="btn btn-primary btn-lg" onclick="saveInvoice(false)"><i class="bi bi-file-earmark-pdf me-1"></i>บันทึก PDF</button>
+       <button class="btn btn-success btn-lg" onclick="saveInvoice(true)"><i class="bi bi-printer me-1"></i>บันทึก & พิมพ์</button>`;
+
+  document.getElementById('previewArea').innerHTML = `
+    <div class="mb-2">${previewHtml}</div>
+    <div class="d-flex gap-2 mb-4 mt-3">
+      ${actionBtns}
+      <button class="btn btn-outline-secondary" onclick="document.getElementById('previewArea').innerHTML=''">
+        <i class="bi bi-pencil me-1"></i>แก้ไขต่อ
+      </button>
+    </div>`;
+
+  document.getElementById('previewArea').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function saveInvoice(shouldPrint = false) {
+  if (editMode) { await saveInvoiceEdit(shouldPrint); return; }
   const customerId = document.getElementById('invCustomer').value;
   const shippingMethod = document.getElementById('invShipping').value;
   const dateVal = document.getElementById('invDate').value;
@@ -868,6 +945,8 @@ async function saveInvoice() {
   await PdfGen.run(_pdfBody, _fn);
   // Mark PDF as fresh so doPrint() can skip regeneration
   try { sessionStorage.setItem('freshPdf', JSON.stringify({ inv: invNumber, file: _fn })); } catch(e) {}
+  // Signal view mode to auto-print if requested
+  if (shouldPrint) { try { sessionStorage.setItem('autoPrint', invNumber); } catch(e) {} }
 
   setTimeout(() => { location.href = 'invoice-create.html?view=' + invNumber; }, 1500);
 }
@@ -938,15 +1017,15 @@ function loadEdit(invNum) {
       <i class="bi bi-arrow-left me-1"></i>ยกเลิก
     </button>`;
 
-  // Update save button label
-  const saveBtn = document.querySelector('[onclick="saveInvoice()"]');
-  if (saveBtn) saveBtn.innerHTML = '<i class="bi bi-save me-1"></i>บันทึกการแก้ไข';
+  // Update preview button label for edit mode
+  const previewBtn = document.getElementById('previewBtn');
+  if (previewBtn) previewBtn.innerHTML = '<i class="bi bi-eye me-1"></i>ดูตัวอย่างการแก้ไข';
 
   const ec = first.editCount || 0;
   Utils.showAlert(`กำลังแก้ไขใบกำกับ ${invNum} (แก้ไขมาแล้ว ${ec} ครั้ง)`, 'warning');
 }
 
-async function saveInvoiceEdit() {
+async function saveInvoiceEdit(shouldPrint = false) {
   const customerId     = document.getElementById('invCustomer').value;
   const shippingMethod = document.getElementById('invShipping').value;
   const dateVal        = document.getElementById('invDate').value;
@@ -1027,6 +1106,7 @@ async function saveInvoiceEdit() {
   Utils.showAlert('<i class="bi bi-hourglass-split me-1"></i>กำลังสร้าง PDF...', 'info');
   await PdfGen.run(_ePdfBody, _eFn);
   try { sessionStorage.setItem('freshPdf', JSON.stringify({ inv: currentInvNum, file: _eFn })); } catch(e) {}
+  if (shouldPrint) { try { sessionStorage.setItem('autoPrint', currentInvNum); } catch(e) {} }
 
   setTimeout(() => { location.href = 'invoice-create.html?view=' + currentInvNum; }, 1500);
 }
@@ -1181,7 +1261,7 @@ function buildInvoicePage(page, cust, cfg, pageNum, totalPages, copyType = '', r
 
   const wmHtml = copyType ? `
     <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;overflow:hidden;z-index:999">
-      <span style="transform:rotate(-30deg);font-size:56pt;font-weight:bold;opacity:0.07;white-space:nowrap;
+      <span class="inv-wm" style="transform:rotate(-30deg);font-size:56pt;font-weight:bold;opacity:0.07;white-space:nowrap;
                    color:${copyType==='ต้นฉบับ'?'#00f':'#f00'};
                    -webkit-print-color-adjust:exact;print-color-adjust:exact">${copyType}</span>
     </div>` : '';
@@ -1254,9 +1334,9 @@ function buildInvoicePage(page, cust, cfg, pageNum, totalPages, copyType = '', r
       <tbody>${rowsHtml}</tbody>
       <tfoot>
         <tr style="background:#fffde7;-webkit-print-color-adjust:exact;print-color-adjust:exact">
-          <td colspan="5" style="font-size:11px;color:#555;font-style:italic;padding:4px 8px">${Utils.numberToThaiWords(parseFloat(page.totalAmount)||0)}</td>
-          <td style="text-align:right;font-weight:bold;padding:4px 6px">รวมทั้งสิ้น</td>
-          <td style="text-align:right;font-weight:bold;padding:4px 8px">${Utils.formatNumber(page.totalAmount||0)}</td>
+          <td colspan="5" style="font-size:10px;color:#000;font-style:italic;padding:4px 8px;white-space:normal">${Utils.numberToThaiWords(parseFloat(page.totalAmount)||0)}</td>
+          <td style="text-align:right;font-weight:bold;padding:4px 6px;color:#000;white-space:nowrap">รวมทั้งสิ้น</td>
+          <td style="text-align:right;font-weight:bold;padding:4px 8px;color:#000;white-space:nowrap">${Utils.formatNumber(page.totalAmount||0)}</td>
         </tr>
       </tfoot>
     </table>
