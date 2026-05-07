@@ -142,12 +142,9 @@ body{margin:0;padding:0;background:#fff;font-family:'Sarabun','TH Sarabun New',s
 .no-print{display:none!important}
 *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 /* Replicate @media print layout for html2canvas rendering */
-.invoice-preview{border:none!important;border-radius:0!important;box-shadow:none!important;padding:5mm!important}
-.inv-header-table{border:none!important}
-.inv-table th:first-child,.inv-table td:first-child{border-left:none!important}
-.inv-table th:last-child,.inv-table td:last-child{border-right:none!important}
-.inv-table thead tr:first-child th,.inv-table thead tr:first-child td{border-top:none!important}
-.inv-table tfoot tr:last-child td{border-bottom:none!important}
+.invoice-preview{border:none!important;border-radius:0!important;box-shadow:none!important;padding:6mm!important}
+.inv-header-table{border:1.5px solid #444!important;margin-bottom:3mm!important}
+.inv-table{border:1.5px solid #444!important;border-collapse:collapse}
 /* Force A5 page height (794px = 210mm at 96dpi) so flex:1 spacer pushes footer to bottom */
 .inv-page{height:794px!important;box-sizing:border-box!important}
 </style>

@@ -62,19 +62,13 @@ body {
   #invoicePreview { display: none !important; }
   #printArea      { display: block !important; }
 
-  .invoice-preview { border: none !important; border-radius: 0 !important; padding: 5mm !important; box-shadow: none !important; background: transparent !important; }
-  .inv-header-table { border: none !important; }
+  .invoice-preview { border: none !important; border-radius: 0 !important; padding: 6mm !important; box-shadow: none !important; background: transparent !important; }
   .inv-page { height: 210mm; width: 148mm; box-sizing: border-box; overflow: hidden; }
-  .inv-table { width: 100%; border-collapse: collapse; font-size: 9pt; }
+  /* Header table — กรอบด้านนอก + ระยะห่างจากขอบหน้ากระดาษจัดการโดย padding ของ .invoice-preview */
+  .inv-header-table { border: 1.5px solid #444 !important; margin-bottom: 3mm !important; }
+  /* Items table — กรอบด้านนอก + ระยะห่างจาก header table */
+  .inv-table { width: 100%; border-collapse: collapse; font-size: 9pt; border: 1.5px solid #444 !important; margin-top: 0 !important; }
   .inv-table th, .inv-table td { border: 1px solid #333; padding: 2px 4px; }
-  /* ── ลบขอบด้านนอกสุดของตารางรายการ — แสดงเฉพาะเส้นแบ่งภายใน ── */
-  .inv-table thead tr:first-child th,
-  .inv-table thead tr:first-child td { border-top: none !important; }
-  .inv-table tfoot tr:last-child td  { border-bottom: none !important; }
-  .inv-table th:first-child,
-  .inv-table td:first-child          { border-left: none !important; }
-  .inv-table th:last-child,
-  .inv-table td:last-child           { border-right: none !important; }
   .inv-table th { background: #ddd !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .inv-table tfoot tr { background: #fffde7 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
