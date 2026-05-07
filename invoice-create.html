@@ -1225,13 +1225,18 @@ function buildInvoicePage(page, cust, cfg, pageNum, totalPages, copyType = '', r
           </div>
         </td>
       </tr>
-      <tr>
+      <tr${cust && cust.taxId ? ' style="border-bottom:1px solid #ccc"' : ''}>
         <td style="padding:3px 8px;font-size:12px">
           <strong>ที่อยู่</strong>&ensp;${cust ? (cust.address||'-') : '-'}
-          ${cust && cust.taxId ? `<br><strong>เลขผู้เสียภาษี</strong>&ensp;${cust.taxId}` : ''}
         </td>
         <td style="padding:3px 8px;font-size:12px;text-align:right"><strong>จัดส่งโดย :</strong>&ensp;${page.shippingMethod||'-'}</td>
       </tr>
+      ${cust && cust.taxId ? `
+      <tr>
+        <td colspan="2" style="padding:3px 8px;font-size:12px">
+          <strong>เลขผู้เสียภาษี</strong>&ensp;${cust.taxId}
+        </td>
+      </tr>` : ''}
     </table>
     <!-- Items table -->
     <table class="inv-table" style="font-size:12px;margin-top:4px">
