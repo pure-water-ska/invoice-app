@@ -41,7 +41,20 @@ const DriveStore = {
       await this._cleanCache();
       await this._loadGIS();
       this._badge('offline');
-      console.log('[DriveStore] Initialized (not signed in yet)');
+
+      const wasSignedIn = localStorage.getItem('wt_drive_signed_in') === '1';
+      if (wasSignedIn) {
+        // เคย sign-in แล้ว → auto-reconnect หลัง page โหลดเสร็จ (ไม่ต้องกด)
+        console.log('[DriveStore] Auto-reconnecting…');
+        setTimeout(() => this.signIn().catch(e => {
+          console.warn('[DriveStore] Auto-reconnect failed:', e.message);
+          this._showConnectBanner(); // ถ้า session หมดอายุ → แสดงปุ่มให้กดใหม่
+        }), 800);
+      } else {
+        // ยังไม่เคย sign-in → แสดง banner ให้กดเชื่อมต่อ
+        this._showConnectBanner();
+        console.log('[DriveStore] Initialized (not signed in yet)');
+      }
     } catch (e) {
       console.warn('[DriveStore] init error:', e.message);
     }
@@ -63,6 +76,15 @@ const DriveStore = {
     }
     await this._loadGIS();
 
+    // ซ่อน banner ระหว่าง sign-in
+    const banner = document.getElementById('driveConnectBanner');
+    if (banner) banner.remove();
+
+    // ถ้าเคย authorize แล้ว → prompt:'' = ใช้ consent เดิม ไม่ต้องกด popup
+    // ถ้าครั้งแรก → prompt:'consent' = แสดง consent screen
+    const wasSignedIn = localStorage.getItem('wt_drive_signed_in') === '1';
+    const promptMode  = wasSignedIn ? '' : 'consent';
+
     return new Promise((resolve, reject) => {
       this._tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: this._clientId,
@@ -82,7 +104,7 @@ const DriveStore = {
         },
         error_callback: (e) => reject(new Error(e.type || 'OAuth error')),
       });
-      this._tokenClient.requestAccessToken({ prompt: '' });
+      this._tokenClient.requestAccessToken({ prompt: promptMode });
     });
   },
 
@@ -95,6 +117,7 @@ const DriveStore = {
     this._folderId = null; this.ready = false;
     this._badge('offline');
     this._saveSignInState(false);
+    this._showConnectBanner(); // แสดงปุ่มให้กดใหม่หลัง sign-out
     console.log('[DriveStore] Signed out');
   },
 
@@ -359,9 +382,45 @@ const DriveStore = {
     if (status === 'online') {
       el.textContent = '☁ Drive';
       el.className   = 'badge bg-success ms-1 py-1 px-2';
+      // ซ่อน banner เมื่อเชื่อมต่อสำเร็จ
+      const banner = document.getElementById('driveConnectBanner');
+      if (banner) banner.remove();
     } else {
       el.textContent = '☁ Drive';
       el.className   = 'badge bg-secondary ms-1 py-1 px-2';
+    }
+  },
+
+  // ── แสดง banner เชิญให้กดเชื่อมต่อ Drive (ครั้งแรก / session หมดอายุ) ────────
+  _showConnectBanner() {
+    // รอให้ DOM พร้อมก่อน
+    const show = () => {
+      if (document.getElementById('driveConnectBanner')) return; // มีอยู่แล้ว
+      const banner = document.createElement('div');
+      banner.id = 'driveConnectBanner';
+      banner.setAttribute('style',
+        'position:fixed;bottom:60px;right:16px;z-index:9980;' +
+        'background:#fff;border:1px solid #dee2e6;border-radius:12px;' +
+        'padding:12px 16px;box-shadow:0 4px 20px rgba(0,0,0,.15);' +
+        'display:flex;align-items:center;gap:10px;font-size:13px;max-width:280px');
+      banner.innerHTML =
+        '<span style="font-size:20px">☁</span>' +
+        '<div style="flex:1">' +
+          '<div style="font-weight:600;color:#212529">เชื่อมต่อ Google Drive</div>' +
+          '<div style="color:#6c757d;font-size:12px">สำรองไฟล์แนบอัตโนมัติ</div>' +
+        '</div>' +
+        '<button onclick="DriveStore.signIn().catch(()=>{})" ' +
+          'style="background:#0d6efd;color:#fff;border:none;border-radius:6px;' +
+          'padding:5px 12px;font-size:12px;cursor:pointer;white-space:nowrap">เชื่อมต่อ</button>' +
+        '<button onclick="document.getElementById(\'driveConnectBanner\').remove()" ' +
+          'style="background:none;border:none;color:#adb5bd;font-size:16px;cursor:pointer;' +
+          'padding:0 2px;line-height:1">×</button>';
+      document.body.appendChild(banner);
+    };
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', show);
+    } else {
+      show();
     }
   },
 
