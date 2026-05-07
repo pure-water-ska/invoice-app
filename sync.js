@@ -39,6 +39,15 @@ const Sync = {
     'wt_inv_counter':     'inv_counter',
   },
 
+  // ── Show badge helper (always makes badge item visible) ───────────────────
+  _showBadge(status, msg) {
+    // Ensure badge item is visible
+    const bi = document.getElementById('syncBadgeItem');
+    if (bi) bi.style.display = '';
+    this._badge(status);
+    if (msg) console.log('[Sync]', msg);
+  },
+
   // ── Initialize ─────────────────────────────────────────────────────────────
   async init() {
     if (typeof FIREBASE_CONFIG === 'undefined' || !FIREBASE_CONFIG.apiKey ||
@@ -46,6 +55,9 @@ const Sync = {
       console.log('[Sync] No valid Firebase config — local-only mode');
       return;
     }
+
+    // Show badge immediately so user knows sync is starting
+    this._showBadge('pending', 'Connecting to Firestore...');
 
     try {
       if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
@@ -77,30 +89,28 @@ const Sync = {
 
       // Mark ready BEFORE flushing queue — so _flushQueue() can proceed
       this.ready = true;
-      this._badge('online');
-      // Show sync badge in navbar
-      const bi = document.getElementById('syncBadgeItem');
-      if (bi) bi.style.display = '';
-
-      console.log(`[Sync] ✓ Ready (org: ${this._orgId}, uid: ${this._uid})`);
+      this._showBadge('online', `✓ Ready (org: ${this._orgId}, uid: ${this._uid})`);
 
       // Flush any queued writes from offline / pre-init period
       await this._flushQueue();
 
     } catch (e) {
       console.error('[Sync] Init failed:', e.message || e);
-      this._badge('error');
+      this._showBadge('error');
+      // Show error detail in badge tooltip
+      const badge = document.getElementById('syncStatusBadge');
+      if (badge) badge.title = 'Sync error: ' + (e.message || e) + '\n(คลิกเพื่อลองใหม่)';
     }
 
     // Online / offline
     window.addEventListener('online', async () => {
       this._online = true;
-      this._badge('online');
+      if (this.ready) this._showBadge('online');
       await this._flushQueue();
     });
     window.addEventListener('offline', () => {
       this._online = false;
-      this._badge('offline');
+      this._showBadge('offline');
     });
   },
 
