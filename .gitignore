@@ -4,9 +4,6 @@ firebase-config.js
 # Claude Code local settings
 .claude/
 
-# Google Drive config (contains Client ID — never commit)
-drive-config.js
-
 # OS
 .DS_Store
 Thumbs.db
