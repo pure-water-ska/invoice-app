@@ -18,6 +18,7 @@
 .item-row input:focus { outline: none; border-color: #86b7fe; box-shadow: 0 0 0 2px rgba(13,110,253,.15); }
 .item-row select { width: 100%; font-size: 13px; border: 1px solid #dee2e6; border-radius: 4px; padding: 2px 4px; }
 .item-row.empty-row input, .item-row.empty-row select { background: #f8f9fa; color: #aaa; }
+@media (max-width: 767px) { .no-mobile-hide { display: none !important; } }
 </style>
 </head>
 <body>
@@ -253,13 +254,39 @@ let currentInvNum = null;
 window.addEventListener('DOMContentLoaded', () => {
   const params = new URLSearchParams(location.search);
   const viewNum = params.get('view');
+  const editNum = params.get('edit');
+
+  // ── Mobile: create/edit not supported — view only ─────────────────────────
+  const isMobile = window.innerWidth < 768;
+  if (isMobile && !viewNum) {
+    if (editNum) {
+      location.replace('invoice-create.html?view=' + editNum);
+      return;
+    }
+    // Create mode on mobile
+    document.getElementById('editForm').style.display  = 'none';
+    document.getElementById('editTable').style.display = 'none';
+    document.getElementById('saveBtnRow').style.display = 'none';
+    document.getElementById('alertBox').innerHTML = `
+      <div class="alert alert-info d-flex align-items-start gap-3 mb-0">
+        <i class="bi bi-phone fs-4 flex-shrink-0 mt-1 text-primary"></i>
+        <div>
+          <div class="fw-bold mb-1">ใช้งานบนมือถือ</div>
+          <div class="small mb-2">การสร้าง/แก้ไขใบกำกับรองรับเฉพาะบนคอมพิวเตอร์
+            — บนมือถือรองรับเฉพาะการ <strong>ดูใบกำกับ</strong></div>
+          <a href="invoices.html" class="btn btn-sm btn-primary">
+            <i class="bi bi-receipt me-1"></i>ดูรายการใบกำกับ
+          </a>
+        </div>
+      </div>`;
+    return;
+  }
 
   // Populate customer select
   DB.getCustomers().sort((a,b)=>a.name.localeCompare(b.name,'th')).forEach(c => {
     document.getElementById('invCustomer').innerHTML += `<option value="${c.id}">${c.name}</option>`;
   });
 
-  const editNum = params.get('edit');
   if (editNum) {
     loadEdit(editNum);
   } else if (viewNum) {
@@ -320,10 +347,11 @@ async function loadView(invNum) {
 
   document.getElementById('toolbarBtns').innerHTML = `
     <button class="btn btn-outline-secondary btn-sm" onclick="history.back()"><i class="bi bi-arrow-left me-1"></i>กลับ</button>
-    <a href="invoice-create.html?edit=${invNum}" class="btn btn-warning btn-sm"><i class="bi bi-pencil me-1"></i>แก้ไข</a>
+    <a href="invoice-create.html?edit=${invNum}" class="btn btn-warning btn-sm no-mobile-hide"><i class="bi bi-pencil me-1"></i>แก้ไข</a>
     <a href="payments.html?inv=${invNum}" class="btn btn-success btn-sm"><i class="bi bi-cash-coin me-1"></i>บันทึกชำระเงิน</a>
-    <button class="btn btn-primary btn-sm" onclick="doPrint()"><i class="bi bi-printer me-1"></i>พิมพ์</button>
-    <button class="btn btn-danger btn-sm" onclick="deleteThis()"><i class="bi bi-trash me-1"></i>ลบ</button>
+    <button class="btn btn-outline-info btn-sm" onclick="copyInvoiceImage()"><i class="bi bi-clipboard-image me-1"></i>คัดลอกรูป</button>
+    <button class="btn btn-primary btn-sm no-mobile-hide" onclick="doPrint()"><i class="bi bi-printer me-1"></i>พิมพ์</button>
+    <button class="btn btn-danger btn-sm no-mobile-hide" onclick="deleteThis()"><i class="bi bi-trash me-1"></i>ลบ</button>
   `;
 
   await renderPreview(pages);
@@ -814,6 +842,60 @@ function clearForm() {
   Utils.showAlert('ล้างข้อมูลแล้ว', 'info');
 }
 
+// ── Copy invoice preview as image to clipboard ────────────────────────────────
+async function copyInvoiceImage() {
+  // Capture first invoice-preview page (skip watermark issues with multi-copy)
+  const previewEl = document.querySelector('#invoicePreview .invoice-preview')
+                 || document.querySelector('#previewArea .invoice-preview');
+  if (!previewEl) { Utils.showAlert('ไม่พบใบกำกับที่จะคัดลอก', 'warning'); return; }
+  Utils.showAlert('<i class="bi bi-hourglass-split me-1"></i>กำลังสร้างรูป...', 'info');
+  try {
+    const canvas = await html2canvas(previewEl, {
+      scale: 2, useCORS: true, allowTaint: true, logging: false,
+      backgroundColor: '#ffffff'
+    });
+    canvas.toBlob(async blob => {
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        Utils.showAlert('<i class="bi bi-check-circle me-1"></i>คัดลอกใบกำกับเป็นรูปสำเร็จ — วางในไลน์/แอปอื่นได้เลย');
+      } catch {
+        // Clipboard API blocked (non-HTTPS / permission denied) → download
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = (currentInvNum || 'invoice') + '.png';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 3000);
+        Utils.showAlert('<i class="bi bi-download me-1"></i>คัดลอกไม่ได้ — ดาวน์โหลดรูปแทน', 'info');
+      }
+    }, 'image/png');
+  } catch(e) {
+    Utils.showAlert('เกิดข้อผิดพลาด: ' + e.message, 'danger');
+  }
+}
+
+// ── Check brand/size mismatch against recorded versions ───────────────────────
+function checkVersionMismatch(customerId, activeItems) {
+  if (!customerId) return [];
+  const versions = DB.getVersions().filter(v => v.customerId === customerId);
+  if (!versions.length) return [];
+  const mismatches = [];
+  const seen = new Set();
+  activeItems.forEach(item => {
+    if (!item.brand || !item.name) return;
+    const key = item.brand + '|' + item.name;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const matched = versions.some(v => {
+      const vBrand = v.brand || '';
+      const vSize  = v.size  || '';
+      return vBrand === item.brand &&
+             (vSize === item.name || item.name.includes(vSize) || vSize.includes(item.name));
+    });
+    if (!matched) mismatches.push({ brand: item.brand, size: item.name });
+  });
+  return mismatches;
+}
+
 function previewInvoice() {
   const customerId     = document.getElementById('invCustomer').value;
   const shippingMethod = document.getElementById('invShipping').value;
@@ -859,6 +941,21 @@ function previewInvoice() {
     previewHtml += buildInvoicePage(tempPage, cust, cfg, pi + 1, chunks.length, 'Preview Only', existingMeta.printCount || 0, editCount);
   });
 
+  // Version mismatch warning
+  const mismatches = checkVersionMismatch(customerId, activeItems);
+  const mismatchHtml = mismatches.length
+    ? `<div class="alert alert-warning d-flex align-items-start gap-2 py-2 mb-2">
+        <i class="bi bi-exclamation-triangle-fill text-warning flex-shrink-0 mt-1"></i>
+        <div>
+          <div class="fw-semibold small">ฉลากขวดไม่ตรง — ตรวจสอบข้อมูลอีกครั้ง</div>
+          ${mismatches.map(m =>
+            `<div class="small">• ยี่ห้อ <strong>${m.brand}</strong> + ขนาด <strong>${m.size}</strong>
+             ไม่มีในบันทึกฉลากขวดของลูกค้านี้
+             <a href="versions.html" target="_blank" class="ms-1 small">(ดูฉลาก)</a></div>`
+          ).join('')}
+        </div>
+      </div>` : '';
+
   const actionBtns = editMode
     ? `<button class="btn btn-success btn-lg" onclick="saveInvoice(false)"><i class="bi bi-save me-1"></i>บันทึกการแก้ไข</button>
        <button class="btn btn-primary btn-lg" onclick="saveInvoice(true)"><i class="bi bi-printer me-1"></i>บันทึก & พิมพ์</button>`
@@ -866,9 +963,13 @@ function previewInvoice() {
        <button class="btn btn-success btn-lg" onclick="saveInvoice(true)"><i class="bi bi-printer me-1"></i>บันทึก & พิมพ์</button>`;
 
   document.getElementById('previewArea').innerHTML = `
+    ${mismatchHtml}
     <div class="mb-2">${previewHtml}</div>
-    <div class="d-flex gap-2 mb-4 mt-3">
+    <div class="d-flex gap-2 mb-4 mt-3 flex-wrap">
       ${actionBtns}
+      <button class="btn btn-outline-info" onclick="copyInvoiceImage()">
+        <i class="bi bi-clipboard-image me-1"></i>คัดลอกเป็นรูป
+      </button>
       <button class="btn btn-outline-secondary" onclick="document.getElementById('previewArea').innerHTML=''">
         <i class="bi bi-pencil me-1"></i>แก้ไขต่อ
       </button>

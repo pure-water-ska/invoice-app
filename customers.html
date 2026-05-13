@@ -406,6 +406,22 @@ function render() {
       const inv = invoices.find(i => i.invoiceNumber === num);
       return DB.getInvoicePaidAmount(num) < (inv ? parseFloat(inv.totalAmount)||0 : 0);
     }).length;
+    // Last invoice date
+    const lastInv = invoices.length
+      ? invoices.reduce((a, b) => (a.createdAt||'') > (b.createdAt||'') ? a : b)
+      : null;
+    const lastDaysAgo = lastInv
+      ? Math.floor((Date.now() - new Date(lastInv.createdAt).getTime()) / 86400000)
+      : null;
+    const lastInvHtml = lastInv
+      ? `<div class="small mb-1" style="color:#6c757d">
+           <i class="bi bi-clock-history me-1"></i>ใบล่าสุด:
+           <strong>${lastInv.createdAt.slice(0,10)}</strong>
+           <span class="badge ms-1 ${lastDaysAgo <= 7 ? 'bg-success' : lastDaysAgo <= 30 ? 'bg-warning text-dark' : 'bg-secondary'}" style="font-size:10px">
+             ${lastDaysAgo === 0 ? 'วันนี้' : lastDaysAgo + ' วันที่แล้ว'}
+           </span>
+         </div>`
+      : `<div class="small mb-1 text-muted"><i class="bi bi-clock-history me-1"></i>ยังไม่มีใบกำกับ</div>`;
 
     const brands = getBrands(c);
     const brandTags = brands.map(b => `
@@ -458,6 +474,7 @@ function render() {
             <div class="small text-muted mb-1"><i class="bi bi-geo-alt me-1"></i>${c.address||'-'}</div>
             <div class="small mb-1"><i class="bi bi-telephone me-1 text-success"></i>${c.phone||'-'}</div>
             <div class="small mb-1"><i class="bi bi-card-text me-1 text-primary"></i>${c.taxId||'-'}</div>
+            ${lastInvHtml}
             <div class="small mb-2" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
               ${c.mapLink
                 ? `<a href="${c.mapLink}" target="_blank" rel="noopener" class="text-decoration-none text-danger small" onclick="event.stopPropagation()"><i class="bi bi-pin-map-fill me-1"></i>Google Maps</a>`

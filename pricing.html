@@ -58,10 +58,12 @@
             <th>ลูกค้า</th>
             <th>วิธีจัดส่ง</th>
             <th class="text-end">ราคาต่อหน่วย (บาท)</th>
+            <th class="text-center" title="วันที่แจ้งลูกค้าเรื่องราคา">แจ้งลูกค้า</th>
+            <th class="text-center" title="จำนวนลูกค้าที่สั่งซื้อในราคานี้">ลูกค้าที่ใช้</th>
             <th class="text-center">จัดการ</th>
           </tr>
         </thead>
-        <tbody id="pricingTable"><tr><td colspan="5" class="text-center text-muted py-4">ยังไม่มีข้อมูลราคา</td></tr></tbody>
+        <tbody id="pricingTable"><tr><td colspan="7" class="text-center text-muted py-4">ยังไม่มีข้อมูลราคา</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -197,17 +199,42 @@ function render() {
   });
   const tbody = document.getElementById('pricingTable');
   if (list.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">ไม่พบข้อมูลราคา</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">ไม่พบข้อมูลราคา</td></tr>';
     return;
   }
+  const allInvoices = DB.getInvoices(); // cache for order-count
   tbody.innerHTML = list.map(p => {
     const prod = products.find(x => x.id === p.productId);
     const cust = customers.find(x => x.id === p.customerId);
+    // Count distinct customers who have ordered this product at this price
+    const orderCustIds = new Set();
+    allInvoices.forEach(inv => {
+      (inv.items || []).forEach(item => {
+        if (item.productId === p.productId &&
+            Math.abs(parseFloat(item.price) - parseFloat(p.price)) < 0.001) {
+          orderCustIds.add(inv.customerId);
+        }
+      });
+    });
+    const orderCount = orderCustIds.size;
+    const notified = p.notifiedAt ? p.notifiedAt : '';
     return `<tr>
       <td>${prod ? prod.name : '<span class="text-danger">ไม่พบสินค้า</span>'}</td>
       <td>${cust ? cust.name : '<span class="text-muted">ทุกลูกค้า</span>'}</td>
       <td>${p.shippingMethod || '<span class="text-muted">ทุกวิธีจัดส่ง</span>'}</td>
       <td class="text-end fw-semibold">฿${Utils.formatNumber(p.price)}</td>
+      <td class="text-center" style="min-width:130px">
+        <input type="date" class="form-control form-control-sm" value="${notified}"
+               title="วันที่แจ้งลูกค้าเรื่องราคานี้"
+               onchange="setNotifiedDate('${p.id}',this.value)"
+               style="font-size:11px;padding:2px 4px;max-width:120px;margin:auto">
+        ${notified ? `<div class="text-muted" style="font-size:10px">${Utils.formatDateTH(notified)}</div>` : '<div class="text-muted" style="font-size:10px">ยังไม่แจ้ง</div>'}
+      </td>
+      <td class="text-center">
+        ${orderCount > 0
+          ? `<span class="badge bg-primary" title="${[...orderCustIds].map(id=>{const c=customers.find(x=>x.id===id);return c?c.name:id;}).join(', ')}">${orderCount} ราย</span>`
+          : `<span class="badge bg-light text-muted border">0 ราย</span>`}
+      </td>
       <td class="text-center">
         <button class="btn btn-sm btn-outline-secondary me-1" onclick="openHistModal('${p.productId}','${p.customerId||''}','${p.shippingMethod||''}')" title="ประวัติราคา"><i class="bi bi-graph-up"></i></button>
         <button class="btn btn-sm btn-outline-primary me-1" onclick="openModal('${p.id}')"><i class="bi bi-pencil"></i></button>
@@ -215,6 +242,15 @@ function render() {
       </td>
     </tr>`;
   }).join('');
+}
+
+function setNotifiedDate(priceId, dateVal) {
+  const list = DB.getPricing();
+  const idx = list.findIndex(p => p.id === priceId);
+  if (idx < 0) return;
+  list[idx].notifiedAt = dateVal;
+  DB.savePricing(list);
+  Utils.showAlert('<i class="bi bi-check-circle me-1"></i>บันทึกวันที่แจ้งลูกค้าแล้ว');
 }
 
 function openModal(id) {
