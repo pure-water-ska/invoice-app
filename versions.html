@@ -143,7 +143,7 @@ mark { background:#fff3cd; padding:0 2px; border-radius:2px; }
             <datalist id="vSizeDatalist"></datalist>
           </div>
 
-          <div class="col-md-6">
+          <div class="col-md-4">
             <label class="form-label fw-semibold">สีฉลาก</label>
             <div class="input-group">
               <input type="color" id="vColor" class="form-control form-control-color" value="#0d6efd" style="width:48px" oninput="document.getElementById('vColorText').value=this.value">
@@ -155,7 +155,21 @@ mark { background:#fff3cd; padding:0 2px; border-radius:2px; }
             </div>
           </div>
 
-          <div class="col-md-6">
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">ชื่อสี</label>
+            <input type="text" id="vColorName" class="form-control" list="vColorNameDatalist"
+                   placeholder="เช่น สีแดง, สีน้ำเงิน..." autocomplete="off">
+            <datalist id="vColorNameDatalist">
+              <option value="สีแดง"><option value="สีน้ำเงิน"><option value="สีเขียว">
+              <option value="สีเหลือง"><option value="สีส้ม"><option value="สีม่วง">
+              <option value="สีชมพู"><option value="สีขาว"><option value="สีดำ">
+              <option value="สีเทา"><option value="สีทอง"><option value="สีเงิน">
+              <option value="สีฟ้า"><option value="สีน้ำตาล"><option value="สีครีม">
+              <option value="Natural"><option value="ใส">
+            </datalist>
+          </div>
+
+          <div class="col-md-4">
             <label class="form-label fw-semibold">วันที่ <span class="text-danger">*</span></label>
             <input type="date" id="vDate" class="form-control">
           </div>
@@ -228,7 +242,7 @@ function render() {
     const brand = (v.brand || (v.brands||[])[0] || '').toLowerCase();
     const size  = (v.size  || (v.sizes||[])[0]  || '').toLowerCase();
     const d     = v.date || '';
-    if (q && !name.includes(q) && !brand.includes(q) && !size.includes(q) && !(v.note||'').toLowerCase().includes(q)) return false;
+    if (q && !name.includes(q) && !brand.includes(q) && !size.includes(q) && !(v.note||'').toLowerCase().includes(q) && !(v.colorName||'').toLowerCase().includes(q)) return false;
     if (custF && v.customerId !== custF) return false;
     if (from && d < from) return false;
     if (to   && d > to)   return false;
@@ -295,6 +309,8 @@ function render() {
                 <div class="d-flex flex-wrap gap-2 align-items-center mb-1">
                   ${brand ? `<span class="tl-brand" style="background:${labelColor}22;color:${labelColor};border-color:${labelColor}66">${hl(brand,q)}</span>` : ''}
                   ${size  ? `<span class="tl-size"><i class="bi bi-box me-1"></i>${hl(size,q)}</span>` : ''}
+                  ${v.colorName ? `<span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;padding:1px 9px;border-radius:20px;background:${labelColor}18;color:${labelColor};border:1px solid ${labelColor}55">
+                    <span style="width:9px;height:9px;border-radius:50%;background:${labelColor};display:inline-block;flex-shrink:0"></span>${hl(v.colorName,q)}</span>` : ''}
                 </div>
                 ${v.note ? `<div class="tl-note"><i class="bi bi-chat-left-text me-1 opacity-50"></i>${hl(v.note,q)}</div>` : ''}
                 ${v.image ? `<div class="mt-2"><img src="${v.image}" class="tl-img" onclick="openLightboxById('${v.id}')"></div>` : ''}
@@ -337,17 +353,19 @@ function openModal(id) {
   document.getElementById('vNote').value  = '';
   document.getElementById('vImage').value = '';
   document.getElementById('vImagePreview').innerHTML = '';
+  document.getElementById('vColorName').value = '';
   verImageB64 = '';
   _setVerColor('#0d6efd');
 
   if (id) {
     const v = DB.getVersions().find(x => x.id === id);
     if (v) {
-      document.getElementById('vCust').value  = v.customerId || '';
-      document.getElementById('vDate').value  = v.date || '';
-      document.getElementById('vBrand').value = v.brand || (v.brands||[])[0] || '';
-      document.getElementById('vSize').value  = v.size  || (v.sizes||[])[0]  || '';
-      document.getElementById('vNote').value  = v.note  || '';
+      document.getElementById('vCust').value      = v.customerId || '';
+      document.getElementById('vDate').value      = v.date || '';
+      document.getElementById('vBrand').value     = v.brand || (v.brands||[])[0] || '';
+      document.getElementById('vSize').value      = v.size  || (v.sizes||[])[0]  || '';
+      document.getElementById('vNote').value      = v.note  || '';
+      document.getElementById('vColorName').value = v.colorName || '';
       _setVerColor(v.color || '#0d6efd');
       if (v.image) {
         verImageB64 = v.image;
@@ -395,8 +413,9 @@ function saveVersion() {
     brand,
     size,
     date,
-    color: document.getElementById('vColorText').value.trim() || document.getElementById('vColor').value || '#0d6efd',
-    note:  document.getElementById('vNote').value.trim(),
+    color:     document.getElementById('vColorText').value.trim() || document.getElementById('vColor').value || '#0d6efd',
+    colorName: document.getElementById('vColorName').value.trim(),
+    note:      document.getElementById('vNote').value.trim(),
     image: verImageB64,
     createdBy: session.name,
     createdByUser: session.username
