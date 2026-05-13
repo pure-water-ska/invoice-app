@@ -48,7 +48,7 @@ jobs:
         run: |
           if [ -n "$GOOGLE_CLIENT_ID" ]; then
             cat > drive-config.js << JSEOF
-          const GOOGLE_CLIENT_ID = "$GOOGLE_CLIENT_ID";
+          window.GOOGLE_CLIENT_ID = "$GOOGLE_CLIENT_ID";
           JSEOF
             echo "Drive config injected from secrets"
           else

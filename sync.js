@@ -420,5 +420,9 @@ const Sync = {
   },
 };
 
+// Expose globally — `const Sync` above is a lexical binding, NOT a window property,
+// so `window.Sync` would otherwise be undefined (breaks nav.js badge + connection modal).
+window.Sync = Sync;
+
 // ── Auto-initialize ───────────────────────────────────────────────────────────
 Sync.init().catch(e => console.error('[Sync]', e));

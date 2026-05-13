@@ -10,7 +10,11 @@
 //   • metadata        → localStorage "wt_drive_files"
 // ─────────────────────────────────────────────────────────────────────────────
 
-const DriveStore = {
+// Guarded + attached to window so it survives a double <script> load (some pages
+// include drive-store.js statically; nav.js also loads it on every page) and so
+// `window.DriveStore` checks (nav.js connection modal) actually see it.
+if (!window.DriveStore) {
+window.DriveStore = {
   ready:        false,
   _clientId:    null,
   _tokenClient: null,
@@ -430,4 +434,5 @@ const DriveStore = {
 };
 
 // ── Auto-initialize ───────────────────────────────────────────────────────────
-DriveStore.init().catch(e => console.warn('[DriveStore]', e.message));
+window.DriveStore.init().catch(e => console.warn('[DriveStore]', e.message));
+} // end if (!window.DriveStore)

@@ -166,6 +166,27 @@
   });
 })();
 
+// ── Load Google Drive store on every page (only if drive-config.js exists) ───
+// Some pages (pdf-import, settings) also include drive-store.js statically; both
+// drive-config.js (window assignment) and drive-store.js (guarded) are safe to
+// load twice. Loading here makes DriveStore + GOOGLE_CLIENT_ID available on
+// dashboard etc. so the post-login connection modal can show/connect Drive.
+(function loadDriveStoreGlobal() {
+  function loadScript(src, cb, errCb) {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload  = cb  || function(){};
+    s.onerror = errCb || function(){};
+    document.head.appendChild(s);
+  }
+  loadScript('./drive-config.js', function() {
+    if (typeof GOOGLE_CLIENT_ID === 'undefined' || typeof GOOGLE_CLIENT_ID !== 'string' ||
+        !GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_ID.includes('.apps.')) return; // not configured
+    if (window.DriveStore) return; // already loaded by a page's static <script>
+    loadScript('./drive-store.js'); // sets window.DriveStore + auto-inits
+  }, function() { /* drive-config.js missing — Drive disabled, silent */ });
+})();
+
 // CDN fallback check — runs after all scripts load
 window.addEventListener('load', function() {
   if (typeof window.bootstrap !== 'undefined') return;

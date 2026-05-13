@@ -23,4 +23,5 @@
 //        - Test users: ใส่ email ของผู้ใช้ทั้ง 3 คน (ถ้าเป็น External)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const GOOGLE_CLIENT_ID = '123456789-abcdefghijklmnop.apps.googleusercontent.com';
+// Assigned on window (not `const`) so the file is safe to load more than once.
+window.GOOGLE_CLIENT_ID = '123456789-abcdefghijklmnop.apps.googleusercontent.com';
