@@ -24,6 +24,10 @@
 .brand-add-btn:hover { border-color:#0d6efd;color:#0d6efd; }
 .brand-inline-input { font-size:12px;border:1px solid #7dd3fc;border-radius:20px;padding:1px 8px;width:90px;outline:none; }
 
+/* ── Suspended customer ── */
+.card.is-suspended { opacity:.72;border-color:#dc3545 !important; }
+.suspended-ribbon { background:#dc3545;color:#fff;font-size:10px;font-weight:700;padding:1px 8px;border-radius:0 0 6px 6px;letter-spacing:.5px; }
+
 /* ── Selection ── */
 .cust-card-wrap { position:relative; }
 .cust-checkbox {
@@ -259,6 +263,34 @@
   </div>
 </div>
 
+<!-- ── Suspend / Unsuspend Modal ──────────────────────────────────────────── -->
+<div class="modal fade" id="suspendModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header" id="suspendModalHeader">
+        <h5 class="modal-title" id="suspendModalTitle"><i class="bi bi-slash-circle me-2"></i>ระงับลูกค้า</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2">ลูกค้า: <strong id="suspendCustName"></strong></p>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">หมายเหตุ / เหตุผล <span class="text-danger" id="suspendReasonRequired">*</span></label>
+          <textarea id="suspendComment" class="form-control" rows="3" placeholder="กรอกเหตุผล..."></textarea>
+        </div>
+        <div id="suspendLogContainer" style="display:none">
+          <hr class="my-2">
+          <div class="fw-semibold small text-muted mb-1"><i class="bi bi-clock-history me-1"></i>ประวัติการระงับ</div>
+          <div id="suspendLogList" style="max-height:160px;overflow-y:auto;font-size:12px"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+        <button class="btn" id="suspendConfirmBtn" onclick="doSuspend()">ยืนยัน</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ── Outstanding Preview Modal ─────────────────────────────────────────── -->
 <div class="modal fade" id="outstandingModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered modal-lg">
@@ -294,8 +326,9 @@ const session = Auth.require();
 DB.init();
 Nav.render('customers');
 
-let custModal, noteModal, currentNoteId;
+let custModal, noteModal, suspendModal, currentNoteId;
 let modalBrands = [];
+let _suspendCustId = null, _suspendAction = null;
 
 // ── Pagination ───────────────────────────────────────────────────────────────
 const CUST_PAGE_SIZE = 24;
@@ -367,6 +400,7 @@ function getBrands(c) {
 window.addEventListener('DOMContentLoaded', () => {
   custModal = new bootstrap.Modal(document.getElementById('custModal'));
   noteModal = new bootstrap.Modal(document.getElementById('noteModal'));
+  suspendModal = new bootstrap.Modal(document.getElementById('suspendModal'));
   render();
   document.getElementById('searchInput').addEventListener('input', () => { _custPage = 1; render(); });
 });
@@ -438,10 +472,11 @@ function render() {
            onclick="${_selMode ? `toggleSelect('${c.id}')` : ''}">
         ${_selMode ? `<input type="checkbox" class="cust-checkbox" id="cchk-${c.id}"
           ${isSel?'checked':''} onclick="event.stopPropagation();toggleSelect('${c.id}')">` : ''}
-        <div class="card h-100" style="${_selMode?'cursor:pointer':''}">
+        <div class="card h-100${c.suspended?' is-suspended':''}" style="${_selMode?'cursor:pointer':''}">
+          ${c.suspended ? `<div class="suspended-ribbon text-center">⛔ ระงับการใช้งาน</div>` : ''}
           <div class="card-body ${_selMode?'ps-4':''}">
             <div class="d-flex justify-content-between align-items-start mb-2">
-              <h6 class="fw-bold mb-0">${c.name}</h6>
+              <h6 class="fw-bold mb-0">${c.name}${c.suspended?'':''}</h6>
               ${_selMode ? '' : `
               <div class="dropdown">
                 <button class="btn btn-sm btn-light" data-bs-toggle="dropdown"><i class="bi bi-three-dots-vertical"></i></button>
@@ -451,6 +486,9 @@ function render() {
                   <li><a class="dropdown-item" href="invoices.html?cust=${c.id}"><i class="bi bi-receipt me-1"></i>ดูใบกำกับ</a></li>
                   <li><a class="dropdown-item" href="#" onclick="showOutstandingPreview('${c.id}')"><i class="bi bi-card-list me-1"></i>รายการค้างชำระ</a></li>
                   <li><hr class="dropdown-divider"></li>
+                  ${c.suspended
+                    ? `<li><a class="dropdown-item text-success" href="#" onclick="openSuspendModal('${c.id}','unsuspend')"><i class="bi bi-check-circle me-1"></i>ยกเลิกระงับ</a></li>`
+                    : `<li><a class="dropdown-item text-warning" href="#" onclick="openSuspendModal('${c.id}','suspend')"><i class="bi bi-slash-circle me-1"></i>ระงับลูกค้า</a></li>`}
                   <li><a class="dropdown-item text-danger" href="#" onclick="deleteCustomer('${c.id}')"><i class="bi bi-trash me-1"></i>ลบ</a></li>
                 </ul>
               </div>`}
@@ -526,6 +564,87 @@ function render() {
   }
 
   if (_selMode) updateSelToolbar();
+}
+
+// ── Suspend / Unsuspend ──────────────────────────────────────────────────────
+function openSuspendModal(custId, action) {
+  _suspendCustId = custId;
+  _suspendAction = action;
+  const c = DB.getCustomerById(custId);
+  if (!c) return;
+
+  const isSuspend = action === 'suspend';
+  const header = document.getElementById('suspendModalHeader');
+  header.className = 'modal-header ' + (isSuspend ? 'bg-warning' : 'bg-success text-white');
+  document.getElementById('suspendModalTitle').innerHTML =
+    `<i class="bi bi-${isSuspend?'slash-circle':'check-circle'} me-2"></i>${isSuspend?'ระงับลูกค้า':'ยกเลิกระงับลูกค้า'}`;
+  document.getElementById('suspendCustName').textContent = c.name;
+  document.getElementById('suspendComment').value = '';
+  document.getElementById('suspendReasonRequired').style.display = isSuspend ? '' : 'none';
+
+  const confirmBtn = document.getElementById('suspendConfirmBtn');
+  confirmBtn.className = 'btn ' + (isSuspend ? 'btn-warning' : 'btn-success');
+  confirmBtn.textContent = isSuspend ? 'ระงับ' : 'ยกเลิกระงับ';
+
+  // Show log if exists
+  const log = c.suspensionLog || [];
+  if (log.length) {
+    document.getElementById('suspendLogContainer').style.display = '';
+    document.getElementById('suspendLogList').innerHTML = log
+      .slice().reverse()
+      .map(e => `<div class="d-flex gap-2 py-1 border-bottom">
+        <span class="badge ${e.action==='suspend'?'bg-warning text-dark':'bg-success'}" style="white-space:nowrap">${e.action==='suspend'?'ระงับ':'ยกเลิกระงับ'}</span>
+        <div>
+          <div class="text-muted">${e.at?e.at.slice(0,16).replace('T',' '):''} — <strong>${e.by||''}</strong></div>
+          ${e.reason ? `<div>${e.reason}</div>` : ''}
+        </div>
+      </div>`).join('');
+  } else {
+    document.getElementById('suspendLogContainer').style.display = 'none';
+  }
+
+  suspendModal.show();
+}
+
+function doSuspend() {
+  if (!_suspendCustId || !_suspendAction) return;
+  const comment = document.getElementById('suspendComment').value.trim();
+  if (_suspendAction === 'suspend' && !comment) {
+    document.getElementById('suspendComment').classList.add('is-invalid');
+    document.getElementById('suspendComment').focus();
+    return;
+  }
+  document.getElementById('suspendComment').classList.remove('is-invalid');
+
+  const c = DB.getCustomerById(_suspendCustId);
+  if (!c) return;
+
+  const now = new Date().toISOString();
+  const logEntry = {
+    action:  _suspendAction,
+    at:      now,
+    by:      session.username,
+    reason:  comment || ''
+  };
+  const log = [...(c.suspensionLog || []), logEntry];
+
+  const patch = {
+    suspended:    _suspendAction === 'suspend',
+    suspendedAt:  now,
+    suspendedBy:  session.username,
+    suspendReason: comment || '',
+    suspensionLog: log
+  };
+  DB.updateCustomer(_suspendCustId, patch);
+  DB.logActivity(session.userId, session.username,
+    _suspendAction === 'suspend' ? 'ระงับลูกค้า' : 'ยกเลิกระงับลูกค้า',
+    { customerName: c.name, reason: comment || '' });
+
+  suspendModal.hide();
+  const actionTh = _suspendAction === 'suspend' ? 'ระงับ' : 'ยกเลิกระงับ';
+  Utils.showAlert(`<i class="bi bi-check-circle me-1"></i>${actionTh}ลูกค้า "${c.name}" สำเร็จ`,
+    _suspendAction === 'suspend' ? 'warning' : 'success');
+  render();
 }
 
 // ── Inline map editing ───────────────────────────────────────────────────────

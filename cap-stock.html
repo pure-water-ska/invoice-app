@@ -154,6 +154,14 @@
               </div>
             </div>
             <div class="mb-3">
+              <label class="form-label fw-semibold">จำนวนขั้นต่ำ (ลัง)</label>
+              <div class="input-group">
+                <input type="number" id="colorMinQty" class="form-control" min="0" step="1" placeholder="0 = ไม่กำหนด">
+                <span class="input-group-text">ลัง</span>
+              </div>
+              <div class="form-text">ระบบจะเตือนเมื่อสต๊อกต่ำกว่าจำนวนนี้หลังบันทึกใบกำกับ</div>
+            </div>
+            <div class="mb-3">
               <label class="form-label fw-semibold">สินค้าที่ใช้ฝาสีนี้</label>
               <div class="text-muted small mb-1">เลือกสินค้าที่เป็นฝาขวด PET สีนี้ (เพื่อตัดสต๊อกอัตโนมัติ)</div>
               <div id="colorProductList" style="max-height:200px;overflow-y:auto;border:1px solid #dee2e6;border-radius:6px;padding:8px"></div>
@@ -170,7 +178,7 @@
           <div class="card-header bg-white fw-semibold py-2">รายการสีฝาทั้งหมด</div>
           <div class="table-responsive">
             <table class="table table-hover mb-0">
-              <thead><tr><th>สี</th><th>สินค้าที่ผูก</th><th class="text-end">สต๊อกปัจจุบัน</th><th></th></tr></thead>
+              <thead><tr><th>สี</th><th>สินค้าที่ผูก</th><th class="text-end">สต๊อก</th><th class="text-end">ขั้นต่ำ</th><th></th></tr></thead>
               <tbody id="colorListBody"></tbody>
             </table>
           </div>
@@ -263,9 +271,11 @@ function renderOverview() {
   const colors = DB.getCapColors();
   // Summary cards
   const cards = colors.map(c => {
-    const stock = DB.getCapCurrentStock(c.id);
-    const cls = stock <= 0 ? 'border-danger' : stock < 1000 ? 'border-warning' : '';
-    const textCls = stock <= 0 ? 'text-danger' : stock < 1000 ? 'text-warning' : 'text-success';
+    const stock  = DB.getCapCurrentStock(c.id);
+    const minQty = c.minQty || 0;
+    const belowMin = minQty > 0 && stock < minQty;
+    const cls = stock <= 0 ? 'border-danger' : belowMin ? 'border-warning' : stock < 1000 ? 'border-warning' : '';
+    const textCls = stock <= 0 ? 'text-danger' : belowMin ? 'text-warning' : stock < 1000 ? 'text-warning' : 'text-success';
     return `
     <div class="col-6 col-md-3">
       <div class="card text-center ${cls}">
@@ -273,6 +283,7 @@ function renderOverview() {
           <div style="font-size:28px;margin-bottom:4px">${colorDot(c.colorCode, 24)}${c.color}</div>
           <div class="fw-bold fs-4 ${textCls}">${Utils.formatNumber(stock)}</div>
           <div class="text-muted small">ลัง</div>
+          ${minQty > 0 ? `<div class="small ${belowMin?'text-danger fw-semibold':'text-muted'} mt-1">ขั้นต่ำ ${Utils.formatNumber(minQty)} ลัง${belowMin?' ⚠️':''}</div>` : ''}
           <button class="btn btn-sm btn-outline-info mt-2" onclick="showDedDetail('${c.id}','${c.color}')">
             <i class="bi bi-list-ul me-1"></i>ดูรายการตัดออก
           </button>
@@ -607,11 +618,14 @@ function renderColorList() {
   }
   tbody.innerHTML = colors.map(c => {
     const stock    = DB.getCapCurrentStock(c.id);
+    const minQty   = c.minQty || 0;
+    const belowMin = minQty > 0 && stock < minQty;
     const prodNames = (c.productIds || []).map(pid => products.find(p => p.id === pid)?.name || pid).join(', ') || '-';
-    return `<tr>
+    return `<tr${belowMin?' class="table-warning"':''}>
       <td>${colorDot(c.colorCode, 16)}<strong>${c.color}</strong></td>
       <td class="small text-muted">${prodNames}</td>
       <td class="text-end fw-semibold ${stock<=0?'text-danger':stock<1000?'text-warning':'text-success'}">${Utils.formatNumber(stock)}</td>
+      <td class="text-end small ${belowMin?'text-danger fw-bold':''}">${minQty>0?Utils.formatNumber(minQty):'<span class="text-muted">—</span>'}</td>
       <td class="text-center">
         <button class="btn btn-sm btn-outline-primary me-1" onclick="editColor('${c.id}')"><i class="bi bi-pencil"></i></button>
         <button class="btn btn-sm btn-outline-danger" onclick="deleteColor('${c.id}')"><i class="bi bi-trash"></i></button>
@@ -631,6 +645,7 @@ function editColor(id) {
   document.getElementById('colorName').value     = c.color;
   document.getElementById('colorCode').value     = c.colorCode || '#6c757d';
   document.getElementById('colorCodeText').value = c.colorCode || '#6c757d';
+  document.getElementById('colorMinQty').value   = c.minQty != null ? c.minQty : '';
   renderColorProductList();
   document.getElementById('colorName').focus();
 }
@@ -640,6 +655,7 @@ function clearColorForm() {
   document.getElementById('colorName').value     = '';
   document.getElementById('colorCode').value     = '#6c757d';
   document.getElementById('colorCodeText').value = '#6c757d';
+  document.getElementById('colorMinQty').value   = '';
   renderColorProductList();
 }
 
@@ -650,11 +666,13 @@ function saveColor() {
   if (!name) { Utils.showAlert('กรุณากรอกชื่อสี', 'warning', 'colorFormAlert'); return; }
 
   const productIds = [...document.querySelectorAll('#colorProductList input:checked')].map(el => el.value);
+  const minQtyVal  = document.getElementById('colorMinQty').value;
+  const minQty     = minQtyVal !== '' ? parseFloat(minQtyVal) : 0;
 
   if (id) {
-    DB.updateCapColor(id, { color: name, colorCode, productIds });
+    DB.updateCapColor(id, { color: name, colorCode, productIds, minQty });
   } else {
-    DB.addCapColor({ id: Utils.uuid(), color: name, colorCode, productIds, createdAt: new Date().toISOString() });
+    DB.addCapColor({ id: Utils.uuid(), color: name, colorCode, productIds, minQty, createdAt: new Date().toISOString() });
   }
   DB.logActivity(session.userId, session.username, id ? 'แก้ไขสีฝาขวด' : 'เพิ่มสีฝาขวด', { color: name });
   Utils.showAlert(`บันทึกสี "${name}" สำเร็จ`, 'success', 'colorFormAlert');

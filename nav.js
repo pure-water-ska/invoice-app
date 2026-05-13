@@ -7,6 +7,48 @@
   }
 })();
 
+// ── PWA Install prompt capture ────────────────────────────────────────────────
+(function() {
+  var _pwaPrompt = null;
+
+  window.addEventListener('beforeinstallprompt', function(e) {
+    e.preventDefault();
+    _pwaPrompt = e;
+    _showPwaBtn();
+  });
+
+  window.addEventListener('appinstalled', function() {
+    _pwaPrompt = null;
+    _hidePwaBtn();
+  });
+
+  function _showPwaBtn() {
+    // May be called before Nav.render() — retry if button container not yet ready
+    function tryShow() {
+      var btn = document.getElementById('pwaInstallBtn');
+      if (!btn) { setTimeout(tryShow, 400); return; }
+      btn.style.display = '';
+    }
+    tryShow();
+  }
+
+  function _hidePwaBtn() {
+    var btn = document.getElementById('pwaInstallBtn');
+    if (btn) btn.style.display = 'none';
+  }
+
+  window._pwaInstall = function() {
+    if (!_pwaPrompt) return;
+    _pwaPrompt.prompt();
+    _pwaPrompt.userChoice.then(function(result) {
+      if (result.outcome === 'accepted') {
+        _pwaPrompt = null;
+        _hidePwaBtn();
+      }
+    });
+  };
+})();
+
 // ── Service Worker Registration & Update Banner ──────────────────────────────
 (function() {
   if (!('serviceWorker' in navigator)) return;
@@ -311,6 +353,11 @@ const Nav = {
         <li class="nav-item me-1" id="driveBadgeItem" style="display:none">
           <span id="driveBadge" class="badge bg-secondary ms-1 py-1 px-2" style="font-size:10px;cursor:pointer"
                 onclick="location.href='settings.html'" title="Google Drive — คลิกเพื่อตั้งค่า">☁ Drive</span>
+        </li>
+        <li class="nav-item me-1" id="pwaInstallBtn" style="display:none">
+          <button class="btn btn-sm btn-outline-light px-2 py-1" onclick="window._pwaInstall && _pwaInstall()" title="ติดตั้งแอปบนเครื่อง">
+            <i class="bi bi-download me-1"></i>ติดตั้งแอป
+          </button>
         </li>
         <li class="nav-item me-1">
           <button class="btn btn-link nav-link px-2 py-1" onclick="Nav.toggleDark()" title="สลับ Dark / Light Mode" style="font-size:1.1rem">

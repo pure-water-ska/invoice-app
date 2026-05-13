@@ -994,6 +994,15 @@ async function saveInvoice(shouldPrint = false) {
   });
   if (activeItems.length === 0) { Utils.showAlert('กรุณากรอกรายการสินค้าอย่างน้อย 1 รายการ', 'warning'); return; }
 
+  // Check cap stock minimum quantity
+  const capWarnings = checkCapMinQty(activeItems);
+  if (capWarnings.length) {
+    const lines = capWarnings.map(w =>
+      `• ${w.color}: สต๊อก ${Utils.formatNumber(w.currentStock)} → ${Utils.formatNumber(w.afterStock)} ลัง (ขั้นต่ำ ${Utils.formatNumber(w.minQty)} ลัง)`
+    ).join('\n');
+    if (!confirm(`⚠️ สต๊อกฝาขวดต่ำกว่าขั้นต่ำที่กำหนด!\n\n${lines}\n\nยืนยันบันทึกใบกำกับต่อไปหรือไม่?`)) return;
+  }
+
   const totalAmount = activeItems.reduce((s, item) => s + calcTotal(item), 0);
   const invNumber = DB.generateInvoiceNumber();
   const createdAt = dateVal ? new Date(dateVal).toISOString() : new Date().toISOString();
@@ -1056,6 +1065,30 @@ async function saveInvoice(shouldPrint = false) {
   if (shouldPrint) { try { sessionStorage.setItem('autoPrint', invNumber); } catch(e) {} }
 
   setTimeout(() => { location.href = 'invoice-create.html?view=' + invNumber; }, 1500);
+}
+
+// ── CAP STOCK MIN-QTY CHECK (called before saving) ──────────────────────────
+// Returns array of { color, currentStock, afterStock, minQty } for colors that
+// would drop below their minimum after this invoice's deduction.
+function checkCapMinQty(items) {
+  const colors = DB.getCapColors();
+  const warnings = [];
+  colors.forEach(color => {
+    if (!color.minQty || color.minQty <= 0) return;
+    if (!color.productIds || !color.productIds.length) return;
+    let deductQty = 0;
+    items.forEach(item => {
+      if (color.productIds.includes(item.productId))
+        deductQty += parseFloat(item.qty) || 0;
+    });
+    if (deductQty <= 0) return;
+    const currentStock = DB.getCapCurrentStock(color.id);
+    const afterStock   = currentStock - deductQty;
+    if (afterStock < color.minQty) {
+      warnings.push({ color: color.color, colorCode: color.colorCode, currentStock, afterStock, minQty: color.minQty, deductQty });
+    }
+  });
+  return warnings;
 }
 
 // ── CAP STOCK AUTO-DEDUCTION ─────────────────────────────────────────────────
@@ -1147,6 +1180,15 @@ async function saveInvoiceEdit(shouldPrint = false) {
     return qty !== 0 || rem !== 0;
   });
   if (!activeItems.length) { Utils.showAlert('กรุณากรอกรายการสินค้าอย่างน้อย 1 รายการ', 'warning'); return; }
+
+  // Check cap stock minimum quantity (re-deduction: current stock already excludes old deduction)
+  const capWarningsEdit = checkCapMinQty(activeItems);
+  if (capWarningsEdit.length) {
+    const lines = capWarningsEdit.map(w =>
+      `• ${w.color}: สต๊อก ${Utils.formatNumber(w.currentStock)} → ${Utils.formatNumber(w.afterStock)} ลัง (ขั้นต่ำ ${Utils.formatNumber(w.minQty)} ลัง)`
+    ).join('\n');
+    if (!confirm(`⚠️ สต๊อกฝาขวดต่ำกว่าขั้นต่ำที่กำหนด!\n\n${lines}\n\nยืนยันบันทึกการแก้ไขต่อไปหรือไม่?`)) return;
+  }
 
   const existingPages = DB.getInvoices().filter(i => i.invoiceNumber === currentInvNum);
   const meta          = existingPages[0] || {};
