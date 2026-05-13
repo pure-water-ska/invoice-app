@@ -144,7 +144,7 @@ mark { background:#fff3cd; padding:0 2px; border-radius:2px; }
           </div>
 
           <div class="col-md-6">
-            <label class="form-label fw-semibold">ชื่อสี</label>
+            <label class="form-label fw-semibold">ชื่อสี <span class="text-danger">*</span></label>
             <input type="text" id="vColorName" class="form-control" list="vColorNameDatalist"
                    placeholder="เช่น สีแดง, สีน้ำเงิน..." autocomplete="off">
             <datalist id="vColorNameDatalist">
@@ -386,10 +386,12 @@ function saveVersion() {
   const brand  = document.getElementById('vBrand').value.trim();
   const size   = document.getElementById('vSize').value.trim();
   const date   = document.getElementById('vDate').value;
-  if (!custId) { Utils.showAlert('กรุณาเลือกลูกค้า',   'warning','modalAlert'); return; }
-  if (!brand)  { Utils.showAlert('กรุณาระบุยี่ห้อ',    'warning','modalAlert'); return; }
-  if (!size)   { Utils.showAlert('กรุณาระบุขนาด/สินค้า','warning','modalAlert'); return; }
-  if (!date)   { Utils.showAlert('กรุณาระบุวันที่',     'warning','modalAlert'); return; }
+  const colorName = document.getElementById('vColorName').value.trim();
+  if (!custId)    { Utils.showAlert('กรุณาเลือกลูกค้า',    'warning','modalAlert'); return; }
+  if (!brand)     { Utils.showAlert('กรุณาระบุยี่ห้อ',     'warning','modalAlert'); return; }
+  if (!size)      { Utils.showAlert('กรุณาระบุขนาด/สินค้า','warning','modalAlert'); return; }
+  if (!colorName) { Utils.showAlert('กรุณาระบุชื่อสี',     'warning','modalAlert'); return; }
+  if (!date)      { Utils.showAlert('กรุณาระบุวันที่',      'warning','modalAlert'); return; }
 
   const id   = document.getElementById('verId').value;
   const cust = DB.getCustomerById(custId);
@@ -398,7 +400,7 @@ function saveVersion() {
     brand,
     size,
     date,
-    colorName: document.getElementById('vColorName').value.trim(),
+    colorName,
     note:      document.getElementById('vNote').value.trim(),
     image: verImageB64,
     createdBy: session.name,
