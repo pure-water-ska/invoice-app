@@ -174,7 +174,7 @@
             <label class="form-label fw-semibold">บัญชีผู้รับโอน</label>
             <div class="d-flex gap-1">
               <select id="payTransferAccountSelect" class="form-select" onchange="onTransferAccountChange()">
-                <option value="">— เลือกบัญชี หรือกรอกเอง —</option>
+                <option value="">— เลือกบัญชี —</option>
               </select>
               <button class="btn btn-outline-secondary btn-sm px-2" onclick="openTransferAccountManager()" title="จัดการบัญชีผู้รับโอน">
                 <i class="bi bi-list-ul"></i>
@@ -185,18 +185,14 @@
             <label class="form-label fw-semibold">ธนาคารต้นทาง</label>
             <input type="text" id="paySourceBank" class="form-control" list="bankDatalist" placeholder="พิมพ์ชื่อธนาคาร..." autocomplete="off">
           </div>
-          <div class="col-md-6 pay-transfer" style="display:none">
-            <label class="form-label fw-semibold">ธนาคารปลายทาง</label>
-            <input type="text" id="payDestBank" class="form-control" list="bankDatalist" placeholder="พิมพ์ชื่อธนาคาร..." autocomplete="off">
-          </div>
-          <div class="col-md-6 pay-transfer" style="display:none">
-            <label class="form-label fw-semibold">ชื่อบัญชีผู้รับโอน</label>
-            <input type="text" id="payAccountName" class="form-control" placeholder="ชื่อบัญชี">
-          </div>
+          <!-- payDestBank / payAccountName hidden — auto-filled by account select -->
+          <input type="hidden" id="payDestBank">
+          <input type="hidden" id="payAccountName">
           <div class="col-md-6 pay-transfer" style="display:none">
             <label class="form-label fw-semibold">วันและเวลาที่โอน</label>
             <input type="datetime-local" id="payTransferDate" class="form-control">
           </div>
+          <div class="col-md-6 pay-transfer" style="display:none"></div>
           <div class="col-12 pay-transfer" style="display:none">
             <label class="form-label fw-semibold"><i class="bi bi-image me-1 text-primary"></i>รูปสลิปโอนเงิน</label>
             <input type="file" id="payTransferImage" class="form-control" accept="image/*" onchange="loadPayImage(this,'transferImagePreview')">
@@ -205,18 +201,28 @@
 
           <!-- เช็ค -->
           <div class="col-md-6 pay-cheque" style="display:none">
+            <label class="form-label fw-semibold">บัญชีผู้รับเงิน (เช็ค)</label>
+            <div class="d-flex gap-1">
+              <select id="payChequeAccountSelect" class="form-select" onchange="onChequeAccountChange()">
+                <option value="">— เลือกบัญชี —</option>
+              </select>
+              <button class="btn btn-outline-secondary btn-sm px-2" onclick="openTransferAccountManager()" title="จัดการบัญชีผู้รับเงิน">
+                <i class="bi bi-list-ul"></i>
+              </button>
+            </div>
+          </div>
+          <div class="col-md-6 pay-cheque" style="display:none">
             <label class="form-label fw-semibold">เลขที่เช็ค</label>
             <input type="text" id="payChequeNo" class="form-control" placeholder="หมายเลขเช็ค">
           </div>
           <div class="col-md-6 pay-cheque" style="display:none">
-            <label class="form-label fw-semibold">ธนาคาร (เช็ค)</label>
+            <label class="form-label fw-semibold">ธนาคารต้นทาง (ออกเช็ค)</label>
             <input type="text" id="payChequeBank" class="form-control" list="bankDatalist" placeholder="พิมพ์ชื่อธนาคาร..." autocomplete="off">
           </div>
           <div class="col-md-6 pay-cheque" style="display:none">
             <label class="form-label fw-semibold">วันที่บนเช็ค</label>
             <input type="date" id="payChequeDate" class="form-control">
           </div>
-          <div class="col-md-6 pay-cheque" style="display:none"></div>
           <div class="col-12 pay-cheque" style="display:none">
             <label class="form-label fw-semibold"><i class="bi bi-image me-1 text-primary"></i>รูปเช็ค</label>
             <input type="file" id="payChequeImage" class="form-control" accept="image/*" onchange="loadPayImage(this,'chequeImagePreview')">
@@ -320,7 +326,7 @@
 </div>
 
 <!-- Method Manager Modal -->
-<div class="modal fade" id="methodModal" tabindex="-1">
+<div class="modal fade" id="methodModal" tabindex="-1" data-bs-backdrop="false">
   <div class="modal-dialog modal-sm">
     <div class="modal-content">
       <div class="modal-header py-2">
@@ -340,7 +346,7 @@
 </div>
 
 <!-- Transfer Account Manager Modal -->
-<div class="modal fade" id="transferAccountModal" tabindex="-1">
+<div class="modal fade" id="transferAccountModal" tabindex="-1" data-bs-backdrop="false">
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header py-2">
@@ -457,8 +463,9 @@ let _imgUpdateB64 = '';           // holds resized image for imgUpdateModal
 window.addEventListener('DOMContentLoaded', () => {
   payModal              = new bootstrap.Modal(document.getElementById('payModal'));
   overpayModal          = new bootstrap.Modal(document.getElementById('overpayModal'));
-  methodModal           = new bootstrap.Modal(document.getElementById('methodModal'));
-  transferAccountModal  = new bootstrap.Modal(document.getElementById('transferAccountModal'));
+  // backdrop:false lets these sub-modals open on top of payModal without conflict
+  methodModal           = new bootstrap.Modal(document.getElementById('methodModal'),          { backdrop: false });
+  transferAccountModal  = new bootstrap.Modal(document.getElementById('transferAccountModal'), { backdrop: false });
   cancelPayModal        = new bootstrap.Modal(document.getElementById('cancelPayModal'));
   dateConfirmModal      = new bootstrap.Modal(document.getElementById('dateConfirmModal'));
   imgUpdateModal        = new bootstrap.Modal(document.getElementById('imgUpdateModal'));
@@ -662,28 +669,44 @@ function deleteMethod(name) {
 function buildCashCollectorSelect() {
   const users = DB.getUsers().filter(u => u.active !== false);
   const sel = document.getElementById('payCashCollector');
+  const prev = sel.value; // preserve current selection if rebuilding
   sel.innerHTML = '<option value="">— เลือกผู้รับเงิน —</option>' +
     users.map(u => `<option value="${u.name}">${u.name}</option>`).join('');
-  if (session && session.name) sel.value = session.name;
+  // Restore previous selection; if none yet, pre-select current user
+  if (prev) sel.value = prev;
+  else if (session && session.name && users.some(u => u.name === session.name))
+    sel.value = session.name;
 }
 
 // ── Transfer account manager ───────────────────────────────────────────────────
-function buildTransferAccountSelect() {
-  const accounts = DB.getTransferAccounts();
-  const sel = document.getElementById('payTransferAccountSelect');
-  sel.innerHTML = '<option value="">— เลือกบัญชี หรือกรอกเอง —</option>' +
+function _accountOptions(accounts) {
+  return '<option value="">— เลือกบัญชี —</option>' +
     accounts.map((a, i) =>
-      `<option value="${i}">${a.name} · ${a.bank}${a.accountNo ? ' · ' + a.accountNo : ''}</option>`
+      `<option value="${i}">${a.name}${a.bank ? ' · ' + a.bank : ''}${a.accountNo ? ' · ' + a.accountNo : ''}</option>`
     ).join('');
 }
 
-function onTransferAccountChange() {
+function buildTransferAccountSelect() {
   const accounts = DB.getTransferAccounts();
-  const i = parseInt(document.getElementById('payTransferAccountSelect').value);
-  if (isNaN(i) || !accounts[i]) return;
-  const a = accounts[i];
-  document.getElementById('payDestBank').value    = a.bank       || '';
-  document.getElementById('payAccountName').value = a.name       || '';
+  const opts = _accountOptions(accounts);
+  document.getElementById('payTransferAccountSelect').innerHTML = opts;
+  document.getElementById('payChequeAccountSelect').innerHTML   = opts;
+}
+
+function _fillAccountFields(idx) {
+  const accounts = DB.getTransferAccounts();
+  const i = parseInt(idx);
+  const a = (!isNaN(i) && accounts[i]) ? accounts[i] : null;
+  document.getElementById('payDestBank').value    = a ? (a.bank  || '') : '';
+  document.getElementById('payAccountName').value = a ? (a.name  || '') : '';
+}
+
+function onTransferAccountChange() {
+  _fillAccountFields(document.getElementById('payTransferAccountSelect').value);
+}
+
+function onChequeAccountChange() {
+  _fillAccountFields(document.getElementById('payChequeAccountSelect').value);
 }
 
 function openTransferAccountManager() {
@@ -738,7 +761,12 @@ function onMethodChange() {
   document.querySelectorAll('.pay-transfer').forEach(el => el.style.display = isTransfer ? '' : 'none');
   document.querySelectorAll('.pay-cheque').forEach(el   => el.style.display = isCheque   ? '' : 'none');
   if (isCash) buildCashCollectorSelect();
-  if (isTransfer) buildTransferAccountSelect();
+  if (isTransfer || isCheque) buildTransferAccountSelect();
+  // Reset account-linked hidden fields when switching methods
+  if (!isTransfer && !isCheque) {
+    document.getElementById('payDestBank').value    = '';
+    document.getElementById('payAccountName').value = '';
+  }
 }
 
 // ── Image loading ─────────────────────────────────────────────────────────────
@@ -1138,6 +1166,7 @@ function addPaymentEntry() {
   document.getElementById('payNote').value                  = '';
   document.getElementById('payCashCollector').value         = '';
   document.getElementById('payTransferAccountSelect').value = '';
+  document.getElementById('payChequeAccountSelect').value   = '';
   document.getElementById('paySourceBank').value            = '';
   document.getElementById('payDestBank').value              = '';
   document.getElementById('payAccountName').value           = '';
