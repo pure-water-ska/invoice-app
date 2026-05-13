@@ -143,7 +143,19 @@ mark { background:#fff3cd; padding:0 2px; border-radius:2px; }
             <datalist id="vSizeDatalist"></datalist>
           </div>
 
-          <div class="col-12">
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">สีฉลาก</label>
+            <div class="input-group">
+              <input type="color" id="vColor" class="form-control form-control-color" value="#0d6efd" style="width:48px" oninput="document.getElementById('vColorText').value=this.value">
+              <input type="text" id="vColorText" class="form-control" value="#0d6efd" placeholder="#0d6efd"
+                     oninput="syncVerColor(this.value)">
+              <button class="btn btn-outline-secondary" type="button" onclick="resetVerColor()" title="รีเซ็ตสี">
+                <i class="bi bi-arrow-counterclockwise"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="col-md-6">
             <label class="form-label fw-semibold">วันที่ <span class="text-danger">*</span></label>
             <input type="date" id="vDate" class="form-control">
           </div>
@@ -264,15 +276,16 @@ function render() {
       <div class="tl-wrap">`;
 
     items.forEach(v => {
-      const cust   = customers.find(c => c.id === v.customerId);
-      const brand  = v.brand || (v.brands||[])[0] || '';
-      const size   = v.size  || (v.sizes||[])[0]  || '';
-      const dateTH = v.date ? Utils.formatDateTH(v.date) : '-';
+      const cust      = customers.find(c => c.id === v.customerId);
+      const brand     = v.brand || (v.brands||[])[0] || '';
+      const size      = v.size  || (v.sizes||[])[0]  || '';
+      const dateTH    = v.date ? Utils.formatDateTH(v.date) : '-';
+      const labelColor = v.color || dotColor;
 
       html += `
         <div class="tl-item">
-          <span class="tl-dot" style="color:${dotColor};background:${dotColor}"></span>
-          <div class="tl-card">
+          <span class="tl-dot" style="color:${labelColor};background:${labelColor}"></span>
+          <div class="tl-card" style="border-left:4px solid ${labelColor}">
             <div class="d-flex justify-content-between align-items-start gap-2">
               <div class="flex-grow-1">
                 ${groupBy !== 'customer'
@@ -280,7 +293,7 @@ function render() {
                        <i class="bi bi-person me-1 text-muted"></i>${hl(cust?.name||'-',q)}
                      </div>` : ''}
                 <div class="d-flex flex-wrap gap-2 align-items-center mb-1">
-                  ${brand ? `<span class="tl-brand">${hl(brand,q)}</span>` : ''}
+                  ${brand ? `<span class="tl-brand" style="background:${labelColor}22;color:${labelColor};border-color:${labelColor}66">${hl(brand,q)}</span>` : ''}
                   ${size  ? `<span class="tl-size"><i class="bi bi-box me-1"></i>${hl(size,q)}</span>` : ''}
                 </div>
                 ${v.note ? `<div class="tl-note"><i class="bi bi-chat-left-text me-1 opacity-50"></i>${hl(v.note,q)}</div>` : ''}
@@ -325,6 +338,7 @@ function openModal(id) {
   document.getElementById('vImage').value = '';
   document.getElementById('vImagePreview').innerHTML = '';
   verImageB64 = '';
+  _setVerColor('#0d6efd');
 
   if (id) {
     const v = DB.getVersions().find(x => x.id === id);
@@ -334,6 +348,7 @@ function openModal(id) {
       document.getElementById('vBrand').value = v.brand || (v.brands||[])[0] || '';
       document.getElementById('vSize').value  = v.size  || (v.sizes||[])[0]  || '';
       document.getElementById('vNote').value  = v.note  || '';
+      _setVerColor(v.color || '#0d6efd');
       if (v.image) {
         verImageB64 = v.image;
         document.getElementById('vImagePreview').innerHTML = imgPreviewHtml(v.image);
@@ -380,6 +395,7 @@ function saveVersion() {
     brand,
     size,
     date,
+    color: document.getElementById('vColorText').value.trim() || document.getElementById('vColor').value || '#0d6efd',
     note:  document.getElementById('vNote').value.trim(),
     image: verImageB64,
     createdBy: session.name,
@@ -473,6 +489,16 @@ function strColor(str) {
   for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) & 0xfffff;
   return p[h % p.length];
 }
+
+// ── Label color helpers ────────────────────────────────────────────────────────
+function _setVerColor(hex) {
+  document.getElementById('vColor').value     = hex;
+  document.getElementById('vColorText').value = hex;
+}
+function syncVerColor(val) {
+  if (/^#[0-9a-fA-F]{6}$/.test(val)) document.getElementById('vColor').value = val;
+}
+function resetVerColor() { _setVerColor('#0d6efd'); }
 </script>
 </body>
 </html>

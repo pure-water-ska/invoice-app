@@ -34,7 +34,13 @@
       "Bash(git commit -m 'fix\\(drive\\): commit drive-config.js so GitHub Pages can load GOOGLE_CLIENT_ID *)",
       "Bash(git commit -m 'feat\\(payments\\): multi-payment entry + cheque date field *)",
       "Bash(git commit -m 'fix\\(sync\\): fix collections never syncing to Firestore *)",
-      "Bash(git commit -m 'fix\\(sync\\): show badge from nav.js before sync.js loads *)"
+      "Bash(git commit -m 'fix\\(sync\\): show badge from nav.js before sync.js loads *)",
+      "Bash(sed -n '1,20p' drive-store.js)",
+      "Bash(sed -n '425,440p' drive-store.js)",
+      "Bash(node -c sync.js)",
+      "Bash(node -c drive-store.js)",
+      "Bash(node -c drive-config.js)",
+      "Bash(node -c nav.js)"
     ]
   }
 }
