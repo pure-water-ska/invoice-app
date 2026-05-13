@@ -66,6 +66,14 @@
 
   if (Auth.session()) window.location.href = 'dashboard.html';
 
+  // Restore username from last session, but NEVER pre-fill password
+  const savedUser = localStorage.getItem('wt_last_user');
+  if (savedUser) document.getElementById('username').value = savedUser;
+
+  // Clear password immediately and after a short delay (overrides browser autofill which fires late)
+  document.getElementById('password').value = '';
+  setTimeout(() => { document.getElementById('password').value = ''; }, 300);
+
   document.getElementById('togglePw').addEventListener('click', () => {
     const pw = document.getElementById('password');
     const eye = document.getElementById('eyeIcon');
@@ -80,6 +88,7 @@
     if (!u || !p) { Utils.showAlert('กรุณากรอกชื่อผู้ใช้และรหัสผ่าน', 'warning'); return; }
     const result = Auth.login(u, p);
     if (result.ok) {
+      localStorage.setItem('wt_last_user', u);           // remember username only
       sessionStorage.removeItem('connModalDone'); // reset so modal shows on each login
       sessionStorage.setItem('justLoggedIn', '1');
       window.location.href = 'dashboard.html';

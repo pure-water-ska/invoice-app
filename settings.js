@@ -734,13 +734,79 @@ async function importZip(input, mode) {
 }
 
 /* ─── Danger Zone ───────────────────────────────────────────────────────── */
-function clearAllData() {
+async function clearAllData() {
   if (!confirm('⚠️ ล้างข้อมูลทั้งหมด?\nการกระทำนี้ไม่สามารถกู้คืนได้!')) return;
   if (!confirm('ยืนยันอีกครั้ง — ลบข้อมูลทุกอย่างจริงหรือไม่?')) return;
+
+  // Disable button to prevent double-click or navigation during async ops
+  const btn = document.querySelector('[onclick="clearAllData()"]');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลังล้าง...'; }
+
   const cfg = DB.getSettings();
+  const dataKeys = Object.values(DB.K).filter(k => k !== DB.K.SETTINGS && k !== DB.K.COUNTER);
+
+  // Cancel any queued Drive uploads so old data isn't re-uploaded after clear
+  if (window.DriveDbSync && DriveDbSync._queue) {
+    Object.keys(DriveDbSync._queue).forEach(k => clearTimeout(DriveDbSync._queue[k]));
+    DriveDbSync._queue = {};
+  }
+
+  // Stop all Firestore real-time listeners — prevents them from pushing data back
+  // after we clear Firestore (listeners would otherwise fire and "undo" the clear)
+  if (window.Sync && Array.isArray(Sync._unsubscribers)) {
+    Sync._unsubscribers.forEach(fn => { try { fn(); } catch {} });
+    Sync._unsubscribers = [];
+  }
+
+  // Clear Firestore data BEFORE clearing localStorage.
+  // This is critical: Sync._pullAll() runs on every page load and would re-download
+  // everything from Firestore if we only cleared localStorage.
+  if (window.Sync && Sync.ready && Sync._db) {
+    try {
+      Utils.showAlert('กำลังล้างข้อมูลใน Firestore... โปรดรอ', 'info');
+      const base = Sync._orgRef();
+
+      // Clear document keys (customers, products, versions, etc.) → set to empty array
+      const docClears = Object.entries(Sync.DOCUMENTS)
+        .filter(([lsKey]) => dataKeys.includes(lsKey))
+        .map(([, docName]) =>
+          base.collection('data').doc(docName)
+            .set({ d: [], ts: firebase.firestore.FieldValue.serverTimestamp(), by: 'clear' })
+            .catch(() => {})
+        );
+
+      // Delete every record in collection keys (invoices, payments)
+      const colClears = Object.entries(Sync.COLLECTIONS)
+        .map(async ([, colName]) => {
+          const snap = await base.collection(colName).get({ source: 'server' }).catch(() => null);
+          if (!snap || snap.empty) return;
+          let batch = Sync._db.batch(), ops = 0;
+          for (const d of snap.docs) {
+            batch.delete(d.ref);
+            if (++ops >= 490) { await batch.commit(); batch = Sync._db.batch(); ops = 0; }
+          }
+          if (ops > 0) await batch.commit();
+        });
+
+      await Promise.all([...docClears, ...colClears]);
+    } catch (e) {
+      console.warn('[clearAllData] Firestore clear error:', e);
+    }
+
+    // Clear the offline sync queue so stale writes don't replay on next load
+    localStorage.removeItem(Sync._pendingLsKey);
+  }
+
+  // Clear all data keys from localStorage
   Object.values(DB.K).forEach(k => localStorage.removeItem(k));
+
+  // Clear Drive DB sync meta — prevents _restoreStaleKeys() from re-downloading deleted data
+  localStorage.removeItem('wt_drive_db_meta');
+
   DB.saveSettings(cfg);
   DB.init();
+
+  if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-trash me-1"></i>ล้างทั้งหมด'; }
   Utils.showAlert('ล้างข้อมูลทั้งหมดแล้ว (ยกเว้นตั้งค่าบริษัทและ admin)', 'warning');
   loadStats();
   renderStorageBar();

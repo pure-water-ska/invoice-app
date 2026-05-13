@@ -162,20 +162,25 @@
             </div>
           </div>
 
-          <!-- ผู้รับเงิน (เงินสดเท่านั้น) -->
+          <!-- ผู้รับเงิน (เงินสดเท่านั้น — เลือกจากรายชื่อผู้ใช้เท่านั้น) -->
           <div class="col-md-6 pay-cash" style="display:none">
-            <label class="form-label fw-semibold">ผู้รับเงิน</label>
-            <div class="d-flex gap-1">
-              <input type="text" id="payCashCollector" class="form-control"
-                     list="receiverDatalist" placeholder="ชื่อผู้รับเงิน" autocomplete="off">
-              <button class="btn btn-outline-secondary btn-sm px-2" onclick="openReceiverManager()" title="จัดการรายชื่อผู้รับเงิน">
-                <i class="bi bi-list-ul"></i>
-              </button>
-            </div>
-            <datalist id="receiverDatalist"></datalist>
+            <label class="form-label fw-semibold">ผู้รับเงิน <span class="text-danger">*</span></label>
+            <select id="payCashCollector" class="form-select"></select>
+            <div class="form-text text-muted">เลือกพนักงานที่รับเงินสด</div>
           </div>
 
           <!-- โอน -->
+          <div class="col-md-6 pay-transfer" style="display:none">
+            <label class="form-label fw-semibold">บัญชีผู้รับโอน</label>
+            <div class="d-flex gap-1">
+              <select id="payTransferAccountSelect" class="form-select" onchange="onTransferAccountChange()">
+                <option value="">— เลือกบัญชี หรือกรอกเอง —</option>
+              </select>
+              <button class="btn btn-outline-secondary btn-sm px-2" onclick="openTransferAccountManager()" title="จัดการบัญชีผู้รับโอน">
+                <i class="bi bi-list-ul"></i>
+              </button>
+            </div>
+          </div>
           <div class="col-md-6 pay-transfer" style="display:none">
             <label class="form-label fw-semibold">ธนาคารต้นทาง</label>
             <input type="text" id="paySourceBank" class="form-control" list="bankDatalist" placeholder="พิมพ์ชื่อธนาคาร..." autocomplete="off">
@@ -334,20 +339,33 @@
   </div>
 </div>
 
-<!-- Receiver Manager Modal -->
-<div class="modal fade" id="receiverModal" tabindex="-1">
-  <div class="modal-dialog modal-sm">
+<!-- Transfer Account Manager Modal -->
+<div class="modal fade" id="transferAccountModal" tabindex="-1">
+  <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header py-2">
-        <h6 class="modal-title fw-bold"><i class="bi bi-person-lines-fill me-1"></i>รายชื่อผู้รับเงิน</h6>
+        <h6 class="modal-title fw-bold"><i class="bi bi-bank me-1"></i>บัญชีผู้รับโอน</h6>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
-      <div class="modal-body p-2">
-        <ul class="list-group list-group-flush mb-2" id="receiverList"></ul>
-        <div class="input-group input-group-sm">
-          <input type="text" id="newReceiverInput" class="form-control" placeholder="เพิ่มชื่อผู้รับเงิน..."
-                 onkeydown="if(event.key==='Enter')confirmAddReceiver()">
-          <button class="btn btn-primary" onclick="confirmAddReceiver()"><i class="bi bi-plus-lg"></i></button>
+      <div class="modal-body p-3">
+        <ul class="list-group list-group-flush mb-3" id="transferAccountList"></ul>
+        <hr class="my-2">
+        <div class="fw-semibold small mb-2 text-muted">เพิ่มบัญชีใหม่</div>
+        <div class="row g-2">
+          <div class="col-12">
+            <input type="text" id="newAcctName" class="form-control form-control-sm" placeholder="ชื่อบัญชี (เช่น บริษัท ABC)">
+          </div>
+          <div class="col-6">
+            <input type="text" id="newAcctBank" class="form-control form-control-sm" list="bankDatalist" placeholder="ธนาคาร" autocomplete="off">
+          </div>
+          <div class="col-6">
+            <input type="text" id="newAcctNo" class="form-control form-control-sm" placeholder="เลขบัญชี">
+          </div>
+          <div class="col-12">
+            <button class="btn btn-primary btn-sm w-100" onclick="confirmAddTransferAccount()">
+              <i class="bi bi-plus-lg me-1"></i>เพิ่มบัญชี
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -429,7 +447,7 @@ const session = Auth.require();
 DB.init();
 Nav.render('payments');
 
-let payModal, overpayModal, methodModal, receiverModal, cancelPayModal, dateConfirmModal, imgUpdateModal;
+let payModal, overpayModal, methodModal, transferAccountModal, cancelPayModal, dateConfirmModal, imgUpdateModal;
 let pendingOverpayData = null;
 let payImages = { transfer: '', cheque: '', signed: '' };
 let _pendingPaymentData = null;   // holds data (array) while waiting for date confirmation
@@ -437,16 +455,15 @@ let _pendingPayments    = [];     // staging list for multi-payment entry
 let _imgUpdateB64 = '';           // holds resized image for imgUpdateModal
 
 window.addEventListener('DOMContentLoaded', () => {
-  payModal        = new bootstrap.Modal(document.getElementById('payModal'));
-  overpayModal    = new bootstrap.Modal(document.getElementById('overpayModal'));
-  methodModal     = new bootstrap.Modal(document.getElementById('methodModal'));
-  receiverModal   = new bootstrap.Modal(document.getElementById('receiverModal'));
-  cancelPayModal  = new bootstrap.Modal(document.getElementById('cancelPayModal'));
-  dateConfirmModal = new bootstrap.Modal(document.getElementById('dateConfirmModal'));
-  imgUpdateModal  = new bootstrap.Modal(document.getElementById('imgUpdateModal'));
+  payModal              = new bootstrap.Modal(document.getElementById('payModal'));
+  overpayModal          = new bootstrap.Modal(document.getElementById('overpayModal'));
+  methodModal           = new bootstrap.Modal(document.getElementById('methodModal'));
+  transferAccountModal  = new bootstrap.Modal(document.getElementById('transferAccountModal'));
+  cancelPayModal        = new bootstrap.Modal(document.getElementById('cancelPayModal'));
+  dateConfirmModal      = new bootstrap.Modal(document.getElementById('dateConfirmModal'));
+  imgUpdateModal        = new bootstrap.Modal(document.getElementById('imgUpdateModal'));
 
   document.getElementById('bankDatalist').innerHTML = Utils.bankDatalistOptions();
-  loadReceiverDatalist();
 
   DB.getCustomers().sort((a,b) => a.name.localeCompare(b.name,'th')).forEach(c => {
     document.getElementById('custNameDatalist').innerHTML +=
@@ -561,6 +578,8 @@ function openPayModal(invNum, custId) {
     document.getElementById(id).value = '');
 
   buildMethodSelect();
+  buildCashCollectorSelect();
+  buildTransferAccountSelect();
   onMethodChange();
 
   const inv   = DB.getInvoices().find(i => i.invoiceNumber === invNum);
@@ -639,57 +658,87 @@ function deleteMethod(name) {
   buildMethodSelect();
 }
 
-// ── Receiver manager ──────────────────────────────────────────────────────────
-function loadReceiverDatalist() {
-  const names = DB.getReceivers();
-  document.getElementById('receiverDatalist').innerHTML =
-    names.map(n => `<option value="${n}">`).join('');
+// ── Cash collector select — populated from active users ───────────────────────
+function buildCashCollectorSelect() {
+  const users = DB.getUsers().filter(u => u.active !== false);
+  const sel = document.getElementById('payCashCollector');
+  sel.innerHTML = '<option value="">— เลือกผู้รับเงิน —</option>' +
+    users.map(u => `<option value="${u.name}">${u.name}</option>`).join('');
+  if (session && session.name) sel.value = session.name;
 }
 
-function openReceiverManager() {
-  renderReceiverList();
-  document.getElementById('newReceiverInput').value = '';
-  receiverModal.show();
+// ── Transfer account manager ───────────────────────────────────────────────────
+function buildTransferAccountSelect() {
+  const accounts = DB.getTransferAccounts();
+  const sel = document.getElementById('payTransferAccountSelect');
+  sel.innerHTML = '<option value="">— เลือกบัญชี หรือกรอกเอง —</option>' +
+    accounts.map((a, i) =>
+      `<option value="${i}">${a.name} · ${a.bank}${a.accountNo ? ' · ' + a.accountNo : ''}</option>`
+    ).join('');
 }
 
-function renderReceiverList() {
-  const names = DB.getReceivers();
-  document.getElementById('receiverList').innerHTML = names.length
-    ? names.map(n => `
-        <li class="list-group-item d-flex justify-content-between align-items-center px-1 py-1">
-          <span>${n}</span>
+function onTransferAccountChange() {
+  const accounts = DB.getTransferAccounts();
+  const i = parseInt(document.getElementById('payTransferAccountSelect').value);
+  if (isNaN(i) || !accounts[i]) return;
+  const a = accounts[i];
+  document.getElementById('payDestBank').value    = a.bank       || '';
+  document.getElementById('payAccountName').value = a.name       || '';
+}
+
+function openTransferAccountManager() {
+  renderTransferAccountList();
+  ['newAcctName','newAcctBank','newAcctNo'].forEach(id => document.getElementById(id).value = '');
+  transferAccountModal.show();
+}
+
+function renderTransferAccountList() {
+  const accounts = DB.getTransferAccounts();
+  document.getElementById('transferAccountList').innerHTML = accounts.length
+    ? accounts.map((a, i) => `
+        <li class="list-group-item d-flex justify-content-between align-items-center py-1 px-2">
+          <div>
+            <div class="fw-semibold">${a.name}</div>
+            <div class="text-muted small">${a.bank}${a.accountNo ? ' · ' + a.accountNo : ''}</div>
+          </div>
           <button class="btn btn-sm btn-outline-danger py-0 px-1"
-                  onclick="deleteReceiver('${n.replace(/'/g,"\\'")}')"><i class="bi bi-trash"></i></button>
+                  onclick="deleteTransferAccount(${i})"><i class="bi bi-trash"></i></button>
         </li>`).join('')
-    : '<li class="list-group-item text-muted small text-center py-2">ยังไม่มีรายชื่อ</li>';
+    : '<li class="list-group-item text-muted small text-center py-2">ยังไม่มีบัญชี</li>';
 }
 
-function confirmAddReceiver() {
-  const val = document.getElementById('newReceiverInput').value.trim();
-  if (!val) return;
-  const names = DB.getReceivers();
-  if (!names.includes(val)) { names.push(val); DB.saveReceivers(names); }
-  document.getElementById('newReceiverInput').value = '';
-  renderReceiverList();
-  loadReceiverDatalist();
+function confirmAddTransferAccount() {
+  const name = document.getElementById('newAcctName').value.trim();
+  const bank = document.getElementById('newAcctBank').value.trim();
+  const no   = document.getElementById('newAcctNo').value.trim();
+  if (!name || !bank) { Utils.showAlert('กรุณากรอกชื่อบัญชีและธนาคาร', 'warning', 'alertBox'); return; }
+  const accounts = DB.getTransferAccounts();
+  accounts.push({ name, bank, accountNo: no });
+  DB.saveTransferAccounts(accounts);
+  ['newAcctName','newAcctBank','newAcctNo'].forEach(id => document.getElementById(id).value = '');
+  renderTransferAccountList();
+  buildTransferAccountSelect();
 }
 
-function deleteReceiver(name) {
-  DB.saveReceivers(DB.getReceivers().filter(n => n !== name));
-  renderReceiverList();
-  loadReceiverDatalist();
+function deleteTransferAccount(idx) {
+  const accounts = DB.getTransferAccounts();
+  accounts.splice(idx, 1);
+  DB.saveTransferAccounts(accounts);
+  renderTransferAccountList();
+  buildTransferAccountSelect();
 }
 
 // ── Method visibility ─────────────────────────────────────────────────────────
 function onMethodChange() {
-  const method = document.getElementById('payMethod').value;
+  const method     = document.getElementById('payMethod').value;
   const isCash     = method === 'เงินสด';
   const isTransfer = method === 'โอน';
   const isCheque   = method === 'เช็ค';
   document.querySelectorAll('.pay-cash').forEach(el     => el.style.display = isCash     ? '' : 'none');
   document.querySelectorAll('.pay-transfer').forEach(el => el.style.display = isTransfer ? '' : 'none');
   document.querySelectorAll('.pay-cheque').forEach(el   => el.style.display = isCheque   ? '' : 'none');
-  if (isCash && !document.getElementById('payCashCollector').value) document.getElementById('payCashCollector').value = session.name;
+  if (isCash) buildCashCollectorSelect();
+  if (isTransfer) buildTransferAccountSelect();
 }
 
 // ── Image loading ─────────────────────────────────────────────────────────────
@@ -1084,14 +1133,15 @@ function addPaymentEntry() {
   _pendingPayments.push(data);
 
   // Clear form for next entry
-  document.getElementById('payMethod').value         = '';
-  document.getElementById('payAmount').value         = '';
-  document.getElementById('payNote').value           = '';
-  document.getElementById('payCashCollector').value  = '';
-  document.getElementById('paySourceBank').value     = '';
-  document.getElementById('payDestBank').value       = '';
-  document.getElementById('payAccountName').value    = '';
-  document.getElementById('payTransferDate').value   = Utils.nowInputValue();
+  document.getElementById('payMethod').value                = '';
+  document.getElementById('payAmount').value                = '';
+  document.getElementById('payNote').value                  = '';
+  document.getElementById('payCashCollector').value         = '';
+  document.getElementById('payTransferAccountSelect').value = '';
+  document.getElementById('paySourceBank').value            = '';
+  document.getElementById('payDestBank').value              = '';
+  document.getElementById('payAccountName').value           = '';
+  document.getElementById('payTransferDate').value          = Utils.nowInputValue();
   document.getElementById('payChequeNo').value       = '';
   document.getElementById('payChequeBank').value     = '';
   document.getElementById('payChequeDate').value     = '';

@@ -432,6 +432,14 @@ function _showConnectionModal() {
     'position:fixed;inset:0;z-index:99994;background:rgba(0,0,0,.55);' +
     'display:flex;align-items:center;justify-content:center;padding:1rem';
 
+  // Whether the File System Access API is available (desktop Chrome / Edge)
+  var canPickDir = typeof window.showDirectoryPicker === 'function';
+
+  // Folder row button style
+  var folderBtnStyle =
+    'background:#0d6efd;color:#fff;border:none;border-radius:6px;' +
+    'padding:4px 10px;font-size:12px;font-weight:600;cursor:pointer;flex-shrink:0;white-space:nowrap';
+
   overlay.innerHTML =
     '<div style="background:' + bg + ';border-radius:14px;padding:1.5rem;max-width:420px;' +
     'width:100%;box-shadow:0 16px 48px rgba(0,0,0,.3)">' +
@@ -458,6 +466,28 @@ function _showConnectionModal() {
     '<div style="font-weight:700;font-size:13px;color:' + txt + '">Google Drive</div>' +
     '<div id="cm-dr-st" style="font-size:12px;color:#d97706;margin-top:2px">⏳ กำลังตรวจสอบ...</div></div>' +
     gBtn + '</div>' +
+
+    // PDF Folder row (only when File System API available)
+    (canPickDir ?
+    '<div style="display:flex;align-items:center;gap:.75rem;padding:.75rem 1rem;' +
+    'border:1px solid ' + brd + ';border-radius:10px;margin-bottom:.75rem;background:' + rowBg + '">' +
+    '<span style="font-size:1.4rem;width:2rem;text-align:center">📄</span>' +
+    '<div style="flex:1;min-width:0">' +
+    '<div style="font-weight:700;font-size:13px;color:' + txt + '">โฟลเดอร์บันทึก PDF</div>' +
+    '<div id="cm-pdf-st" style="font-size:12px;color:#d97706;margin-top:2px">⏳ กำลังตรวจสอบ...</div></div>' +
+    '<button id="cm-pdf-btn" style="display:none;' + folderBtnStyle + '">เลือก</button></div>'
+    : '') +
+
+    // Backup Folder row (only when File System API available)
+    (canPickDir ?
+    '<div style="display:flex;align-items:center;gap:.75rem;padding:.75rem 1rem;' +
+    'border:1px solid ' + brd + ';border-radius:10px;margin-bottom:.75rem;background:' + rowBg + '">' +
+    '<span style="font-size:1.4rem;width:2rem;text-align:center">💾</span>' +
+    '<div style="flex:1;min-width:0">' +
+    '<div style="font-weight:700;font-size:13px;color:' + txt + '">โฟลเดอร์สำรองข้อมูล</div>' +
+    '<div id="cm-backup-st" style="font-size:12px;color:#d97706;margin-top:2px">⏳ กำลังตรวจสอบ...</div></div>' +
+    '<button id="cm-backup-btn" style="display:none;' + folderBtnStyle + '">เลือก</button></div>'
+    : '') +
 
     '<div id="cm-offline-row" style="display:none;margin-top:.25rem">' +
     '<button id="cm-offline-btn" class="btn btn-secondary btn-sm w-100">' +
@@ -491,10 +521,92 @@ function _showConnectionModal() {
   }
 
   // ── checkAllDone: uses dynamic checks every time ───────────────────────────
-  // fbResolved/drResolved track whether we've determined each service's final state.
+  // fbResolved/drResolved/pdfResolved/backupResolved track each service's final state.
   var fbResolved = false, drResolved = false;
+  var pdfResolved = !canPickDir, backupResolved = !canPickDir; // skip if API unavailable
   function checkAllDone() {
-    if (fbResolved && drResolved) setTimeout(closeModal, 700);
+    if (fbResolved && drResolved && pdfResolved && backupResolved) setTimeout(closeModal, 700);
+  }
+
+  // ── Inline IDB helper (reads/writes directory handles stored by settings.js) ─
+  function _idbOpen() {
+    return new Promise(function(res, rej) {
+      var req = indexedDB.open('wt_handles_v1', 1);
+      req.onupgradeneeded = function(e) { e.target.result.createObjectStore('handles'); };
+      req.onsuccess = function(e) { res(e.target.result); };
+      req.onerror   = function(e) { rej(e.target.error); };
+    });
+  }
+  function _idbGet(key) {
+    return _idbOpen().then(function(db) {
+      return new Promise(function(res, rej) {
+        var tx = db.transaction('handles', 'readonly');
+        var req = tx.objectStore('handles').get(key);
+        req.onsuccess = function(e) { res(e.target.result || null); };
+        req.onerror   = function(e) { rej(e.target.error); };
+      });
+    }).catch(function() { return null; });
+  }
+  function _idbSet(key, val) {
+    return _idbOpen().then(function(db) {
+      return new Promise(function(res, rej) {
+        var tx = db.transaction('handles', 'readwrite');
+        tx.objectStore('handles').put(val, key);
+        tx.oncomplete = res;
+        tx.onerror = function(e) { rej(e.target.error); };
+      });
+    }).catch(function() {});
+  }
+
+  // ── Folder check & pick buttons (only if canPickDir) ──────────────────────
+  if (canPickDir) {
+    // Check PDF folder
+    _idbGet('pdf_dir').then(function(h) {
+      if (h) {
+        setSt('pdf', '✓ ' + h.name, '#16a34a');
+        pdfResolved = true; checkAllDone();
+      } else {
+        setSt('pdf', 'ยังไม่ได้เลือก — กรุณาเลือกโฟลเดอร์', '#d97706');
+        var btn = document.getElementById('cm-pdf-btn');
+        if (btn) btn.style.display = '';
+      }
+    });
+
+    // Check Backup folder
+    _idbGet('backup_dir').then(function(h) {
+      if (h) {
+        setSt('backup', '✓ ' + h.name, '#16a34a');
+        backupResolved = true; checkAllDone();
+      } else {
+        setSt('backup', 'ยังไม่ได้เลือก — กรุณาเลือกโฟลเดอร์', '#d97706');
+        var btn = document.getElementById('cm-backup-btn');
+        if (btn) btn.style.display = '';
+      }
+    });
+
+    // PDF pick button
+    var pdfBtn = document.getElementById('cm-pdf-btn');
+    if (pdfBtn) pdfBtn.addEventListener('click', function() {
+      window.showDirectoryPicker({ mode: 'readwrite' }).then(function(h) {
+        return _idbSet('pdf_dir', h).then(function() {
+          setSt('pdf', '✓ ' + h.name, '#16a34a');
+          pdfBtn.style.display = 'none';
+          pdfResolved = true; checkAllDone();
+        });
+      }).catch(function(e) { if (e.name !== 'AbortError') console.warn('[connModal] pdf dir:', e); });
+    });
+
+    // Backup pick button
+    var backupBtn = document.getElementById('cm-backup-btn');
+    if (backupBtn) backupBtn.addEventListener('click', function() {
+      window.showDirectoryPicker({ mode: 'readwrite' }).then(function(h) {
+        return _idbSet('backup_dir', h).then(function() {
+          setSt('backup', '✓ ' + h.name, '#16a34a');
+          backupBtn.style.display = 'none';
+          backupResolved = true; checkAllDone();
+        });
+      }).catch(function(e) { if (e.name !== 'AbortError') console.warn('[connModal] backup dir:', e); });
+    });
   }
 
   // ── ทำงานออฟไลน์ button ───────────────────────────────────────────────────
