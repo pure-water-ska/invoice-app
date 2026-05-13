@@ -21,6 +21,7 @@ const APP_SHELL = [
   './auth.js',
   './idb.js',
   './drive-store.js',
+  './drive-db-sync.js',
   './settings.js',
   './style.css',
   './manifest.json',

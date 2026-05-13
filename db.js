@@ -35,6 +35,8 @@ const DB = {
       if (Sync.ready) Sync.push(key, val);
       else Sync._enqueue(key, val);   // will be flushed once Sync.init() completes
     }
+    // Queue upload to Google Drive (debounced, no-op if Drive not connected)
+    if (window.DriveDbSync) DriveDbSync.queueUpload(key, val);
   },
 
   // ─── SETTINGS ────────────────────────────────────────────────────────────────

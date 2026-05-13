@@ -103,6 +103,10 @@ window.DriveStore = {
             this._badge('online');
             this._saveSignInState(true);
             console.log('[DriveStore] Signed in ✓ folder:', this._folderId);
+            // Init DB sync layer (load drive-db-sync.js if not yet loaded)
+            if (window.DriveDbSync) {
+              DriveDbSync.init().catch(e => console.warn('[DriveDbSync]', e.message));
+            }
             resolve();
           } catch (e) { reject(e); }
         },

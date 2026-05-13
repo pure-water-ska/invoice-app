@@ -182,8 +182,19 @@
   loadScript('./drive-config.js', function() {
     if (typeof GOOGLE_CLIENT_ID === 'undefined' || typeof GOOGLE_CLIENT_ID !== 'string' ||
         !GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_ID.includes('.apps.')) return; // not configured
-    if (window.DriveStore) return; // already loaded by a page's static <script>
-    loadScript('./drive-store.js'); // sets window.DriveStore + auto-inits
+
+    // Load drive-store.js (guarded — safe to double-load)
+    function afterDriveStore() {
+      // Load drive-db-sync.js (guarded — safe to double-load)
+      if (!window.DriveDbSync) loadScript('./drive-db-sync.js');
+    }
+
+    if (window.DriveStore) {
+      // Already loaded by a page's static <script> — just load db-sync
+      afterDriveStore();
+    } else {
+      loadScript('./drive-store.js', afterDriveStore); // sets window.DriveStore + auto-inits
+    }
   }, function() { /* drive-config.js missing — Drive disabled, silent */ });
 })();
 
