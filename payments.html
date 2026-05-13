@@ -162,10 +162,17 @@
             </div>
           </div>
 
-          <!-- เงินสด -->
-          <div class="col-md-6 pay-cash" style="display:none">
-            <label class="form-label fw-semibold">ผู้รับเงินสด</label>
-            <input type="text" id="payCashCollector" class="form-control" placeholder="ชื่อผู้รับเงิน">
+          <!-- ผู้รับเงิน (ทุกวิธีชำระ) -->
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">ผู้รับเงิน</label>
+            <div class="d-flex gap-1">
+              <input type="text" id="payCashCollector" class="form-control"
+                     list="receiverDatalist" placeholder="ชื่อผู้รับเงิน" autocomplete="off">
+              <button class="btn btn-outline-secondary btn-sm px-2" onclick="openReceiverManager()" title="จัดการรายชื่อผู้รับเงิน">
+                <i class="bi bi-list-ul"></i>
+              </button>
+            </div>
+            <datalist id="receiverDatalist"></datalist>
           </div>
 
           <!-- โอน -->
@@ -327,6 +334,26 @@
   </div>
 </div>
 
+<!-- Receiver Manager Modal -->
+<div class="modal fade" id="receiverModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title fw-bold"><i class="bi bi-person-lines-fill me-1"></i>รายชื่อผู้รับเงิน</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-2">
+        <ul class="list-group list-group-flush mb-2" id="receiverList"></ul>
+        <div class="input-group input-group-sm">
+          <input type="text" id="newReceiverInput" class="form-control" placeholder="เพิ่มชื่อผู้รับเงิน..."
+                 onkeydown="if(event.key==='Enter')confirmAddReceiver()">
+          <button class="btn btn-primary" onclick="confirmAddReceiver()"><i class="bi bi-plus-lg"></i></button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Cancel Payment Modal -->
 <div class="modal fade" id="cancelPayModal" tabindex="-1" data-bs-backdrop="static">
   <div class="modal-dialog">
@@ -402,7 +429,7 @@ const session = Auth.require();
 DB.init();
 Nav.render('payments');
 
-let payModal, overpayModal, methodModal, cancelPayModal, dateConfirmModal, imgUpdateModal;
+let payModal, overpayModal, methodModal, receiverModal, cancelPayModal, dateConfirmModal, imgUpdateModal;
 let pendingOverpayData = null;
 let payImages = { transfer: '', cheque: '', signed: '' };
 let _pendingPaymentData = null;   // holds data (array) while waiting for date confirmation
@@ -413,11 +440,13 @@ window.addEventListener('DOMContentLoaded', () => {
   payModal        = new bootstrap.Modal(document.getElementById('payModal'));
   overpayModal    = new bootstrap.Modal(document.getElementById('overpayModal'));
   methodModal     = new bootstrap.Modal(document.getElementById('methodModal'));
+  receiverModal   = new bootstrap.Modal(document.getElementById('receiverModal'));
   cancelPayModal  = new bootstrap.Modal(document.getElementById('cancelPayModal'));
   dateConfirmModal = new bootstrap.Modal(document.getElementById('dateConfirmModal'));
   imgUpdateModal  = new bootstrap.Modal(document.getElementById('imgUpdateModal'));
 
   document.getElementById('bankDatalist').innerHTML = Utils.bankDatalistOptions();
+  loadReceiverDatalist();
 
   DB.getCustomers().sort((a,b) => a.name.localeCompare(b.name,'th')).forEach(c => {
     document.getElementById('custNameDatalist').innerHTML +=
@@ -610,6 +639,47 @@ function deleteMethod(name) {
   buildMethodSelect();
 }
 
+// ── Receiver manager ──────────────────────────────────────────────────────────
+function loadReceiverDatalist() {
+  const names = DB.getReceivers();
+  document.getElementById('receiverDatalist').innerHTML =
+    names.map(n => `<option value="${n}">`).join('');
+}
+
+function openReceiverManager() {
+  renderReceiverList();
+  document.getElementById('newReceiverInput').value = '';
+  receiverModal.show();
+}
+
+function renderReceiverList() {
+  const names = DB.getReceivers();
+  document.getElementById('receiverList').innerHTML = names.length
+    ? names.map(n => `
+        <li class="list-group-item d-flex justify-content-between align-items-center px-1 py-1">
+          <span>${n}</span>
+          <button class="btn btn-sm btn-outline-danger py-0 px-1"
+                  onclick="deleteReceiver('${n.replace(/'/g,"\\'")}')"><i class="bi bi-trash"></i></button>
+        </li>`).join('')
+    : '<li class="list-group-item text-muted small text-center py-2">ยังไม่มีรายชื่อ</li>';
+}
+
+function confirmAddReceiver() {
+  const val = document.getElementById('newReceiverInput').value.trim();
+  if (!val) return;
+  const names = DB.getReceivers();
+  if (!names.includes(val)) { names.push(val); DB.saveReceivers(names); }
+  document.getElementById('newReceiverInput').value = '';
+  renderReceiverList();
+  loadReceiverDatalist();
+}
+
+function deleteReceiver(name) {
+  DB.saveReceivers(DB.getReceivers().filter(n => n !== name));
+  renderReceiverList();
+  loadReceiverDatalist();
+}
+
 // ── Method visibility ─────────────────────────────────────────────────────────
 function onMethodChange() {
   const method = document.getElementById('payMethod').value;
@@ -619,7 +689,6 @@ function onMethodChange() {
   document.querySelectorAll('.pay-cash').forEach(el     => el.style.display = isCash     ? '' : 'none');
   document.querySelectorAll('.pay-transfer').forEach(el => el.style.display = isTransfer ? '' : 'none');
   document.querySelectorAll('.pay-cheque').forEach(el   => el.style.display = isCheque   ? '' : 'none');
-  if (isCash) document.getElementById('payCashCollector').value = session.name;
 }
 
 // ── Image loading ─────────────────────────────────────────────────────────────

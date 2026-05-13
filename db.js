@@ -51,6 +51,8 @@ const DB = {
     });
   },
   saveSettings(s) { this._set(this.K.SETTINGS, s); },
+  getReceivers() { const s = this.getSettings(); return Array.isArray(s.receivers) ? s.receivers : []; },
+  saveReceivers(arr) { const s = this.getSettings(); s.receivers = arr; this.saveSettings(s); },
 
   // ─── PAYMENT METHODS ─────────────────────────────────────────────────────────
   getPayMethods() {

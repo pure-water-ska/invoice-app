@@ -48,12 +48,28 @@ window.DriveStore = {
 
       const wasSignedIn = localStorage.getItem('wt_drive_signed_in') === '1';
       if (wasSignedIn) {
-        // เคย sign-in แล้ว → auto-reconnect หลัง page โหลดเสร็จ (ไม่ต้องกด)
-        console.log('[DriveStore] Auto-reconnecting…');
-        setTimeout(() => this.signIn().catch(e => {
-          console.warn('[DriveStore] Auto-reconnect failed:', e.message);
-          this._showConnectBanner(); // ถ้า session หมดอายุ → แสดงปุ่มให้กดใหม่
-        }), 800);
+        // Try restoring token from sessionStorage first — avoids OAuth popup on every page
+        const cachedTok = sessionStorage.getItem('wt_dr_tok');
+        const cachedExp = parseInt(sessionStorage.getItem('wt_dr_exp') || '0');
+        const cachedFid = sessionStorage.getItem('wt_dr_fid');
+        if (cachedTok && cachedExp > Date.now() + 30000) {
+          try {
+            this._token    = cachedTok;
+            this._tokenExp = cachedExp;
+            this._folderId = cachedFid || await this._ensureFolder();
+            this.ready = true;
+            this._badge('online');
+            this._saveSignInState(true);
+            if (window.DriveDbSync) DriveDbSync.init().catch(e => console.warn('[DriveDbSync]', e.message));
+            console.log('[DriveStore] Restored from session cache ✓');
+          } catch (e) {
+            console.warn('[DriveStore] Session restore error:', e.message);
+            this._tryReAuth();
+          }
+        } else {
+          // Token expired or missing → full re-auth
+          this._tryReAuth();
+        }
       } else {
         // ยังไม่เคย sign-in → แสดง banner ให้กดเชื่อมต่อ
         this._showConnectBanner();
@@ -97,8 +113,14 @@ window.DriveStore = {
           if (resp.error) { reject(new Error(resp.error_description || resp.error)); return; }
           this._token    = resp.access_token;
           this._tokenExp = Date.now() + (parseInt(resp.expires_in) - 60) * 1000;
+          // Cache token for this browser session so page navigations don't re-trigger OAuth
+          try {
+            sessionStorage.setItem('wt_dr_tok', this._token);
+            sessionStorage.setItem('wt_dr_exp', String(this._tokenExp));
+          } catch {}
           try {
             this._folderId = await this._ensureFolder();
+            try { sessionStorage.setItem('wt_dr_fid', this._folderId); } catch {}
             this.ready = true;
             this._badge('online');
             this._saveSignInState(true);
@@ -125,8 +147,17 @@ window.DriveStore = {
     this._folderId = null; this.ready = false;
     this._badge('offline');
     this._saveSignInState(false);
-    this._showConnectBanner(); // แสดงปุ่มให้กดใหม่หลัง sign-out
+    try { sessionStorage.removeItem('wt_dr_tok'); sessionStorage.removeItem('wt_dr_exp'); sessionStorage.removeItem('wt_dr_fid'); } catch {}
+    this._showConnectBanner();
     console.log('[DriveStore] Signed out');
+  },
+
+  // ── Background re-auth (silent, no user-visible popup when prompt='') ──────
+  _tryReAuth() {
+    setTimeout(() => this.signIn().catch(e => {
+      console.warn('[DriveStore] Auto-reconnect failed:', e.message);
+      this._showConnectBanner();
+    }), 800);
   },
 
   // ── Upload file → Drive + cache locally ───────────────────────────────────
