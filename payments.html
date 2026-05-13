@@ -146,12 +146,7 @@
 
           <div class="col-md-6">
             <label class="form-label fw-semibold">วิธีชำระเงิน <span class="text-danger">*</span></label>
-            <div class="d-flex gap-1">
-              <select id="payMethod" class="form-select" onchange="onMethodChange()"></select>
-              <button class="btn btn-outline-secondary btn-sm px-2" onclick="openMethodManager()" title="จัดการรายการวิธีชำระ">
-                <i class="bi bi-list-ul"></i>
-              </button>
-            </div>
+            <select id="payMethod" class="form-select" onchange="onMethodChange()"></select>
           </div>
 
           <div class="col-md-6">
@@ -162,11 +157,10 @@
             </div>
           </div>
 
-          <!-- ผู้รับเงิน (เงินสดเท่านั้น — เลือกจากรายชื่อผู้ใช้เท่านั้น) -->
+          <!-- ผู้รับเงิน (เงินสดเท่านั้น — ผู้ล็อกอินอยู่เท่านั้น) -->
           <div class="col-md-6 pay-cash" style="display:none">
-            <label class="form-label fw-semibold">ผู้รับเงิน <span class="text-danger">*</span></label>
-            <select id="payCashCollector" class="form-select"></select>
-            <div class="form-text text-muted">เลือกพนักงานที่รับเงินสด</div>
+            <label class="form-label fw-semibold">ผู้รับเงิน</label>
+            <input type="text" id="payCashCollector" class="form-control" readonly>
           </div>
 
           <!-- โอน -->
@@ -325,25 +319,6 @@
   </div>
 </div>
 
-<!-- Method Manager Modal -->
-<div class="modal fade" id="methodModal" tabindex="-1" data-bs-backdrop="false">
-  <div class="modal-dialog modal-sm">
-    <div class="modal-content">
-      <div class="modal-header py-2">
-        <h6 class="modal-title fw-bold"><i class="bi bi-list-ul me-1"></i>รายการวิธีชำระเงิน</h6>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body p-2">
-        <ul class="list-group list-group-flush mb-2" id="methodList"></ul>
-        <div class="input-group input-group-sm">
-          <input type="text" id="newMethodInput" class="form-control" placeholder="เพิ่มวิธีใหม่..."
-                 onkeydown="if(event.key==='Enter')confirmAddMethod()">
-          <button class="btn btn-primary" onclick="confirmAddMethod()"><i class="bi bi-plus-lg"></i></button>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
 
 <!-- Transfer Account Manager Modal -->
 <div class="modal fade" id="transferAccountModal" tabindex="-1" data-bs-backdrop="false">
@@ -453,7 +428,7 @@ const session = Auth.require();
 DB.init();
 Nav.render('payments');
 
-let payModal, overpayModal, methodModal, transferAccountModal, cancelPayModal, dateConfirmModal, imgUpdateModal;
+let payModal, overpayModal, transferAccountModal, cancelPayModal, dateConfirmModal, imgUpdateModal;
 let pendingOverpayData = null;
 let payImages = { transfer: '', cheque: '', signed: '' };
 let _pendingPaymentData = null;   // holds data (array) while waiting for date confirmation
@@ -463,8 +438,7 @@ let _imgUpdateB64 = '';           // holds resized image for imgUpdateModal
 window.addEventListener('DOMContentLoaded', () => {
   payModal              = new bootstrap.Modal(document.getElementById('payModal'));
   overpayModal          = new bootstrap.Modal(document.getElementById('overpayModal'));
-  // backdrop:false lets these sub-modals open on top of payModal without conflict
-  methodModal           = new bootstrap.Modal(document.getElementById('methodModal'),          { backdrop: false });
+  // backdrop:false lets this sub-modal open on top of payModal without conflict
   transferAccountModal  = new bootstrap.Modal(document.getElementById('transferAccountModal'), { backdrop: false });
   cancelPayModal        = new bootstrap.Modal(document.getElementById('cancelPayModal'));
   dateConfirmModal      = new bootstrap.Modal(document.getElementById('dateConfirmModal'));
@@ -629,53 +603,9 @@ function buildMethodSelect(selected) {
     methods.map(m => `<option value="${m}" ${m===selected?'selected':''}>${m}</option>`).join('');
 }
 
-function openMethodManager() {
-  renderMethodList();
-  document.getElementById('newMethodInput').value = '';
-  methodModal.show();
-}
-
-function renderMethodList() {
-  const methods  = DB.getPayMethods();
-  const defaults = ['เงินสด', 'โอน', 'เช็ค'];
-  document.getElementById('methodList').innerHTML = methods.map(m => `
-    <li class="list-group-item d-flex justify-content-between align-items-center px-1 py-1">
-      <span>${m}</span>
-      ${!defaults.includes(m)
-        ? `<button class="btn btn-sm btn-outline-danger py-0 px-1"
-                   onclick="deleteMethod('${m.replace(/'/g,"\\'")}')"><i class="bi bi-trash"></i></button>`
-        : '<span class="text-muted small">ค่าเริ่มต้น</span>'}
-    </li>`).join('');
-}
-
-function confirmAddMethod() {
-  const val = document.getElementById('newMethodInput').value.trim();
-  if (!val) return;
-  const methods = DB.getPayMethods();
-  if (!methods.includes(val)) { methods.push(val); DB.savePayMethods(methods); }
-  document.getElementById('newMethodInput').value = '';
-  renderMethodList();
-  buildMethodSelect(val);
-}
-
-function deleteMethod(name) {
-  const methods = DB.getPayMethods().filter(m => m !== name);
-  DB.savePayMethods(methods);
-  renderMethodList();
-  buildMethodSelect();
-}
-
-// ── Cash collector select — populated from active users ───────────────────────
+// ── Cash collector — always the currently logged-in user (read-only) ──────────
 function buildCashCollectorSelect() {
-  const users = DB.getUsers().filter(u => u.active !== false);
-  const sel = document.getElementById('payCashCollector');
-  const prev = sel.value; // preserve current selection if rebuilding
-  sel.innerHTML = '<option value="">— เลือกผู้รับเงิน —</option>' +
-    users.map(u => `<option value="${u.name}">${u.name}</option>`).join('');
-  // Restore previous selection; if none yet, pre-select current user
-  if (prev) sel.value = prev;
-  else if (session && session.name && users.some(u => u.name === session.name))
-    sel.value = session.name;
+  document.getElementById('payCashCollector').value = session ? session.username : '';
 }
 
 // ── Transfer account manager ───────────────────────────────────────────────────

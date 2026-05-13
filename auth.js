@@ -72,6 +72,7 @@ const Auth = {
       loginTime: new Date().toISOString()
     };
     sessionStorage.setItem(this.KEY, JSON.stringify(session));
+    if (user.mustChangePw) sessionStorage.setItem('mustChangePw', '1');
     DB.logLogin(user.id, user.username, true);
     DB.logActivity(user.id, user.username, 'เข้าสู่ระบบ', {});
     return { ok: true, user: session };

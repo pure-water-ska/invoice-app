@@ -386,6 +386,12 @@ const Nav = {
     _checkStorageAlert();
     DB.runAutoBackup(s.username);
 
+    // Force password change for first-time users (set by users.html on creation)
+    if (sessionStorage.getItem('mustChangePw') === '1') {
+      setTimeout(_showChangePwOverlay, 200);
+      return; // don't show connection modal yet — will show after pw change
+    }
+
     // Show connection modal once per login session
     if (sessionStorage.getItem('justLoggedIn')) {
       sessionStorage.removeItem('justLoggedIn');
@@ -393,6 +399,85 @@ const Nav = {
     }
   }
 };
+
+// ── Force password change overlay (first login after account creation) ────────
+function _showChangePwOverlay() {
+  var isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+  var bg  = isDark ? '#1c2128' : '#ffffff';
+  var txt = isDark ? '#c9d1d9' : '#212529';
+  var brd = isDark ? '#30363d' : '#dee2e6';
+
+  var overlay = document.createElement('div');
+  overlay.id = 'changePwOverlay';
+  overlay.style.cssText =
+    'position:fixed;inset:0;z-index:99995;background:rgba(0,0,0,.65);' +
+    'display:flex;align-items:center;justify-content:center;padding:1rem';
+
+  overlay.innerHTML =
+    '<div style="background:' + bg + ';border-radius:14px;padding:1.75rem;max-width:380px;' +
+    'width:100%;box-shadow:0 16px 48px rgba(0,0,0,.35)">' +
+
+    '<div style="text-align:center;margin-bottom:1.25rem">' +
+    '<div style="font-size:2.5rem;margin-bottom:.5rem">🔐</div>' +
+    '<div style="font-weight:700;font-size:1.05rem;color:' + txt + '">กรุณาเปลี่ยนรหัสผ่าน</div>' +
+    '<div style="font-size:13px;color:#6b7280;margin-top:.35rem">' +
+    'บัญชีของคุณถูกสร้างโดยผู้ดูแลระบบ<br>กรุณาตั้งรหัสผ่านใหม่ก่อนใช้งาน</div></div>' +
+
+    '<div id="cpw-alert" style="display:none;background:#fee2e2;color:#991b1b;border-radius:8px;' +
+    'padding:8px 12px;font-size:13px;margin-bottom:1rem"></div>' +
+
+    '<div style="margin-bottom:.85rem">' +
+    '<label style="font-size:13px;font-weight:600;color:' + txt + ';display:block;margin-bottom:4px">รหัสผ่านใหม่</label>' +
+    '<input id="cpw-new" type="password" placeholder="อย่างน้อย 6 ตัวอักษร" ' +
+    'style="width:100%;padding:8px 12px;border:1px solid ' + brd + ';border-radius:8px;' +
+    'font-size:14px;background:' + (isDark?'#0d1117':bg) + ';color:' + txt + ';box-sizing:border-box"></div>' +
+
+    '<div style="margin-bottom:1.25rem">' +
+    '<label style="font-size:13px;font-weight:600;color:' + txt + ';display:block;margin-bottom:4px">ยืนยันรหัสผ่านใหม่</label>' +
+    '<input id="cpw-confirm" type="password" placeholder="พิมพ์ซ้ำเพื่อยืนยัน" ' +
+    'style="width:100%;padding:8px 12px;border:1px solid ' + brd + ';border-radius:8px;' +
+    'font-size:14px;background:' + (isDark?'#0d1117':bg) + ';color:' + txt + ';box-sizing:border-box"></div>' +
+
+    '<button id="cpw-save" ' +
+    'style="width:100%;padding:10px;background:#0d6efd;color:#fff;border:none;border-radius:8px;' +
+    'font-size:14px;font-weight:600;cursor:pointer">บันทึกรหัสผ่าน</button>' +
+    '</div>';
+
+  document.body.appendChild(overlay);
+
+  function showErr(msg) {
+    var el = document.getElementById('cpw-alert');
+    el.textContent = msg; el.style.display = '';
+  }
+
+  document.getElementById('cpw-save').addEventListener('click', function() {
+    var pw1 = document.getElementById('cpw-new').value;
+    var pw2 = document.getElementById('cpw-confirm').value;
+    if (pw1.length < 6) { showErr('รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร'); return; }
+    if (pw1 !== pw2)    { showErr('รหัสผ่านทั้งสองช่องไม่ตรงกัน'); return; }
+
+    var s = Auth.session();
+    if (!s) return;
+    DB.updateUser(s.userId, { password: Utils.hashPassword(pw1), mustChangePw: false });
+    sessionStorage.removeItem('mustChangePw');
+
+    overlay.style.transition = 'opacity .3s';
+    overlay.style.opacity = '0';
+    setTimeout(function() {
+      if (overlay.parentNode) overlay.remove();
+      // After password changed, proceed with connection modal if first login
+      if (sessionStorage.getItem('justLoggedIn')) {
+        sessionStorage.removeItem('justLoggedIn');
+        setTimeout(_showConnectionModal, 300);
+      }
+    }, 350);
+  });
+
+  // Enter key submits
+  [document.getElementById('cpw-new'), document.getElementById('cpw-confirm')].forEach(function(el) {
+    el.addEventListener('keydown', function(e) { if (e.key === 'Enter') document.getElementById('cpw-save').click(); });
+  });
+}
 
 // ── Connection modal (shown once per session, right after login) ──────────────
 function _showConnectionModal() {

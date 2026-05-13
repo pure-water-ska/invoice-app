@@ -244,7 +244,7 @@ function saveUser() {
     DB.logActivity(session.userId, session.username, 'แก้ไขผู้ใช้', { targetUser: username });
     Utils.showAlert('บันทึกสำเร็จ');
   } else {
-    DB.addUser({ id: Utils.uuid(), ...data, password: Utils.hashPassword(password), createdAt: new Date().toISOString() });
+    DB.addUser({ id: Utils.uuid(), ...data, password: Utils.hashPassword(password), createdAt: new Date().toISOString(), mustChangePw: true });
     DB.logActivity(session.userId, session.username, 'เพิ่มผู้ใช้', { targetUser: username });
     Utils.showAlert('เพิ่มผู้ใช้สำเร็จ');
   }
