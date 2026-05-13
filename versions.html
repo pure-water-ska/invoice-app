@@ -143,19 +143,7 @@ mark { background:#fff3cd; padding:0 2px; border-radius:2px; }
             <datalist id="vSizeDatalist"></datalist>
           </div>
 
-          <div class="col-md-4">
-            <label class="form-label fw-semibold">สีฉลาก</label>
-            <div class="input-group">
-              <input type="color" id="vColor" class="form-control form-control-color" value="#0d6efd" style="width:48px" oninput="document.getElementById('vColorText').value=this.value">
-              <input type="text" id="vColorText" class="form-control" value="#0d6efd" placeholder="#0d6efd"
-                     oninput="syncVerColor(this.value)">
-              <button class="btn btn-outline-secondary" type="button" onclick="resetVerColor()" title="รีเซ็ตสี">
-                <i class="bi bi-arrow-counterclockwise"></i>
-              </button>
-            </div>
-          </div>
-
-          <div class="col-md-4">
+          <div class="col-md-6">
             <label class="form-label fw-semibold">ชื่อสี</label>
             <input type="text" id="vColorName" class="form-control" list="vColorNameDatalist"
                    placeholder="เช่น สีแดง, สีน้ำเงิน..." autocomplete="off">
@@ -169,7 +157,7 @@ mark { background:#fff3cd; padding:0 2px; border-radius:2px; }
             </datalist>
           </div>
 
-          <div class="col-md-4">
+          <div class="col-md-6">
             <label class="form-label fw-semibold">วันที่ <span class="text-danger">*</span></label>
             <input type="date" id="vDate" class="form-control">
           </div>
@@ -290,16 +278,15 @@ function render() {
       <div class="tl-wrap">`;
 
     items.forEach(v => {
-      const cust      = customers.find(c => c.id === v.customerId);
-      const brand     = v.brand || (v.brands||[])[0] || '';
-      const size      = v.size  || (v.sizes||[])[0]  || '';
-      const dateTH    = v.date ? Utils.formatDateTH(v.date) : '-';
-      const labelColor = v.color || dotColor;
+      const cust   = customers.find(c => c.id === v.customerId);
+      const brand  = v.brand || (v.brands||[])[0] || '';
+      const size   = v.size  || (v.sizes||[])[0]  || '';
+      const dateTH = v.date ? Utils.formatDateTH(v.date) : '-';
 
       html += `
         <div class="tl-item">
-          <span class="tl-dot" style="color:${labelColor};background:${labelColor}"></span>
-          <div class="tl-card" style="border-left:4px solid ${labelColor}">
+          <span class="tl-dot" style="color:${dotColor};background:${dotColor}"></span>
+          <div class="tl-card">
             <div class="d-flex justify-content-between align-items-start gap-2">
               <div class="flex-grow-1">
                 ${groupBy !== 'customer'
@@ -307,10 +294,10 @@ function render() {
                        <i class="bi bi-person me-1 text-muted"></i>${hl(cust?.name||'-',q)}
                      </div>` : ''}
                 <div class="d-flex flex-wrap gap-2 align-items-center mb-1">
-                  ${brand ? `<span class="tl-brand" style="background:${labelColor}22;color:${labelColor};border-color:${labelColor}66">${hl(brand,q)}</span>` : ''}
+                  ${brand ? `<span class="tl-brand">${hl(brand,q)}</span>` : ''}
                   ${size  ? `<span class="tl-size"><i class="bi bi-box me-1"></i>${hl(size,q)}</span>` : ''}
-                  ${v.colorName ? `<span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;padding:1px 9px;border-radius:20px;background:${labelColor}18;color:${labelColor};border:1px solid ${labelColor}55">
-                    <span style="width:9px;height:9px;border-radius:50%;background:${labelColor};display:inline-block;flex-shrink:0"></span>${hl(v.colorName,q)}</span>` : ''}
+                  ${v.colorName ? `<span class="badge bg-secondary bg-opacity-10 text-secondary border" style="font-size:11px;font-weight:600">
+                    <i class="bi bi-palette me-1"></i>${hl(v.colorName,q)}</span>` : ''}
                 </div>
                 ${v.note ? `<div class="tl-note"><i class="bi bi-chat-left-text me-1 opacity-50"></i>${hl(v.note,q)}</div>` : ''}
                 ${v.image ? `<div class="mt-2"><img src="${v.image}" class="tl-img" onclick="openLightboxById('${v.id}')"></div>` : ''}
@@ -355,7 +342,6 @@ function openModal(id) {
   document.getElementById('vImagePreview').innerHTML = '';
   document.getElementById('vColorName').value = '';
   verImageB64 = '';
-  _setVerColor('#0d6efd');
 
   if (id) {
     const v = DB.getVersions().find(x => x.id === id);
@@ -366,7 +352,6 @@ function openModal(id) {
       document.getElementById('vSize').value      = v.size  || (v.sizes||[])[0]  || '';
       document.getElementById('vNote').value      = v.note  || '';
       document.getElementById('vColorName').value = v.colorName || '';
-      _setVerColor(v.color || '#0d6efd');
       if (v.image) {
         verImageB64 = v.image;
         document.getElementById('vImagePreview').innerHTML = imgPreviewHtml(v.image);
@@ -413,7 +398,6 @@ function saveVersion() {
     brand,
     size,
     date,
-    color:     document.getElementById('vColorText').value.trim() || document.getElementById('vColor').value || '#0d6efd',
     colorName: document.getElementById('vColorName').value.trim(),
     note:      document.getElementById('vNote').value.trim(),
     image: verImageB64,
@@ -509,15 +493,6 @@ function strColor(str) {
   return p[h % p.length];
 }
 
-// ── Label color helpers ────────────────────────────────────────────────────────
-function _setVerColor(hex) {
-  document.getElementById('vColor').value     = hex;
-  document.getElementById('vColorText').value = hex;
-}
-function syncVerColor(val) {
-  if (/^#[0-9a-fA-F]{6}$/.test(val)) document.getElementById('vColor').value = val;
-}
-function resetVerColor() { _setVerColor('#0d6efd'); }
 </script>
 </body>
 </html>
