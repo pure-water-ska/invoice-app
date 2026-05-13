@@ -40,7 +40,8 @@
       "Bash(node -c sync.js)",
       "Bash(node -c drive-store.js)",
       "Bash(node -c drive-config.js)",
-      "Bash(node -c nav.js)"
+      "Bash(node -c nav.js)",
+      "Bash(git commit -m 'fix: hide receiver name field unless cash selected *)"
     ]
   }
 }
