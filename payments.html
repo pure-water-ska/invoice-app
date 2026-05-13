@@ -162,8 +162,8 @@
             </div>
           </div>
 
-          <!-- ผู้รับเงิน (ทุกวิธีชำระ) -->
-          <div class="col-md-6">
+          <!-- ผู้รับเงิน (เงินสดเท่านั้น) -->
+          <div class="col-md-6 pay-cash" style="display:none">
             <label class="form-label fw-semibold">ผู้รับเงิน</label>
             <div class="d-flex gap-1">
               <input type="text" id="payCashCollector" class="form-control"
@@ -689,6 +689,7 @@ function onMethodChange() {
   document.querySelectorAll('.pay-cash').forEach(el     => el.style.display = isCash     ? '' : 'none');
   document.querySelectorAll('.pay-transfer').forEach(el => el.style.display = isTransfer ? '' : 'none');
   document.querySelectorAll('.pay-cheque').forEach(el   => el.style.display = isCheque   ? '' : 'none');
+  if (isCash && !document.getElementById('payCashCollector').value) document.getElementById('payCashCollector').value = session.name;
 }
 
 // ── Image loading ─────────────────────────────────────────────────────────────
