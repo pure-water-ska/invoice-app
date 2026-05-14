@@ -55,12 +55,24 @@ const Auth = {
     { key: 'import_zip',      label: 'Import ZIP (ข้อมูล + PDF)',     group: 'สำรองข้อมูล' },
   ],
 
-  login(username, password) {
+  async _fetchIP() {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 3000);
+      const res = await fetch('https://api.ipify.org?format=json', { signal: ctrl.signal });
+      clearTimeout(timer);
+      const data = await res.json();
+      return data.ip || null;
+    } catch { return null; }
+  },
+
+  async login(username, password) {
     const user = DB.getUserByUsername(username);
     if (!user)        return { ok: false, msg: 'ไม่พบชื่อผู้ใช้' };
     if (!user.active) return { ok: false, msg: 'บัญชีถูกระงับการใช้งาน' };
+    const ip = await this._fetchIP();
     if (user.password !== Utils.hashPassword(password)) {
-      DB.logLogin(user.id, user.username, false);
+      DB.logLogin(user.id, user.username, false, ip);
       return { ok: false, msg: 'รหัสผ่านไม่ถูกต้อง' };
     }
     const session = {
@@ -73,7 +85,7 @@ const Auth = {
     };
     sessionStorage.setItem(this.KEY, JSON.stringify(session));
     if (user.mustChangePw) sessionStorage.setItem('mustChangePw', '1');
-    DB.logLogin(user.id, user.username, true);
+    DB.logLogin(user.id, user.username, true, ip);
     DB.logActivity(user.id, user.username, 'เข้าสู่ระบบ', {});
     return { ok: true, user: session };
   },

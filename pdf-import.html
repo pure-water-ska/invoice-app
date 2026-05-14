@@ -343,9 +343,14 @@ function renderCard(data, ci, fname, pn, totalPdf, pageImageUrl) {
     </div>
     ${confBadge(data.fields)}
   </div>
-  <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#raw_${ci}">
-    <i class="bi bi-code-square me-1"></i>ข้อความดิบ
-  </button>
+  <div class="d-flex gap-2">
+    <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#raw_${ci}">
+      <i class="bi bi-code-square me-1"></i>ข้อความดิบ
+    </button>
+    <button class="btn btn-sm btn-success" id="saveBtn_${ci}" onclick="saveSingleCard(${ci})">
+      <i class="bi bi-save me-1"></i>บันทึก
+    </button>
+  </div>
 </div>
 <div class="collapse" id="raw_${ci}">
   <div class="card-body border-bottom p-2"><pre class="raw-text mb-0">${esc(data.rawText)}</pre></div>
@@ -668,6 +673,45 @@ function beInputToCE(txt) {
 // Find customer by exact name
 function findCustByName(name) {
   return _custs.find(c => c.name === name.trim()) || null;
+}
+
+async function saveSingleCard(ci) {
+  if (_cards[ci].saved) return;
+
+  const d = getCardData(ci);
+  if (!d.invoiceNumber)    { Utils.showAlert(`การ์ด ${ci+1}: ต้องระบุเลขที่ใบกำกับ`, 'warning'); return; }
+  if (!d.customerId)       { Utils.showAlert(`การ์ด ${ci+1}: ไม่พบลูกค้า "${d.customerName}" ในฐานข้อมูล`, 'warning'); return; }
+  if (!(d.totalAmount > 0)){ Utils.showAlert(`การ์ด ${ci+1}: ต้องระบุยอดเงินรวม`, 'warning'); return; }
+  if (DB.getInvoicesByNumber(d.invoiceNumber).length) {
+    Utils.showAlert(`${d.invoiceNumber}: มีอยู่ในระบบแล้ว`, 'warning'); return;
+  }
+
+  const btn = document.getElementById(`saveBtn_${ci}`);
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลังบันทึก...';
+
+  const createdAt = d.invoiceDate ? new Date(d.invoiceDate).toISOString() : new Date().toISOString();
+  DB.addInvoice({
+    id: Utils.uuid(), invoiceNumber: d.invoiceNumber, page: 1, totalPages: 1,
+    customerId: d.customerId, shippingMethod: d.shippingMethod, items: [],
+    totalAmount: d.totalAmount, note: d.note, createdAt,
+    createdBy: session.name, createdByUser: session.username, printCount: 0, importedFrom: 'pdf',
+  });
+  DB.logActivity(session.userId, session.username, 'นำเข้าใบกำกับจาก PDF',
+    { invoiceNumber: d.invoiceNumber, customerName: d.customerName, totalAmount: d.totalAmount });
+
+  try { await savePdfForCard(ci, d); } catch(e) { console.warn('PDF save:', e); }
+
+  _cards[ci].saved = true;
+  const sel = document.getElementById(`sel_${ci}`);
+  if (sel) { sel.checked = false; sel.disabled = true; }
+  const card = document.getElementById(`card_${ci}`);
+  card.classList.add('card-saved');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="bi bi-check-circle-fill me-1"></i>บันทึกแล้ว';
+  btn.classList.replace('btn-success', 'btn-outline-success');
+  updateSaveBtn();
+  Utils.showAlert(`บันทึก ${d.invoiceNumber} สำเร็จ`, 'success');
 }
 </script>
 </body>

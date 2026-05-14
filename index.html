@@ -81,12 +81,12 @@
     else { pw.type = 'password'; eye.className = 'bi bi-eye'; }
   });
 
-  document.getElementById('loginForm').addEventListener('submit', e => {
+  document.getElementById('loginForm').addEventListener('submit', async e => {
     e.preventDefault();
     const u = document.getElementById('username').value.trim();
     const p = document.getElementById('password').value;
     if (!u || !p) { Utils.showAlert('กรุณากรอกชื่อผู้ใช้และรหัสผ่าน', 'warning'); return; }
-    const result = Auth.login(u, p);
+    const result = await Auth.login(u, p);
     if (result.ok) {
       localStorage.setItem('wt_last_user', u);           // remember username only
       sessionStorage.removeItem('connModalDone'); // reset so modal shows on each login
