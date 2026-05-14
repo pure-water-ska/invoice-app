@@ -525,7 +525,7 @@ const DB = {
     ];
     prices.forEach(item => {
       const productId = pid(item.name);
-      if (productId) this.upsertPrice(productId, '', 'รับเอง', item.price);
+      if (productId) this.upsertPrice(productId, '', 'รับหน้าโรงงาน', item.price);
     });
 
     // Standard "จัดส่ง" prices (default for all customers unless overridden)

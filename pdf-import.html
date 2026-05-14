@@ -247,7 +247,7 @@ function parseInvoice(text, filenameCustHint) {
   }
 
   // ── Shipping method ──
-  if (text.includes('รับเอง'))  { r.shippingMethod = 'รับเอง';  r.fields.shippingMethod = true; }
+  if (text.includes('รับหน้าโรงงาน'))  { r.shippingMethod = 'รับหน้าโรงงาน';  r.fields.shippingMethod = true; }
   else if (text.includes('จัดส่ง') || text.includes('ณัฐวุฒิ')) {
     r.shippingMethod = text.includes('ณัฐวุฒิ') ? 'ณัฐวุฒิ' : 'จัดส่ง';
     r.fields.shippingMethod = true;
@@ -413,7 +413,7 @@ function renderCard(data, ci, fname, pn, totalPdf, pageImageUrl) {
           </label>
           <select class="form-select ${fieldClass(data.fields.shippingMethod)}" id="s_${ci}">
             <option value="จัดส่ง"${data.shippingMethod==='จัดส่ง'?' selected':''}>จัดส่ง</option>
-            <option value="รับเอง"${data.shippingMethod==='รับเอง'?' selected':''}>รับเอง</option>
+            <option value="รับหน้าโรงงาน"${data.shippingMethod==='รับหน้าโรงงาน'?' selected':''}>รับหน้าโรงงาน</option>
             <option value="ณัฐวุฒิ"${data.shippingMethod==='ณัฐวุฒิ'?' selected':''}>ณัฐวุฒิ</option>
           </select>
         </div>

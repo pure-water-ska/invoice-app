@@ -32,7 +32,7 @@
 .price-cell { text-align:right; padding: 4px 8px !important; }
 .price-cell.empty { color: #bbb; }
 .price-cell.changed { background: #fff3cd !important; }
-.ship-badge-รับเอง  { background: #198754; }
+.ship-badge-รับหน้าโรงงาน  { background: #198754; }
 .ship-badge-จัดส่ง  { background: #0d6efd; }
 .ship-badge-ณัฐวุฒิ { background: #6f42c1; }
 
@@ -82,10 +82,10 @@
           — ราคาประเภทอื่นจะไม่ถูกเปลี่ยนแปลง
         </p>
         <div class="d-flex gap-3 flex-wrap">
-          <button class="btn btn-outline-success btn-lg px-4 ship-btn" data-ship="รับเอง"
+          <button class="btn btn-outline-success btn-lg px-4 ship-btn" data-ship="รับหน้าโรงงาน"
                   onclick="selectShipType(this)">
             <i class="bi bi-person-walking d-block fs-2 mb-1"></i>
-            รับเอง
+            รับหน้าโรงงาน
           </button>
           <button class="btn btn-outline-primary btn-lg px-4 ship-btn" data-ship="จัดส่ง"
                   onclick="selectShipType(this)">
@@ -209,7 +209,7 @@ DB.init();
 Nav.render('price-import');
 
 // ─── State ─────────────────────────────────────────────────────────────────
-let _shipType   = '';       // รับเอง / จัดส่ง / ณัฐวุฒิ
+let _shipType   = '';       // รับหน้าโรงงาน / จัดส่ง / ณัฐวุฒิ
 let _wb         = null;
 let _fileName   = '';
 let _parsed     = null;     // { prodNames[], rows[{custRaw, prices[]}] }
@@ -372,7 +372,7 @@ function renderPreview() {
   const { products, customers, cells } = _matches;
 
   // Header
-  const shipCls = { 'รับเอง': 'bg-success', 'จัดส่ง': 'bg-primary', 'ณัฐวุฒิ': 'bg-purple' }[_shipType] || 'bg-secondary';
+  const shipCls = { 'รับหน้าโรงงาน': 'bg-success', 'จัดส่ง': 'bg-primary', 'ณัฐวุฒิ': 'bg-purple' }[_shipType] || 'bg-secondary';
   const hRow = document.getElementById('matrixHeader');
   hRow.innerHTML =
     `<th>ลูกค้า</th>` +
