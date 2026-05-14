@@ -97,9 +97,9 @@
       <div class="table-responsive">
         <table class="table table-hover table-sm mb-0">
           <thead><tr>
-            <th>#</th><th>วันที่/เวลา</th><th>ผู้ใช้</th><th>IP Address</th><th class="text-center">ผลลัพธ์</th>
+            <th>#</th><th>วันที่/เวลา</th><th>ผู้ใช้</th><th>IP Address</th><th>ตำแหน่ง</th><th>อุปกรณ์</th><th class="text-center">ผลลัพธ์</th>
           </tr></thead>
-          <tbody id="loginTable"><tr><td colspan="5" class="text-center text-muted py-4">ยังไม่มีประวัติ</td></tr></tbody>
+          <tbody id="loginTable"><tr><td colspan="8" class="text-center text-muted py-4">ยังไม่มีประวัติ</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -226,8 +226,12 @@ function renderLogin() {
   document.getElementById('loginCount').textContent = list.length + ' รายการ';
   const shown = f.limit > 0 ? list.slice(0, f.limit) : list;
   const tbody = document.getElementById('loginTable');
-  if (!shown.length) { tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">ไม่พบรายการ</td></tr>'; return; }
-  tbody.innerHTML = shown.map((item, i) => `
+  if (!shown.length) { tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">ไม่พบรายการ</td></tr>'; return; }
+  tbody.innerHTML = shown.map((item, i) => {
+    const locationParts = [item.city, item.region, item.country].filter(Boolean);
+    const location = locationParts.length ? locationParts.join(', ') : null;
+    const deviceIcon = item.device === 'Mobile' ? 'bi-phone' : item.device === 'Tablet' ? 'bi-tablet' : 'bi-laptop';
+    return `
     <tr>
       <td class="text-muted">${i+1}</td>
       <td style="white-space:nowrap">${Utils.formatDateTimeTH(item.timestamp)}</td>
@@ -236,12 +240,18 @@ function renderLogin() {
         <span class="text-muted small ms-1">${(DB.getUserByUsername(item.username)||{}).name||''}</span>
       </td>
       <td class="text-muted small" style="white-space:nowrap">${item.ip || '<span class="text-muted">—</span>'}</td>
+      <td class="text-muted small">${location || '<span class="text-muted">—</span>'}</td>
+      <td class="text-muted small" style="white-space:nowrap">
+        ${item.device ? `<i class="bi ${deviceIcon} me-1"></i>` : ''}${item.browser || ''}${item.os ? ` <span class="text-muted">(${item.os})</span>` : ''}
+        ${!item.browser && !item.os ? '<span class="text-muted">—</span>' : ''}
+      </td>
       <td class="text-center">
         ${item.success
           ? '<span class="badge bg-success"><i class="bi bi-check me-1"></i>สำเร็จ</span>'
           : '<span class="badge bg-danger"><i class="bi bi-x me-1"></i>ล้มเหลว</span>'}
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 }
 </script>
 </body>

@@ -282,9 +282,15 @@ const DB = {
 
   // ─── LOGIN HISTORY ───────────────────────────────────────────────────────────
   getLogins() { return this._get(this.K.LOGINS); },
-  logLogin(userId, username, success, ip) {
+  logLogin(userId, username, success, geo = {}, deviceInfo = {}) {
     const log = this.getLogins();
-    log.unshift({ id: Utils.uuid(), userId, username, success, ip: ip || null, timestamp: new Date().toISOString() });
+    log.unshift({
+      id: Utils.uuid(), userId, username, success,
+      ip: geo.ip || null,
+      city: geo.city || null, region: geo.region || null, country: geo.country || null,
+      browser: deviceInfo.browser || null, os: deviceInfo.os || null, device: deviceInfo.device || null,
+      timestamp: new Date().toISOString()
+    });
     if (log.length > 1000) log.splice(1000);
     this._set(this.K.LOGINS, log);
   },

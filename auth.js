@@ -55,24 +55,49 @@ const Auth = {
     { key: 'import_zip',      label: 'Import ZIP (ข้อมูล + PDF)',     group: 'สำรองข้อมูล' },
   ],
 
-  async _fetchIP() {
+  async _fetchGeoInfo() {
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 3000);
-      const res = await fetch('https://api.ipify.org?format=json', { signal: ctrl.signal });
+      const timer = setTimeout(() => ctrl.abort(), 4000);
+      const res = await fetch('https://ip-api.com/json/?fields=status,query,city,regionName,country', { signal: ctrl.signal });
       clearTimeout(timer);
       const data = await res.json();
-      return data.ip || null;
-    } catch { return null; }
+      if (data.status === 'success') {
+        return { ip: data.query || null, city: data.city || null, region: data.regionName || null, country: data.country || null };
+      }
+      return { ip: null, city: null, region: null, country: null };
+    } catch { return { ip: null, city: null, region: null, country: null }; }
+  },
+
+  _getDeviceInfo() {
+    const ua = navigator.userAgent;
+    let browser = 'Unknown', os = 'Unknown', device = 'Desktop';
+
+    if (/Edg\//.test(ua))           browser = 'Edge ' + (ua.match(/Edg\/([\d.]+)/)||[])[1];
+    else if (/OPR\//.test(ua))      browser = 'Opera ' + (ua.match(/OPR\/([\d.]+)/)||[])[1];
+    else if (/Chrome\//.test(ua))   browser = 'Chrome ' + (ua.match(/Chrome\/([\d.]+)/)||[])[1];
+    else if (/Firefox\//.test(ua))  browser = 'Firefox ' + (ua.match(/Firefox\/([\d.]+)/)||[])[1];
+    else if (/Safari\//.test(ua))   browser = 'Safari ' + (ua.match(/Version\/([\d.]+)/)||[])[1];
+
+    if (/Windows NT/.test(ua))      os = 'Windows';
+    else if (/Mac OS X/.test(ua))   os = 'macOS';
+    else if (/Android/.test(ua))    os = 'Android';
+    else if (/iPhone|iPad/.test(ua)) os = 'iOS';
+    else if (/Linux/.test(ua))      os = 'Linux';
+
+    if (/Mobi|Android/i.test(ua))   device = 'Mobile';
+    else if (/Tablet|iPad/i.test(ua)) device = 'Tablet';
+
+    return { browser, os, device };
   },
 
   async login(username, password) {
     const user = DB.getUserByUsername(username);
     if (!user)        return { ok: false, msg: 'ไม่พบชื่อผู้ใช้' };
     if (!user.active) return { ok: false, msg: 'บัญชีถูกระงับการใช้งาน' };
-    const ip = await this._fetchIP();
+    const [geo, deviceInfo] = await Promise.all([this._fetchGeoInfo(), Promise.resolve(this._getDeviceInfo())]);
     if (user.password !== Utils.hashPassword(password)) {
-      DB.logLogin(user.id, user.username, false, ip);
+      DB.logLogin(user.id, user.username, false, geo, deviceInfo);
       return { ok: false, msg: 'รหัสผ่านไม่ถูกต้อง' };
     }
     const session = {
@@ -85,7 +110,7 @@ const Auth = {
     };
     sessionStorage.setItem(this.KEY, JSON.stringify(session));
     if (user.mustChangePw) sessionStorage.setItem('mustChangePw', '1');
-    DB.logLogin(user.id, user.username, true, ip);
+    DB.logLogin(user.id, user.username, true, geo, deviceInfo);
     DB.logActivity(user.id, user.username, 'เข้าสู่ระบบ', {});
     return { ok: true, user: session };
   },
