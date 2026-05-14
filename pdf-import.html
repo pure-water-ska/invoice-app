@@ -350,6 +350,9 @@ function renderCard(data, ci, fname, pn, totalPdf, pageImageUrl) {
     <button class="btn btn-sm btn-success" id="saveBtn_${ci}" onclick="saveSingleCard(${ci})">
       <i class="bi bi-save me-1"></i>บันทึก
     </button>
+    <button class="btn btn-sm btn-outline-danger" onclick="closeCard(${ci})" title="ปิด">
+      <i class="bi bi-x-lg"></i>
+    </button>
   </div>
 </div>
 <div class="collapse" id="raw_${ci}">
@@ -668,6 +671,13 @@ function beInputToCE(txt) {
   let y = parseInt(m[3]);
   if (y > 2500) y -= 543;
   return `${y}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+}
+
+function closeCard(ci) {
+  const card = document.getElementById(`card_${ci}`);
+  if (card) card.remove();
+  _cards[ci] = { ..._cards[ci], _closed: true, saved: true }; // treat as done so batch save ignores it
+  updateSaveBtn();
 }
 
 // Find customer by exact name
