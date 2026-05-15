@@ -1351,7 +1351,7 @@ function showOutstandingPreview(custId) {
   }
 
   const grandRem = unpaid.reduce((s, r) => s + r.rem, 0);
-  const today = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+  const today = Utils.formatDateLongTH(new Date().toISOString());
 
   const rows = unpaid.map((r, i) => `
     <tr style="font-size:13px">
