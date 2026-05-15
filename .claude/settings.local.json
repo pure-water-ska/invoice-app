@@ -41,7 +41,9 @@
       "Bash(node -c drive-store.js)",
       "Bash(node -c drive-config.js)",
       "Bash(node -c nav.js)",
-      "Bash(git commit -m 'fix: hide receiver name field unless cash selected *)"
+      "Bash(git commit -m 'fix: hide receiver name field unless cash selected *)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\APINUN_JP\\\\Downloads\\\\web app\" -Force | Select-Object Name, @{Name=\"Type\";Expression={if\\($_.PSIsContainer\\){\"Directory\"}else{\"File\"}}} | Sort-Object Type, Name)",
+      "Bash(git *)"
     ]
   }
 }

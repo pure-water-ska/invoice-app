@@ -29,6 +29,14 @@
 .img-timeline-item:last-child { margin-bottom: 0; }
 .img-tl-img { max-height:72px; border-radius:4px; border:1px solid #dee2e6; cursor:pointer; }
 [data-bs-theme="dark"] .img-timeline-item::before { border-color: var(--bs-card-bg); }
+
+/* ── Payment summary print ── */
+#payPrintArea { display: none; }
+@media print {
+  body > *:not(#payPrintArea) { display: none !important; }
+  #payPrintArea { display: block !important; margin: 0; padding: 0; }
+  @page { size: A5 portrait; margin: 0; }
+}
 </style>
 </head>
 <body>
@@ -420,6 +428,9 @@
 
 <datalist id="bankDatalist"></datalist>
 
+<!-- A5 Payment Summary Print Area -->
+<div id="payPrintArea"></div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script>
@@ -525,6 +536,10 @@ function render() {
           <button class="btn btn-sm btn-outline-info"
                   onclick="showOutstandingPreview('${inv.customerId}')" title="รายการค้างชำระทั้งหมดของลูกค้า">
             <i class="bi bi-list-check"></i>
+          </button>
+          <button class="btn btn-sm btn-outline-secondary"
+                  onclick="printPaymentSummary('${inv.invoiceNumber}')" title="พิมพ์ใบสรุปชำระเงิน">
+            <i class="bi bi-printer"></i>
           </button>
         </div>
       </td>
@@ -1298,6 +1313,113 @@ async function saveOutstandingImage() {
       setTimeout(() => URL.revokeObjectURL(url), 3000);
     }
   } catch (e) { Utils.showAlert('เกิดข้อผิดพลาด: ' + e.message, 'danger'); }
+}
+
+// ── Print payment summary (A5) ────────────────────────────────────────────────
+function printPaymentSummary(invNum) {
+  const inv = DB.getInvoices().find(i => i.invoiceNumber === invNum);
+  if (!inv) return;
+  const cust     = DB.getCustomerById(inv.customerId);
+  const settings = DB.getSettings();
+  const payments = DB.getPaymentsByInvoice(invNum).filter(p => !p.cancelled);
+  const total    = parseFloat(inv.totalAmount) || 0;
+  const paid     = payments.reduce((s, p) => s + p.amount, 0);
+  const remaining = total - paid;
+  const today    = new Date().toLocaleDateString('th-TH', { year:'numeric', month:'long', day:'numeric' });
+  const printedBy = session ? session.name : '';
+
+  const methodDetail = p => {
+    if (p.method === 'โอน') {
+      const from = Utils.getBankName(p.sourceBank);
+      const to   = Utils.getBankName(p.destBank);
+      return [from, to].filter(Boolean).join(' → ');
+    }
+    if (p.method === 'เช็ค') return p.chequeNo ? `เช็ค#${p.chequeNo}${p.chequeDate ? ' วันที่ ' + Utils.formatDateTH(p.chequeDate) : ''}` : '';
+    if (p.method === 'เงินสด') return p.cashCollector ? `รับโดย: ${p.cashCollector}` : '';
+    return '';
+  };
+
+  const rows = payments.map((p, i) => {
+    const detail = [methodDetail(p), p.notes].filter(Boolean).join(' | ');
+    return `<tr>
+      <td style="padding:3px 5px;border:1px solid #ccc;text-align:center">${i+1}</td>
+      <td style="padding:3px 5px;border:1px solid #ccc;text-align:center">${Utils.formatDateTH(p.payDate || p.createdAt)}</td>
+      <td style="padding:3px 5px;border:1px solid #ccc;text-align:center">${p.method}</td>
+      <td style="padding:3px 5px;border:1px solid #ccc">${detail}</td>
+      <td style="padding:3px 5px;border:1px solid #ccc;text-align:right">${Utils.formatNumber(p.amount)}</td>
+    </tr>`;
+  }).join('');
+
+  const statusColor = remaining <= 0 ? '#1a7a4a' : '#c0392b';
+  const statusText  = remaining <= 0 ? '✓ ชำระครบแล้ว' : `ค้างชำระ ฿${Utils.formatNumber(remaining)}`;
+  const summaryBg   = remaining <= 0 ? '#e8f4ec' : '#fdecea';
+  const addrLine    = [settings.address, settings.phone ? 'โทร. ' + settings.phone : ''].filter(Boolean).join(' | ');
+
+  document.getElementById('payPrintArea').innerHTML = `
+    <div style="font-family:'Sarabun','TH Sarabun New',sans-serif;font-size:9.5pt;color:#111;line-height:1.5;padding:8mm;box-sizing:border-box">
+      <div style="text-align:center;margin-bottom:5mm;border-bottom:1.5px solid #333;padding-bottom:3mm">
+        <div style="font-size:13pt;font-weight:700">${settings.companyName || ''}</div>
+        ${addrLine ? `<div style="font-size:8.5pt;color:#555">${addrLine}</div>` : ''}
+        <div style="font-size:11pt;font-weight:700;margin-top:2mm">ใบสรุปการชำระเงิน</div>
+      </div>
+
+      <table style="width:100%;font-size:8.5pt;margin-bottom:4mm;border-collapse:collapse">
+        <tr>
+          <td style="width:50%;vertical-align:top">
+            <div><span style="color:#555">เลขที่ใบกำกับ:</span> <strong>${invNum}</strong></div>
+            <div><span style="color:#555">วันที่ออกใบกำกับ:</span> ${Utils.formatDateTH(inv.createdAt)}</div>
+            <div><span style="color:#555">วันที่พิมพ์:</span> ${today}</div>
+          </td>
+          <td style="width:50%;vertical-align:top;text-align:right">
+            <div><span style="color:#555">ลูกค้า:</span> <strong>${cust ? cust.name : '-'}</strong></div>
+            ${cust && cust.phone ? `<div><span style="color:#555">โทร:</span> ${cust.phone}</div>` : ''}
+          </td>
+        </tr>
+      </table>
+
+      <table style="width:100%;border-collapse:collapse;font-size:8.5pt;margin-bottom:4mm">
+        <thead>
+          <tr style="background:#eee">
+            <th style="padding:3px 5px;border:1px solid #bbb;text-align:center">#</th>
+            <th style="padding:3px 5px;border:1px solid #bbb;text-align:center">วันที่ชำระ</th>
+            <th style="padding:3px 5px;border:1px solid #bbb;text-align:center">วิธีชำระ</th>
+            <th style="padding:3px 5px;border:1px solid #bbb;text-align:left">รายละเอียด</th>
+            <th style="padding:3px 5px;border:1px solid #bbb;text-align:right">จำนวนเงิน (฿)</th>
+          </tr>
+        </thead>
+        <tbody>${rows || '<tr><td colspan="5" style="padding:5px;text-align:center;color:#888">ยังไม่มีรายการชำระ</td></tr>'}</tbody>
+      </table>
+
+      <table style="width:100%;border-collapse:collapse;font-size:8.5pt;margin-bottom:4mm">
+        <tr>
+          <td style="width:55%"></td>
+          <td style="width:45%;border:1px solid #bbb;padding:0">
+            <table style="width:100%;border-collapse:collapse">
+              <tr style="background:#f5f5f5">
+                <td style="padding:3px 6px;border-bottom:1px solid #ccc">ยอดรวมใบกำกับ</td>
+                <td style="padding:3px 6px;border-bottom:1px solid #ccc;text-align:right">${Utils.formatNumber(total)}</td>
+              </tr>
+              <tr>
+                <td style="padding:3px 6px;border-bottom:1px solid #ccc;color:#1a7a4a">ชำระแล้วทั้งสิ้น</td>
+                <td style="padding:3px 6px;border-bottom:1px solid #ccc;text-align:right;color:#1a7a4a;font-weight:700">${Utils.formatNumber(paid)}</td>
+              </tr>
+              <tr style="background:${summaryBg}">
+                <td style="padding:3px 6px;font-weight:700">ยอดค้างชำระ</td>
+                <td style="padding:3px 6px;text-align:right;font-weight:700;color:${statusColor}">${Utils.formatNumber(Math.max(0, remaining))}</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+
+      <div style="border:1px dashed #aaa;border-radius:3px;padding:3mm;font-size:8pt;color:#444">
+        <strong>สถานะ:</strong> <span style="color:${statusColor};font-weight:700">${statusText}</span> &nbsp;|&nbsp;
+        <strong>จำนวนรายการ:</strong> ${payments.length} รายการ &nbsp;|&nbsp;
+        <strong>พิมพ์โดย:</strong> ${printedBy}
+      </div>
+    </div>`;
+
+  window.print();
 }
 
 async function copyOutstandingImage() {
