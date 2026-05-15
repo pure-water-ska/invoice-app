@@ -384,7 +384,6 @@ const Nav = {
 
     _checkOverdueAlert();
     _checkStorageAlert();
-    DB.runAutoBackup(s.username);
 
     // Force password change for first-time users (set by users.html on creation)
     if (sessionStorage.getItem('mustChangePw') === '1') {

@@ -117,7 +117,11 @@ const Auth = {
 
   logout() {
     const s = this.session();
-    if (s) DB.logActivity(s.userId, s.username, 'ออกจากระบบ', {});
+    if (s) {
+      DB.logActivity(s.userId, s.username, 'ออกจากระบบ', {});
+      // Auto-download backup on sign-out if daily backup is enabled
+      try { DB.runAutoBackup(s.username); } catch {}
+    }
     sessionStorage.removeItem(this.KEY);
     // Sign out of Firebase if sync is active
     try { if (window.firebase && firebase.apps.length) firebase.auth().signOut(); } catch {}

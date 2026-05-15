@@ -92,12 +92,20 @@
     </div>
   </div>
 
-  <!-- Search -->
+  <!-- Search + Sort -->
   <div class="card mb-3">
     <div class="card-body py-2">
-      <div class="input-group input-group-sm" style="max-width:400px">
-        <span class="input-group-text"><i class="bi bi-search"></i></span>
-        <input type="text" id="searchInput" class="form-control" placeholder="ค้นหาชื่อ, เบอร์, ยี่ห้อ...">
+      <div class="d-flex gap-2 flex-wrap align-items-center">
+        <div class="input-group input-group-sm" style="max-width:360px">
+          <span class="input-group-text"><i class="bi bi-search"></i></span>
+          <input type="text" id="searchInput" class="form-control" placeholder="ค้นหาชื่อ, เบอร์, ยี่ห้อ...">
+        </div>
+        <select id="sortCust" class="form-select form-select-sm" style="max-width:190px" onchange="_custPage=1;render()">
+          <option value="name_asc">ชื่อ A → Z</option>
+          <option value="name_desc">ชื่อ Z → A</option>
+          <option value="bal_desc">ยอดค้าง มาก → น้อย</option>
+          <option value="bal_asc">ยอดค้าง น้อย → มาก</option>
+        </select>
       </div>
     </div>
   </div>
@@ -415,7 +423,25 @@ function render() {
       (c.taxId||'').includes(q) ||
       brands.includes(q);
   });
-  list.sort((a,b) => a.name.localeCompare(b.name, 'th'));
+  const sortMode = document.getElementById('sortCust')?.value || 'name_asc';
+  const _custBalance = c => {
+    const invs = DB.getInvoices().filter(i => i.customerId === c.id);
+    const nums = [...new Set(invs.map(i => i.invoiceNumber))];
+    return nums.reduce((s, n) => {
+      const pg1 = invs.find(i => i.invoiceNumber === n && i.page === 1) || invs.find(i => i.invoiceNumber === n);
+      const t = parseFloat(pg1?.totalAmount) || 0;
+      return s + Math.max(0, t - DB.getInvoicePaidAmount(n));
+    }, 0);
+  };
+  list.sort((a, b) => {
+    switch (sortMode) {
+      case 'name_asc':  return a.name.localeCompare(b.name, 'th');
+      case 'name_desc': return b.name.localeCompare(a.name, 'th');
+      case 'bal_desc':  return _custBalance(b) - _custBalance(a);
+      case 'bal_asc':   return _custBalance(a) - _custBalance(b);
+      default:          return a.name.localeCompare(b.name, 'th');
+    }
+  });
   _visibleIds = list.map(c => c.id);  // full filtered list for select-all
 
   const el = document.getElementById('customerList');

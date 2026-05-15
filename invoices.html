@@ -67,10 +67,15 @@
       <table class="table table-hover mb-0">
         <thead>
           <tr>
-            <th>เลขที่</th><th>วันที่</th><th>ลูกค้า</th>
-            <th>จัดส่ง</th><th class="text-end">ยอดรวม</th>
-            <th class="text-end">ชำระแล้ว</th><th class="text-end">ค้าง</th>
-            <th class="text-center">สถานะ</th><th class="text-center">จัดการ</th>
+            <th class="sort-th" onclick="setSort('num')">เลขที่ <span id="si_num"></span></th>
+            <th class="sort-th" onclick="setSort('date')">วันที่ <span id="si_date">▼</span></th>
+            <th class="sort-th" onclick="setSort('cust')">ลูกค้า <span id="si_cust"></span></th>
+            <th class="sort-th" onclick="setSort('ship')">จัดส่ง <span id="si_ship"></span></th>
+            <th class="sort-th text-end" onclick="setSort('total')">ยอดรวม <span id="si_total"></span></th>
+            <th class="sort-th text-end" onclick="setSort('paid')">ชำระแล้ว <span id="si_paid"></span></th>
+            <th class="sort-th text-end" onclick="setSort('rem')">ค้าง <span id="si_rem"></span></th>
+            <th class="sort-th text-center" onclick="setSort('status')">สถานะ <span id="si_status"></span></th>
+            <th class="text-center">จัดการ</th>
           </tr>
         </thead>
         <tbody id="invoiceTable"><tr><td colspan="9" class="text-center text-muted py-4">ยังไม่มีใบกำกับ</td></tr></tbody>
@@ -105,6 +110,12 @@ window.addEventListener('DOMContentLoaded', () => {
 
 const INV_PAGE_SIZE = 30;
 let _invPage = 1;
+let _sortCol = 'date', _sortDir = -1;
+
+function setSort(col) {
+  if (_sortCol === col) _sortDir = -_sortDir; else { _sortCol = col; _sortDir = -1; }
+  _invPage = 1; render();
+}
 const _pdfInvMap = {};
 
 function sanitizeFilename(s) {
@@ -175,7 +186,33 @@ function render() {
     return true;
   });
 
-  list.sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+  // Update sort indicators
+  ['num','date','cust','ship','total','paid','rem','status'].forEach(k => {
+    const el = document.getElementById('si_' + k);
+    if (el) el.textContent = k === _sortCol ? (_sortDir === 1 ? '▲' : '▼') : '';
+  });
+
+  list.sort((a, b) => {
+    const ca  = customers.find(c => c.id === a.customerId);
+    const cb  = customers.find(c => c.id === b.customerId);
+    const pa  = DB.getInvoicePaidAmount(a.invoiceNumber);
+    const pb  = DB.getInvoicePaidAmount(b.invoiceNumber);
+    const ta  = parseFloat(a.totalAmount) || 0;
+    const tb  = parseFloat(b.totalAmount) || 0;
+    let cmp = 0;
+    switch (_sortCol) {
+      case 'num':    cmp = a.invoiceNumber.localeCompare(b.invoiceNumber, 'th'); break;
+      case 'date':   cmp = new Date(a.createdAt) - new Date(b.createdAt); break;
+      case 'cust':   cmp = (ca?.name||'').localeCompare(cb?.name||'', 'th'); break;
+      case 'ship':   cmp = (a.shippingMethod||'').localeCompare(b.shippingMethod||'', 'th'); break;
+      case 'total':  cmp = ta - tb; break;
+      case 'paid':   cmp = pa - pb; break;
+      case 'rem':    cmp = (ta - pa) - (tb - pb); break;
+      case 'status': cmp = statusInfo(pa,ta).key.localeCompare(statusInfo(pb,tb).key); break;
+      default:       cmp = new Date(a.createdAt) - new Date(b.createdAt);
+    }
+    return cmp * _sortDir;
+  });
 
   // Rebuild PDF map for current filtered list
   list.forEach(inv => { if (inv.importedFrom === 'pdf') _pdfInvMap[inv.invoiceNumber] = inv; });

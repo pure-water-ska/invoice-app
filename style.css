@@ -1,5 +1,11 @@
 /* style.css */
 
+/* ── Sortable table headers ── */
+.sort-th { cursor: pointer; user-select: none; white-space: nowrap; }
+.sort-th:hover { background: rgba(0,0,0,.04); }
+[data-bs-theme="dark"] .sort-th:hover { background: rgba(255,255,255,.06); }
+.sort-th span { font-size: 10px; opacity: .7; margin-left: 2px; }
+
 :root {
   --primary: #0d6efd;
   --body-bg: #f0f4f8;
