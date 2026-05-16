@@ -20,6 +20,20 @@
 .item-row select { width: 100%; font-size: 13px; border: 1px solid #dee2e6; border-radius: 4px; padding: 2px 4px; }
 .item-row.empty-row input, .item-row.empty-row select { background: #f8f9fa; color: #aaa; }
 @media (max-width: 767px) { .no-mobile-hide { display: none !important; } }
+/* ── Searchable customer dropdown ── */
+#custSearchWrap { position: relative; }
+#custDropdown {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 1055;
+  background: #fff; border: 1px solid #86b7fe; border-top: none;
+  border-radius: 0 0 6px 6px; max-height: 240px; overflow-y: auto;
+  box-shadow: 0 6px 16px rgba(0,0,0,.12); display: none;
+}
+#custDropdown .copt {
+  padding: 8px 12px; cursor: pointer; font-size: 14px; border-bottom: 1px solid #f0f0f0;
+}
+#custDropdown .copt:last-child { border-bottom: none; }
+#custDropdown .copt:hover, #custDropdown .copt.hi { background: #e8f0ff; color: #0d6efd; }
+#custDropdown .copt-empty { padding: 10px 12px; color: #999; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -50,9 +64,12 @@
         </div>
         <div class="col-12 col-md-4">
           <label class="form-label fw-semibold">ลูกค้า <span class="text-danger">*</span></label>
-          <select id="invCustomer" class="form-select" onchange="onCustomerChange()">
-            <option value="">— เลือกลูกค้า —</option>
-          </select>
+          <div id="custSearchWrap">
+            <input type="text" id="invCustomerSearch" class="form-control" placeholder="พิมพ์ชื่อลูกค้า..."
+                   autocomplete="off" oninput="_custFilter()" onfocus="_custOpen()" onkeydown="_custKey(event)">
+            <input type="hidden" id="invCustomer">
+            <div id="custDropdown"></div>
+          </div>
         </div>
         <div class="col-12 col-md-2">
           <label class="form-label fw-semibold">วิธีจัดส่ง <span class="text-danger">*</span></label>
@@ -287,9 +304,82 @@ window.addEventListener('DOMContentLoaded', () => {
     return;
   }
 
-  // Populate customer select
-  DB.getCustomers().sort((a,b)=>a.name.localeCompare(b.name,'th')).forEach(c => {
-    document.getElementById('invCustomer').innerHTML += `<option value="${c.id}">${c.name}</option>`;
+  // Build customer list for searchable dropdown
+  window._custList = DB.getCustomers().sort((a,b)=>a.name.localeCompare(b.name,'th'));
+
+  // ── Searchable customer dropdown helpers ───────────────────────────────────
+  let _custHi = -1; // highlighted index
+
+  function _custRender(filtered) {
+    const dd = document.getElementById('custDropdown');
+    if (!filtered.length) {
+      dd.innerHTML = '<div class="copt-empty">ไม่พบลูกค้า</div>';
+    } else {
+      dd.innerHTML = filtered.map((c, i) =>
+        `<div class="copt${i===_custHi?' hi':''}" data-id="${c.id}" data-name="${c.name}"
+              onmousedown="setCustomerById('${c.id}','${c.name.replace(/'/g,"\\'")}')">
+           ${c.name}
+         </div>`
+      ).join('');
+    }
+    dd.style.display = '';
+  }
+
+  function _custOpen() {
+    _custHi = -1;
+    _custRender(window._custList);
+  }
+
+  function _custFilter() {
+    _custHi = -1;
+    const q = document.getElementById('invCustomerSearch').value.trim().toLowerCase();
+    const filtered = q ? window._custList.filter(c => c.name.toLowerCase().includes(q)) : window._custList;
+    _custRender(filtered);
+    // Clear hidden ID if user is typing a new search
+    document.getElementById('invCustomer').value = '';
+  }
+
+  function _custClose() {
+    document.getElementById('custDropdown').style.display = 'none';
+    _custHi = -1;
+  }
+
+  window.setCustomerById = function(id, name) {
+    const c = window._custList.find(x => x.id === id);
+    document.getElementById('invCustomer').value = id || '';
+    document.getElementById('invCustomerSearch').value = (name || (c && c.name) || '');
+    _custClose();
+    if (id) onCustomerChange();
+  };
+
+  window._custFilter  = _custFilter;
+  window._custOpen    = _custOpen;
+  window._custKey     = function(e) {
+    const dd    = document.getElementById('custDropdown');
+    const items = dd.querySelectorAll('.copt');
+    if (!items.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      _custHi = Math.min(_custHi + 1, items.length - 1);
+      items.forEach((el, i) => el.classList.toggle('hi', i === _custHi));
+      items[_custHi]?.scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      _custHi = Math.max(_custHi - 1, 0);
+      items.forEach((el, i) => el.classList.toggle('hi', i === _custHi));
+      items[_custHi]?.scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const hi = dd.querySelector('.copt.hi') || dd.querySelector('.copt');
+      if (hi) { setCustomerById(hi.dataset.id, hi.dataset.name); }
+    } else if (e.key === 'Escape') {
+      _custClose();
+    }
+  };
+
+  // Close dropdown when clicking outside
+  document.addEventListener('mousedown', (e) => {
+    if (!document.getElementById('custSearchWrap').contains(e.target)) _custClose();
   });
 
   if (editNum) {
@@ -306,10 +396,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // Pre-select customer from URL param (e.g. from payment overpay redirect)
     const custParam = params.get('cust');
-    if (custParam) {
-      document.getElementById('invCustomer').value = custParam;
-      onCustomerChange();
-    }
+    if (custParam) setCustomerById(custParam);
 
     // Pre-fill adjustment item if coming from overpay/underpay
     const adjustParam = params.get('adjust');
@@ -839,7 +926,7 @@ function removeRow(i) {
 }
 
 function clearForm() {
-  document.getElementById('invCustomer').value = '';
+  setCustomerById('', '');
   document.getElementById('invShipping').value = '';
   if (_fpInvDate) _fpInvDate.setDate(new Date()); else document.getElementById('invDate').value = Utils.todayBE();
   document.getElementById('invNumber').value = DB.peekNextInvoiceNumber();
@@ -1144,9 +1231,8 @@ function loadEdit(invNum) {
   document.getElementById('invNumber').value  = invNum;
   if (_fpInvDate) _fpInvDate.setDate(first.createdAt ? first.createdAt.slice(0, 10) : new Date());
   else document.getElementById('invDate').value = first.createdAt ? Utils.isoToBE(first.createdAt) : Utils.todayBE();
-  document.getElementById('invCustomer').value = first.customerId;
+  setCustomerById(first.customerId);
   document.getElementById('invShipping').value = first.shippingMethod;
-  onCustomerChange();
 
   items = pages.flatMap(p => p.items || []).map(item => ({
     productId: item.productId || '',
