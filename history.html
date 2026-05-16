@@ -65,6 +65,11 @@
             <option value="0">แสดงทั้งหมด</option>
           </select>
         </div>
+        <div class="col-6 col-md-auto">
+          <button class="btn btn-outline-secondary btn-sm w-100" onclick="clearFilters()">
+            <i class="bi bi-x-lg me-1"></i>ล้าง
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -171,6 +176,19 @@ function switchTab(tab, el) {
 }
 
 function renderCurrent() { currentTab === 'activity' ? renderActivity() : renderLogin(); }
+
+function clearFilters() {
+  ['filterUser','searchText','filterAction','filterSuccess'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  ['filterFrom','filterTo'].forEach(id => {
+    const el = document.getElementById(id);
+    el.value = '';
+    if (el._flatpickr) el._flatpickr.clear();
+  });
+  renderCurrent();
+}
 function render() { renderActivity(); renderLogin(); }
 
 function getFilters() {

@@ -74,11 +74,16 @@
             <option value="paid">ชำระแล้ว</option>
           </select>
         </div>
-        <div class="col-md-2">
+        <div class="col-6 col-md-2">
           <input type="text" id="filterFrom" class="form-control form-control-sm" placeholder="DD/MM/YYYY">
         </div>
-        <div class="col-md-2">
+        <div class="col-6 col-md-2">
           <input type="text" id="filterTo" class="form-control form-control-sm" placeholder="DD/MM/YYYY">
+        </div>
+        <div class="col-12 col-md-auto">
+          <button class="btn btn-outline-secondary btn-sm w-100" onclick="clearFilters()">
+            <i class="bi bi-x-lg me-1"></i>ล้าง
+          </button>
         </div>
       </div>
     </div>
@@ -448,6 +453,16 @@ Nav.render('payments');
 
 let payModal, overpayModal, transferAccountModal, cancelPayModal, dateConfirmModal, imgUpdateModal;
 let _sortCol = 'date', _sortDir = -1;
+
+function clearFilters() {
+  ['searchInv','filterCustomer','filterStatus'].forEach(id => document.getElementById(id).value = '');
+  ['filterFrom','filterTo'].forEach(id => {
+    const el = document.getElementById(id);
+    el.value = '';
+    if (el._flatpickr) el._flatpickr.clear();
+  });
+  render();
+}
 
 function setSort(col) {
   if (_sortCol === col) _sortDir = -_sortDir; else { _sortCol = col; _sortDir = -1; }
