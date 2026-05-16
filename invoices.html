@@ -29,11 +29,11 @@
   <div id="alertBox" class="mb-2"></div>
 
   <!-- Selection toolbar -->
-  <div id="selToolbar" class="d-none mb-2 px-3 py-2 rounded d-flex align-items-center gap-2 flex-wrap alert alert-primary py-2"
+  <div id="selToolbar" class="mb-2 alert alert-primary py-2 d-flex align-items-center gap-2 flex-wrap" style="display:none!important">
     <input type="checkbox" id="selAllChk" style="width:16px;height:16px;accent-color:#0d6efd;cursor:pointer"
            onchange="toggleAllSel(this.checked)" title="เลือก/ยกเลิกทั้งหมด">
-    <span id="selLabel" class="fw-semibold small text-primary">เลือก 0 รายการ</span>
-    <div class="ms-auto d-flex gap-2">
+    <span id="selLabel" class="fw-semibold small">เลือก 0 รายการ</span>
+    <div class="ms-auto d-flex gap-2 flex-wrap">
       <button class="btn btn-sm btn-light border" onclick="toggleAllSel(true)">เลือกทั้งหมด</button>
       <button class="btn btn-sm btn-outline-secondary" onclick="clearSel()">ยกเลิก</button>
       <button class="btn btn-sm btn-danger" id="bulkDelBtn" disabled onclick="confirmBulkDelete()">
@@ -148,15 +148,15 @@ function toggleSelMode() {
   if (_selMode) {
     btn.classList.add('active', 'btn-primary');
     btn.classList.remove('btn-outline-secondary');
-    toolbar.classList.remove('d-none');
+    toolbar.style.removeProperty('display');
     thChk.classList.remove('d-none');
-    thActions.classList.add('d-none');
+    if (thActions) thActions.classList.add('d-none');
   } else {
     btn.classList.remove('active', 'btn-primary');
     btn.classList.add('btn-outline-secondary');
-    toolbar.classList.add('d-none');
+    toolbar.style.setProperty('display', 'none', 'important');
     thChk.classList.add('d-none');
-    thActions.classList.remove('d-none');
+    if (thActions) thActions.classList.remove('d-none');
     clearSel();
   }
   render();
@@ -222,9 +222,8 @@ function executeBulkDelete() {
   _selMode = false;
   document.getElementById('selModeBtn').classList.remove('active','btn-primary');
   document.getElementById('selModeBtn').classList.add('btn-outline-secondary');
-  document.getElementById('selToolbar').classList.add('d-none');
+  document.getElementById('selToolbar').style.setProperty('display', 'none', 'important');
   document.getElementById('thChk').classList.add('d-none');
-  document.getElementById('thActions').classList.remove('d-none');
   render();
 }
 
