@@ -3,7 +3,7 @@
 // ⚠️  เมื่อ deploy version ใหม่ ให้อัปเดต CACHE_VERSION ให้ตรงกับ APP_VERSION ใน utils.js
 //     เพื่อให้ browser ล้าง cache เก่าและดาวน์โหลดไฟล์ใหม่ทั้งหมด
 
-const CACHE_VERSION  = 'v1.2.8';
+const CACHE_VERSION  = 'v1.2.9';
 const STATIC_CACHE   = `wt-static-${CACHE_VERSION}`;
 const RUNTIME_CACHE  = `wt-runtime-${CACHE_VERSION}`;
 
@@ -19,6 +19,7 @@ const APP_SHELL = [
   './utils.js',
   './db.js',
   './auth.js',
+  './bedate.js',
   './idb.js',
   './drive-store.js',
   './drive-db-sync.js',
@@ -31,6 +32,9 @@ const APP_SHELL = [
   'https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css',
   // html2canvas
   'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js',
+  // flatpickr (B.E. date picker)
+  'https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css',
+  'https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js',
 ];
 
 // ── INSTALL: pre-cache app shell ───────────────────────────────────────────────

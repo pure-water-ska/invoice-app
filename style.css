@@ -105,6 +105,56 @@ body {
   .stat-card .stat-value { font-size: 1.4rem; }
 }
 
+@media (max-width: 576px) {
+  /* Typography */
+  body { font-size: 13px; }
+  h4, .h4 { font-size: 1.1rem; }
+  h5, .h5 { font-size: 1rem; }
+
+  /* Page wrap */
+  .page-wrap { padding: .5rem; }
+
+  /* Tables — tighter cells so more fits on screen */
+  .table td, .table th { padding: .35rem .4rem; font-size: 12px; }
+  .table-responsive { border-radius: 8px; }
+
+  /* Buttons — keep them tappable but compact */
+  .btn-sm { padding: .25rem .45rem; font-size: 11px; }
+  .btn { font-size: 13px; }
+
+  /* Filter / action bars — stack nicely */
+  .filter-bar .row > [class*="col-"] { margin-bottom: .4rem; }
+  .input-group { flex-wrap: nowrap; }
+
+  /* Stat cards */
+  .stat-card { padding: .8rem; }
+  .stat-card .stat-icon { font-size: 1.8rem; }
+  .stat-card .stat-value { font-size: 1.2rem; }
+  .stat-card .stat-label { font-size: .75rem; }
+
+  /* Modal — full-width on phone */
+  .modal-dialog { margin: .5rem; }
+  .modal-lg, .modal-xl { max-width: 100%; }
+
+  /* Card headers */
+  .card-header { padding: .6rem .8rem; }
+  .card-body { padding: .75rem; }
+
+  /* Page header row (title + action button) */
+  .page-header { flex-wrap: wrap; gap: .5rem; }
+  .page-header .btn { font-size: 12px; padding: .3rem .6rem; }
+
+  /* Invoice action buttons in table */
+  .action-btns { white-space: nowrap; }
+  .action-btns .btn { padding: .2rem .35rem; font-size: 11px; }
+
+  /* Badge */
+  .badge { font-size: 10px; padding: .25em .45em; }
+
+  /* Navigation */
+  #navContainer .navbar-brand { font-size: .95rem; }
+}
+
 /* ── Dark Mode (Bootstrap 5.3 data-bs-theme="dark") ── */
 [data-bs-theme="dark"] {
   --body-bg: #0d1117;

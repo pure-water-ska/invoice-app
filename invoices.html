@@ -12,18 +12,19 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css">
 </head>
 <body>
 <div id="navContainer"></div>
 <div class="page-wrap">
-  <div class="d-flex justify-content-between align-items-center mb-3">
+  <div class="d-flex justify-content-between align-items-center mb-3 page-header">
     <h5 class="mb-0 fw-bold"><i class="bi bi-receipt me-2 text-primary"></i>รายการใบกำกับสินค้า</h5>
-    <a href="invoice-create.html" class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i>สร้างใบใหม่</a>
+    <a href="invoice-create.html" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>สร้างใบใหม่</a>
   </div>
   <div id="alertBox" class="mb-2"></div>
 
   <!-- Filters -->
-  <div class="card mb-3">
+  <div class="card mb-3 filter-bar">
     <div class="card-body py-2">
       <div class="row g-2">
         <div class="col-md-3">
@@ -46,10 +47,10 @@
           </select>
         </div>
         <div class="col-md-2">
-          <input type="date" id="filterFrom" class="form-control form-control-sm" placeholder="จากวันที่">
+          <input type="text" id="filterFrom" class="form-control form-control-sm" placeholder="DD/MM/YYYY">
         </div>
         <div class="col-md-2">
-          <input type="date" id="filterTo" class="form-control form-control-sm" placeholder="ถึงวันที่">
+          <input type="text" id="filterTo" class="form-control form-control-sm" placeholder="DD/MM/YYYY">
         </div>
       </div>
     </div>
@@ -70,15 +71,15 @@
             <th class="sort-th" onclick="setSort('num')">เลขที่ <span id="si_num"></span></th>
             <th class="sort-th" onclick="setSort('date')">วันที่ <span id="si_date">▼</span></th>
             <th class="sort-th" onclick="setSort('cust')">ลูกค้า <span id="si_cust"></span></th>
-            <th class="sort-th" onclick="setSort('ship')">จัดส่ง <span id="si_ship"></span></th>
-            <th class="sort-th text-end" onclick="setSort('total')">ยอดรวม <span id="si_total"></span></th>
-            <th class="sort-th text-end" onclick="setSort('paid')">ชำระแล้ว <span id="si_paid"></span></th>
+            <th class="sort-th d-none d-md-table-cell" onclick="setSort('ship')">จัดส่ง <span id="si_ship"></span></th>
+            <th class="sort-th text-end d-none d-md-table-cell" onclick="setSort('total')">ยอดรวม <span id="si_total"></span></th>
+            <th class="sort-th text-end d-none d-md-table-cell" onclick="setSort('paid')">ชำระแล้ว <span id="si_paid"></span></th>
             <th class="sort-th text-end" onclick="setSort('rem')">ค้าง <span id="si_rem"></span></th>
             <th class="sort-th text-center" onclick="setSort('status')">สถานะ <span id="si_status"></span></th>
             <th class="text-center">จัดการ</th>
           </tr>
         </thead>
-        <tbody id="invoiceTable"><tr><td colspan="9" class="text-center text-muted py-4">ยังไม่มีใบกำกับ</td></tr></tbody>
+        <tbody id="invoiceTable"><tr><td colspan="6" class="text-center text-muted py-4">ยังไม่มีใบกำกับ</td></tr></tbody>
       </table>
     </div>
     <div id="invPagination" class="d-flex justify-content-between align-items-center px-3 py-2 border-top small text-muted" style="display:none!important"></div>
@@ -86,7 +87,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script><script src="idb.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
+<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script><script src="idb.js"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -102,9 +104,11 @@ window.addEventListener('DOMContentLoaded', () => {
   if (params.get('cust')) custSel.value = params.get('cust');
   if (params.get('num')) document.getElementById('searchInput').value = params.get('num');
 
-  ['searchInput','filterCustomer','filterStatus','filterFrom','filterTo'].forEach(id =>
+  ['searchInput','filterCustomer','filterStatus'].forEach(id =>
     document.getElementById(id).addEventListener('change', () => { _invPage = 1; render(); }));
   document.getElementById('searchInput').addEventListener('input', () => { _invPage = 1; render(); });
+  BEDate.byId('filterFrom', { onChange: () => { _invPage = 1; render(); } });
+  BEDate.byId('filterTo',   { onChange: () => { _invPage = 1; render(); } });
   render();
 });
 
@@ -160,8 +164,8 @@ function render() {
   const q = document.getElementById('searchInput').value.toLowerCase();
   const fc = document.getElementById('filterCustomer').value;
   const fs = document.getElementById('filterStatus').value;
-  const from = document.getElementById('filterFrom').value;
-  const to   = document.getElementById('filterTo').value;
+  const from = Utils.parseBEToISO(document.getElementById('filterFrom').value);
+  const to   = Utils.parseBEToISO(document.getElementById('filterTo').value);
 
   const allInvoices = DB.getInvoices();
   const customers = DB.getCustomers();
@@ -230,7 +234,7 @@ function render() {
 
   const tbody = document.getElementById('invoiceTable');
   if (list.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">ไม่พบใบกำกับ</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">ไม่พบใบกำกับ</td></tr>';
     document.getElementById('invPagination').style.display = 'none';
     return;
   }
@@ -253,9 +257,9 @@ function render() {
       </td>
       <td>${Utils.formatDateTH(inv.createdAt)}</td>
       <td>${cust ? cust.name : '-'}</td>
-      <td><span class="badge bg-light text-dark border">${inv.shippingMethod||'-'}</span></td>
-      <td class="text-end">฿${Utils.formatNumber(total)}</td>
-      <td class="text-end text-success">฿${Utils.formatNumber(paid)}</td>
+      <td class="d-none d-md-table-cell"><span class="badge bg-light text-dark border">${inv.shippingMethod||'-'}</span></td>
+      <td class="text-end d-none d-md-table-cell">฿${Utils.formatNumber(total)}</td>
+      <td class="text-end text-success d-none d-md-table-cell">฿${Utils.formatNumber(paid)}</td>
       <td class="text-end ${remaining>0?'text-danger fw-semibold':'text-muted'}">฿${Utils.formatNumber(remaining)}</td>
       <td class="text-center"><span class="badge ${si.cls}">${si.label}</span></td>
       <td class="text-center">

@@ -12,6 +12,7 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css">
 <style>
 .rpt-table th  { background:#e9ecef; font-weight:600; white-space:nowrap; font-size:13px; }
 .rpt-table td  { font-size:13px; vertical-align:middle; }
@@ -52,24 +53,22 @@
   </div>
 
   <!-- Filter bar -->
-  <div class="card mb-3 no-print" id="filterBar">
+  <div class="card mb-3 no-print filter-bar" id="filterBar">
     <div class="card-body py-2">
       <div class="row g-2 align-items-end">
-        <div class="col-auto">
+        <div class="col-6 col-sm-auto">
           <label class="form-label mb-1 fw-semibold small">ตั้งแต่วันที่</label>
-          <input type="date" id="filterFrom" class="form-control form-control-sm" style="width:150px">
+          <input type="text" id="filterFrom" class="form-control form-control-sm" placeholder="DD/MM/YYYY">
         </div>
-        <div class="col-auto">
+        <div class="col-6 col-sm-auto">
           <label class="form-label mb-1 fw-semibold small">ถึงวันที่</label>
-          <input type="date" id="filterTo" class="form-control form-control-sm" style="width:150px">
+          <input type="text" id="filterTo" class="form-control form-control-sm" placeholder="DD/MM/YYYY">
         </div>
-        <div class="col-auto d-flex gap-1">
+        <div class="col-12 col-sm-auto d-flex gap-1 flex-wrap">
           <button class="btn btn-sm btn-outline-secondary" onclick="setRange('month')">เดือนนี้</button>
           <button class="btn btn-sm btn-outline-secondary" onclick="setRange('last3')">3 เดือน</button>
           <button class="btn btn-sm btn-outline-secondary" onclick="setRange('year')">ปีนี้</button>
           <button class="btn btn-sm btn-outline-secondary" onclick="setRange('all')">ทั้งหมด</button>
-        </div>
-        <div class="col-auto ms-auto">
           <button class="btn btn-sm btn-primary" onclick="runReport()"><i class="bi bi-funnel me-1"></i>คำนวณ</button>
         </div>
       </div>
@@ -132,7 +131,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
+<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script><script src="bedate.js"></script>
 <script>
 Auth.require();
 DB.init();
@@ -145,7 +145,11 @@ let reportGroups = {};   // groupKey -> { label, invoices[], payments[], items[]
 let inDetailView = false;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
+let _fpRptFrom, _fpRptTo;
+
 window.addEventListener('DOMContentLoaded', () => {
+  _fpRptFrom = BEDate.byId('filterFrom');
+  _fpRptTo   = BEDate.byId('filterTo');
   setRange('month');
   runReport();
 });
@@ -164,8 +168,8 @@ function setRange(preset) {
   } else {
     from = '2020-01-01'; to = '2099-12-31';
   }
-  document.getElementById('filterFrom').value = from;
-  document.getElementById('filterTo').value   = to;
+  if (_fpRptFrom) _fpRptFrom.setDate(from); else document.getElementById('filterFrom').value = Utils.isoToBE(from);
+  if (_fpRptTo)   _fpRptTo.setDate(to);   else document.getElementById('filterTo').value   = Utils.isoToBE(to);
 }
 
 function switchTab(tab, btn) {
@@ -178,10 +182,10 @@ function switchTab(tab, btn) {
 // ── Core data builder ─────────────────────────────────────────────────────────
 function runReport() {
   closeDetail();
-  const fromVal = document.getElementById('filterFrom').value;
-  const toVal   = document.getElementById('filterTo').value;
-  const from = fromVal ? new Date(fromVal+'T00:00:00') : new Date('2000-01-01');
-  const to   = toVal   ? new Date(toVal  +'T23:59:59') : new Date('2099-12-31');
+  const fromISO = Utils.parseBEToISO(document.getElementById('filterFrom').value);
+  const toISO   = Utils.parseBEToISO(document.getElementById('filterTo').value);
+  const from = fromISO ? new Date(fromISO+'T00:00:00') : new Date('2000-01-01');
+  const to   = toISO   ? new Date(toISO  +'T23:59:59') : new Date('2099-12-31');
 
   const allInvoices = DB.getInvoices();
   const allPayments = DB.getPayments();

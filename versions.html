@@ -12,6 +12,7 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css">
 <style>
 .tl-group        { margin-bottom: 2rem; }
 .tl-group-header { font-weight: 700; font-size: 15px; color: #0d6efd;
@@ -71,30 +72,30 @@ mark { background:#fff3cd; padding:0 2px; border-radius:2px; }
   <div id="alertBox" class="mb-2"></div>
 
   <!-- Filter bar -->
-  <div class="card mb-3 no-print">
+  <div class="card mb-3 no-print filter-bar">
     <div class="card-body py-2">
       <div class="row g-2 align-items-end">
-        <div class="col-md-3">
+        <div class="col-12 col-md-3">
           <div class="input-group input-group-sm">
             <span class="input-group-text"><i class="bi bi-search"></i></span>
             <input type="text" id="searchQ" class="form-control"
                    placeholder="ค้นหา ลูกค้า / ยี่ห้อ / ขนาด..." oninput="render()">
           </div>
         </div>
-        <div class="col-md-3">
+        <div class="col-12 col-md-3">
           <select id="filterCust" class="form-select form-select-sm" onchange="render()">
             <option value="">— ลูกค้าทั้งหมด —</option>
           </select>
         </div>
-        <div class="col-md-2">
-          <input type="date" id="filterFrom" class="form-control form-control-sm"
-                 onchange="render()" title="ตั้งแต่วันที่">
+        <div class="col-6 col-md-2">
+          <input type="text" id="filterFrom" class="form-control form-control-sm"
+                 title="ตั้งแต่วันที่" placeholder="DD/MM/YYYY">
         </div>
-        <div class="col-md-2">
-          <input type="date" id="filterTo" class="form-control form-control-sm"
-                 onchange="render()" title="ถึงวันที่">
+        <div class="col-6 col-md-2">
+          <input type="text" id="filterTo" class="form-control form-control-sm"
+                 title="ถึงวันที่" placeholder="DD/MM/YYYY">
         </div>
-        <div class="col-md-2">
+        <div class="col-12 col-md-2">
           <select id="groupBy" class="form-select form-select-sm" onchange="render()">
             <option value="customer">จัดกลุ่มตามลูกค้า</option>
             <option value="date">จัดกลุ่มตามเดือน</option>
@@ -129,21 +130,21 @@ mark { background:#fff3cd; padding:0 2px; border-radius:2px; }
             </select>
           </div>
 
-          <div class="col-md-6">
+          <div class="col-12 col-md-6">
             <label class="form-label fw-semibold">ยี่ห้อ <span class="text-danger">*</span></label>
             <input type="text" id="vBrand" class="form-control" list="vBrandDatalist"
                    placeholder="เลือกหรือพิมพ์ยี่ห้อ" autocomplete="off">
             <datalist id="vBrandDatalist"></datalist>
           </div>
 
-          <div class="col-md-6">
+          <div class="col-12 col-md-6">
             <label class="form-label fw-semibold">ขนาด / สินค้า <span class="text-danger">*</span></label>
             <input type="text" id="vSize" class="form-control" list="vSizeDatalist"
                    placeholder="เลือกหรือพิมพ์ขนาด" autocomplete="off">
             <datalist id="vSizeDatalist"></datalist>
           </div>
 
-          <div class="col-md-6">
+          <div class="col-12 col-md-6">
             <label class="form-label fw-semibold">ชื่อสี <span class="text-danger">*</span></label>
             <input type="text" id="vColorName" class="form-control" list="vColorNameDatalist"
                    placeholder="เช่น สีแดง, สีน้ำเงิน..." autocomplete="off">
@@ -157,9 +158,9 @@ mark { background:#fff3cd; padding:0 2px; border-radius:2px; }
             </datalist>
           </div>
 
-          <div class="col-md-6">
+          <div class="col-12 col-md-6">
             <label class="form-label fw-semibold">วันที่ <span class="text-danger">*</span></label>
-            <input type="date" id="vDate" class="form-control">
+            <input type="text" id="vDate" class="form-control" placeholder="DD/MM/YYYY">
           </div>
 
           <div class="col-12">
@@ -191,7 +192,8 @@ mark { background:#fff3cd; padding:0 2px; border-radius:2px; }
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
+<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -200,8 +202,13 @@ Nav.render('versions');
 let verModal;
 let verImageB64 = '';
 
+let _fpVDate;
+
 window.addEventListener('DOMContentLoaded', () => {
   verModal = new bootstrap.Modal(document.getElementById('verModal'));
+  _fpVDate = BEDate.byId('vDate');
+  BEDate.byId('filterFrom', { onChange: render });
+  BEDate.byId('filterTo',   { onChange: render });
 
   const custs = DB.getCustomers().sort((a,b) => a.name.localeCompare(b.name,'th'));
   custs.forEach(c => {
@@ -219,8 +226,8 @@ window.addEventListener('DOMContentLoaded', () => {
 function render() {
   const q      = document.getElementById('searchQ').value.trim().toLowerCase();
   const custF  = document.getElementById('filterCust').value;
-  const from   = document.getElementById('filterFrom').value;
-  const to     = document.getElementById('filterTo').value;
+  const from   = Utils.parseBEToISO(document.getElementById('filterFrom').value);
+  const to     = Utils.parseBEToISO(document.getElementById('filterTo').value);
   const groupBy = document.getElementById('groupBy').value;
   const customers = DB.getCustomers();
 
@@ -347,7 +354,8 @@ function openModal(id) {
     const v = DB.getVersions().find(x => x.id === id);
     if (v) {
       document.getElementById('vCust').value      = v.customerId || '';
-      document.getElementById('vDate').value      = v.date || '';
+      if (_fpVDate) _fpVDate.setDate(v.date || new Date());
+      else document.getElementById('vDate').value = v.date ? Utils.isoToBE(v.date) : Utils.todayBE();
       document.getElementById('vBrand').value     = v.brand || (v.brands||[])[0] || '';
       document.getElementById('vSize').value      = v.size  || (v.sizes||[])[0]  || '';
       document.getElementById('vNote').value      = v.note  || '';
@@ -360,7 +368,7 @@ function openModal(id) {
     }
   } else {
     document.getElementById('vCust').value = '';
-    document.getElementById('vDate').value = Utils.todayInputValue();
+    if (_fpVDate) _fpVDate.setDate(new Date()); else document.getElementById('vDate').value = Utils.todayBE();
     updateBrandDatalist('');
   }
   verModal.show();
@@ -385,7 +393,7 @@ function saveVersion() {
   const custId = document.getElementById('vCust').value;
   const brand  = document.getElementById('vBrand').value.trim();
   const size   = document.getElementById('vSize').value.trim();
-  const date   = document.getElementById('vDate').value;
+  const date   = Utils.parseBEToISO(document.getElementById('vDate').value) || Utils.todayInputValue();
   const colorName = document.getElementById('vColorName').value.trim();
   if (!custId)    { Utils.showAlert('กรุณาเลือกลูกค้า',    'warning','modalAlert'); return; }
   if (!brand)     { Utils.showAlert('กรุณาระบุยี่ห้อ',     'warning','modalAlert'); return; }

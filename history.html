@@ -12,6 +12,7 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css">
 </head>
 <body>
 <div id="navContainer"></div>
@@ -24,39 +25,39 @@
   </ul>
 
   <!-- Filters -->
-  <div class="card mb-3">
+  <div class="card mb-3 filter-bar">
     <div class="card-body py-2">
       <div class="row g-2">
-        <div class="col-md-3">
+        <div class="col-6 col-md-3">
           <select id="filterUser" class="form-select form-select-sm">
             <option value="">— ผู้ใช้ทั้งหมด —</option>
           </select>
         </div>
-        <div class="col-md-3">
+        <div class="col-6 col-md-3">
           <div class="input-group input-group-sm">
             <span class="input-group-text"><i class="bi bi-search"></i></span>
             <input type="text" id="searchText" class="form-control" placeholder="ค้นหา...">
           </div>
         </div>
-        <div class="col-md-2">
-          <input type="date" id="filterFrom" class="form-control form-control-sm">
+        <div class="col-6 col-md-2">
+          <input type="text" id="filterFrom" class="form-control form-control-sm" placeholder="DD/MM/YYYY">
         </div>
-        <div class="col-md-2">
-          <input type="date" id="filterTo" class="form-control form-control-sm">
+        <div class="col-6 col-md-2">
+          <input type="text" id="filterTo" class="form-control form-control-sm" placeholder="DD/MM/YYYY">
         </div>
-        <div class="col-md-2" id="activityFilterExt">
+        <div class="col-6 col-md-2" id="activityFilterExt">
           <select id="filterAction" class="form-select form-select-sm">
             <option value="">— ทุกประเภท —</option>
           </select>
         </div>
-        <div class="col-md-2 d-none" id="loginFilterExt">
+        <div class="col-6 col-md-2 d-none" id="loginFilterExt">
           <select id="filterSuccess" class="form-select form-select-sm">
             <option value="">— ทุกผลลัพธ์ —</option>
             <option value="true">สำเร็จ</option>
             <option value="false">ล้มเหลว</option>
           </select>
         </div>
-        <div class="col-md-2">
+        <div class="col-6 col-md-2">
           <select id="filterRows" class="form-select form-select-sm">
             <option value="50">แสดง 50 รายการ</option>
             <option value="100">แสดง 100 รายการ</option>
@@ -107,7 +108,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
+<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -146,10 +148,12 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('filterAction').innerHTML += `<option value="${a}">${a}</option>`;
   });
 
-  ['filterUser','searchText','filterFrom','filterTo','filterRows','filterAction','filterSuccess'].forEach(id => {
+  ['filterUser','searchText','filterRows','filterAction','filterSuccess'].forEach(id => {
     document.getElementById(id).addEventListener('input', renderCurrent);
     document.getElementById(id).addEventListener('change', renderCurrent);
   });
+  BEDate.byId('filterFrom', { onChange: renderCurrent });
+  BEDate.byId('filterTo',   { onChange: renderCurrent });
   render();
 });
 
@@ -173,8 +177,8 @@ function getFilters() {
   return {
     user: document.getElementById('filterUser').value,
     q: document.getElementById('searchText').value.toLowerCase(),
-    from: document.getElementById('filterFrom').value,
-    to: document.getElementById('filterTo').value,
+    from: Utils.parseBEToISO(document.getElementById('filterFrom').value),
+    to:   Utils.parseBEToISO(document.getElementById('filterTo').value),
     limit: parseInt(document.getElementById('filterRows').value) || 0,
     action: document.getElementById('filterAction').value,
     success: document.getElementById('filterSuccess').value,

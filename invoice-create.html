@@ -12,6 +12,7 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css">
 <style>
 .item-row td { vertical-align: middle; padding: 3px 4px; }
 .item-row input { border: 1px solid #dee2e6; border-radius: 4px; padding: 2px 5px; font-size: 13px; width: 100%; }
@@ -39,21 +40,21 @@
     <div class="card-header bg-light fw-semibold py-2 inv-section-header">ข้อมูลใบกำกับ</div>
     <div class="card-body">
       <div class="row g-3">
-        <div class="col-md-3">
+        <div class="col-6 col-md-3">
           <label class="form-label fw-semibold">เลขที่ใบกำกับ</label>
           <input type="text" id="invNumber" class="form-control" readonly placeholder="สร้างอัตโนมัติ" style="background:#f8f9fa">
         </div>
-        <div class="col-md-3">
+        <div class="col-6 col-md-3">
           <label class="form-label fw-semibold">วันที่</label>
-          <input type="date" id="invDate" class="form-control">
+          <input type="text" id="invDate" class="form-control" placeholder="DD/MM/YYYY">
         </div>
-        <div class="col-md-4">
+        <div class="col-12 col-md-4">
           <label class="form-label fw-semibold">ลูกค้า <span class="text-danger">*</span></label>
           <select id="invCustomer" class="form-select" onchange="onCustomerChange()">
             <option value="">— เลือกลูกค้า —</option>
           </select>
         </div>
-        <div class="col-md-2">
+        <div class="col-12 col-md-2">
           <label class="form-label fw-semibold">วิธีจัดส่ง <span class="text-danger">*</span></label>
           <select id="invShipping" class="form-select" onchange="refreshPrices()">
             <option value="">— เลือก —</option>
@@ -76,7 +77,7 @@
     </div>
     <div class="card-body p-2">
       <div class="table-responsive">
-        <table class="table table-bordered mb-0" id="itemTable" style="min-width:700px">
+        <table class="table table-bordered mb-0" id="itemTable" style="min-width:600px">
           <thead class="table-light">
             <tr>
               <th style="width:40px">#</th>
@@ -100,8 +101,8 @@
     </div>
   </div>
 
-  <div class="d-flex gap-2 mb-3 no-print" id="saveBtnRow" style="display:none">
-    <button class="btn btn-primary btn-lg" id="previewBtn" onclick="previewInvoice()"><i class="bi bi-eye me-1"></i>ดูตัวอย่าง</button>
+  <div class="d-flex flex-wrap gap-2 mb-3 no-print" id="saveBtnRow" style="display:none">
+    <button class="btn btn-primary" id="previewBtn" onclick="previewInvoice()"><i class="bi bi-eye me-1"></i>ดูตัวอย่าง</button>
     <button class="btn btn-outline-secondary" onclick="clearForm()"><i class="bi bi-arrow-counterclockwise me-1"></i>ล้างข้อมูล</button>
   </div>
 
@@ -119,7 +120,8 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
-<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script><script src="idb.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
+<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script><script src="idb.js"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -251,7 +253,10 @@ let viewMode = false;
 let editMode = false;
 let currentInvNum = null;
 
+let _fpInvDate;
+
 window.addEventListener('DOMContentLoaded', () => {
+  _fpInvDate = BEDate.byId('invDate');
   const params = new URLSearchParams(location.search);
   const viewNum = params.get('view');
   const editNum = params.get('edit');
@@ -296,7 +301,7 @@ window.addEventListener('DOMContentLoaded', () => {
     viewMode = false;
     document.getElementById('saveBtnRow').style.display = '';
     document.getElementById('invNumber').value = DB.peekNextInvoiceNumber();
-    document.getElementById('invDate').value = Utils.todayInputValue();
+    _fpInvDate.setDate(new Date());
     initRows();
 
     // Pre-select customer from URL param (e.g. from payment overpay redirect)
@@ -836,7 +841,7 @@ function removeRow(i) {
 function clearForm() {
   document.getElementById('invCustomer').value = '';
   document.getElementById('invShipping').value = '';
-  document.getElementById('invDate').value = Utils.todayInputValue();
+  if (_fpInvDate) _fpInvDate.setDate(new Date()); else document.getElementById('invDate').value = Utils.todayBE();
   document.getElementById('invNumber').value = DB.peekNextInvoiceNumber();
   initRows();
   Utils.showAlert('ล้างข้อมูลแล้ว', 'info');
@@ -914,7 +919,8 @@ function previewInvoice() {
   const cust        = DB.getCustomerById(customerId);
   const cfg         = DB.getSettings();
   const totalAmount = activeItems.reduce((s, item) => s + calcTotal(item), 0);
-  const createdAt   = dateVal ? new Date(dateVal).toISOString() : new Date().toISOString();
+  const dateValISO  = Utils.parseBEToISO(dateVal) || Utils.todayInputValue();
+  const createdAt   = new Date(dateValISO).toISOString();
   const previewInvNum = editMode ? currentInvNum : DB.peekNextInvoiceNumber();
   const existingMeta  = editMode ? (DB.getInvoices().find(i => i.invoiceNumber === currentInvNum) || {}) : {};
   const editCount     = editMode ? ((existingMeta.editCount || 0) + 1) : 0;
@@ -1005,7 +1011,8 @@ async function saveInvoice(shouldPrint = false) {
 
   const totalAmount = activeItems.reduce((s, item) => s + calcTotal(item), 0);
   const invNumber = DB.generateInvoiceNumber();
-  const createdAt = dateVal ? new Date(dateVal).toISOString() : new Date().toISOString();
+  const _dateISO  = Utils.parseBEToISO(dateVal) || Utils.todayInputValue();
+  const createdAt = new Date(_dateISO).toISOString();
 
   // Split into pages of 14 rows
   const chunks = [];
@@ -1135,7 +1142,8 @@ function loadEdit(invNum) {
 
   const first = pages[0];
   document.getElementById('invNumber').value  = invNum;
-  document.getElementById('invDate').value    = first.createdAt ? first.createdAt.slice(0, 10) : Utils.todayInputValue();
+  if (_fpInvDate) _fpInvDate.setDate(first.createdAt ? first.createdAt.slice(0, 10) : new Date());
+  else document.getElementById('invDate').value = first.createdAt ? Utils.isoToBE(first.createdAt) : Utils.todayBE();
   document.getElementById('invCustomer').value = first.customerId;
   document.getElementById('invShipping').value = first.shippingMethod;
   onCustomerChange();
@@ -1203,7 +1211,8 @@ async function saveInvoiceEdit(shouldPrint = false) {
   DB.saveInvoices(DB.getInvoices().filter(i => i.invoiceNumber !== currentInvNum));
 
   const totalAmount = activeItems.reduce((s, item) => s + calcTotal(item), 0);
-  const createdAt   = dateVal ? new Date(dateVal).toISOString() : (meta.createdAt || new Date().toISOString());
+  const _editDateISO = Utils.parseBEToISO(dateVal) || Utils.todayInputValue();
+  const createdAt    = new Date(_editDateISO).toISOString() || (meta.createdAt || new Date().toISOString());
   const chunks = [];
   for (let i = 0; i < activeItems.length; i += ROWS_PER_PAGE) chunks.push(activeItems.slice(i, i + ROWS_PER_PAGE));
 

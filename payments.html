@@ -12,6 +12,7 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css">
 <style>
 .img-thumb     { max-height:140px; border-radius:6px; border:1px solid #dee2e6; cursor:pointer; }
 .pay-hist-img  { max-height:60px;  border-radius:4px; border:1px solid #dee2e6; cursor:pointer; }
@@ -42,13 +43,13 @@
 <body>
 <div id="navContainer"></div>
 <div class="page-wrap">
-  <div class="d-flex justify-content-between align-items-center mb-3">
+  <div class="d-flex justify-content-between align-items-center mb-3 page-header">
     <h5 class="mb-0 fw-bold"><i class="bi bi-cash-coin me-2 text-primary"></i>ติดตามการชำระเงิน</h5>
   </div>
   <div id="alertBox" class="mb-2"></div>
 
   <!-- Filters -->
-  <div class="card mb-3">
+  <div class="card mb-3 filter-bar">
     <div class="card-body py-2">
       <div class="row g-2">
         <div class="col-md-3">
@@ -74,10 +75,10 @@
           </select>
         </div>
         <div class="col-md-2">
-          <input type="date" id="filterFrom" class="form-control form-control-sm">
+          <input type="text" id="filterFrom" class="form-control form-control-sm" placeholder="DD/MM/YYYY">
         </div>
         <div class="col-md-2">
-          <input type="date" id="filterTo" class="form-control form-control-sm">
+          <input type="text" id="filterTo" class="form-control form-control-sm" placeholder="DD/MM/YYYY">
         </div>
       </div>
     </div>
@@ -92,13 +93,13 @@
           <th class="sort-th" onclick="setSort('num')">เลขที่ <span id="si_num"></span></th>
           <th class="sort-th" onclick="setSort('date')">วันที่ <span id="si_date">▼</span></th>
           <th class="sort-th" onclick="setSort('cust')">ลูกค้า <span id="si_cust"></span></th>
-          <th class="sort-th text-end" onclick="setSort('total')">ยอดรวม <span id="si_total"></span></th>
-          <th class="sort-th text-end" onclick="setSort('paid')">ชำระแล้ว <span id="si_paid"></span></th>
+          <th class="sort-th text-end d-none d-md-table-cell" onclick="setSort('total')">ยอดรวม <span id="si_total"></span></th>
+          <th class="sort-th text-end d-none d-md-table-cell" onclick="setSort('paid')">ชำระแล้ว <span id="si_paid"></span></th>
           <th class="sort-th text-end" onclick="setSort('rem')">ค้าง <span id="si_rem"></span></th>
           <th class="sort-th text-center" onclick="setSort('status')">สถานะ <span id="si_status"></span></th>
           <th class="text-center">จัดการ</th>
         </tr></thead>
-        <tbody id="paymentTable"><tr><td colspan="8" class="text-center text-muted py-3">ยังไม่มีข้อมูล</td></tr></tbody>
+        <tbody id="paymentTable"><tr><td colspan="6" class="text-center text-muted py-3">ยังไม่มีข้อมูล</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -111,7 +112,7 @@
 
 <!-- Payment Modal -->
 <div class="modal fade" id="payModal" tabindex="-1">
-  <div class="modal-dialog modal-lg">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title">บันทึกชำระเงิน — <span id="payInvNum"></span></h5>
@@ -151,18 +152,18 @@
         </div>
 
         <div class="row g-3">
-          <div class="col-md-6">
+          <div class="col-12 col-md-6">
             <label class="form-label fw-semibold">วันที่ชำระเงิน <span class="text-danger">*</span></label>
-            <input type="date" id="payDate" class="form-control" onchange="checkPayDate()">
+            <input type="text" id="payDate" class="form-control" placeholder="DD/MM/YYYY">
           </div>
-          <div class="col-md-6"></div>
+          <div class="col-12 col-md-6"></div>
 
-          <div class="col-md-6">
+          <div class="col-12 col-md-6">
             <label class="form-label fw-semibold">วิธีชำระเงิน <span class="text-danger">*</span></label>
             <select id="payMethod" class="form-select" onchange="onMethodChange()"></select>
           </div>
 
-          <div class="col-md-6">
+          <div class="col-12 col-md-6">
             <label class="form-label fw-semibold">จำนวนเงิน (บาท) <span class="text-danger">*</span></label>
             <div class="input-group">
               <span class="input-group-text">฿</span>
@@ -171,13 +172,13 @@
           </div>
 
           <!-- ผู้รับเงิน (เงินสดเท่านั้น — ผู้ล็อกอินอยู่เท่านั้น) -->
-          <div class="col-md-6 pay-cash" style="display:none">
+          <div class="col-12 col-md-6 pay-cash" style="display:none">
             <label class="form-label fw-semibold">ผู้รับเงิน</label>
             <input type="text" id="payCashCollector" class="form-control" readonly>
           </div>
 
           <!-- โอน -->
-          <div class="col-md-6 pay-transfer" style="display:none">
+          <div class="col-12 col-md-6 pay-transfer" style="display:none">
             <label class="form-label fw-semibold">บัญชีผู้รับโอน</label>
             <div class="d-flex gap-1">
               <select id="payTransferAccountSelect" class="form-select" onchange="onTransferAccountChange()">
@@ -188,18 +189,18 @@
               </button>
             </div>
           </div>
-          <div class="col-md-6 pay-transfer" style="display:none">
+          <div class="col-12 col-md-6 pay-transfer" style="display:none">
             <label class="form-label fw-semibold">ธนาคารต้นทาง</label>
             <input type="text" id="paySourceBank" class="form-control" list="bankDatalist" placeholder="พิมพ์ชื่อธนาคาร..." autocomplete="off">
           </div>
           <!-- payDestBank / payAccountName hidden — auto-filled by account select -->
           <input type="hidden" id="payDestBank">
           <input type="hidden" id="payAccountName">
-          <div class="col-md-6 pay-transfer" style="display:none">
+          <div class="col-12 col-md-6 pay-transfer" style="display:none">
             <label class="form-label fw-semibold">วันและเวลาที่โอน</label>
             <input type="datetime-local" id="payTransferDate" class="form-control">
           </div>
-          <div class="col-md-6 pay-transfer" style="display:none"></div>
+          <div class="col-12 col-md-6 pay-transfer" style="display:none"></div>
           <div class="col-12 pay-transfer" style="display:none">
             <label class="form-label fw-semibold"><i class="bi bi-image me-1 text-primary"></i>รูปสลิปโอนเงิน</label>
             <input type="file" id="payTransferImage" class="form-control" accept="image/*" onchange="loadPayImage(this,'transferImagePreview')">
@@ -207,7 +208,7 @@
           </div>
 
           <!-- เช็ค -->
-          <div class="col-md-6 pay-cheque" style="display:none">
+          <div class="col-12 col-md-6 pay-cheque" style="display:none">
             <label class="form-label fw-semibold">บัญชีผู้รับเงิน (เช็ค)</label>
             <div class="d-flex gap-1">
               <select id="payChequeAccountSelect" class="form-select" onchange="onChequeAccountChange()">
@@ -218,17 +219,17 @@
               </button>
             </div>
           </div>
-          <div class="col-md-6 pay-cheque" style="display:none">
+          <div class="col-12 col-md-6 pay-cheque" style="display:none">
             <label class="form-label fw-semibold">เลขที่เช็ค</label>
             <input type="text" id="payChequeNo" class="form-control" placeholder="หมายเลขเช็ค">
           </div>
-          <div class="col-md-6 pay-cheque" style="display:none">
+          <div class="col-12 col-md-6 pay-cheque" style="display:none">
             <label class="form-label fw-semibold">ธนาคารต้นทาง (ออกเช็ค)</label>
             <input type="text" id="payChequeBank" class="form-control" list="bankDatalist" placeholder="พิมพ์ชื่อธนาคาร..." autocomplete="off">
           </div>
-          <div class="col-md-6 pay-cheque" style="display:none">
+          <div class="col-12 col-md-6 pay-cheque" style="display:none">
             <label class="form-label fw-semibold">วันที่บนเช็ค</label>
-            <input type="date" id="payChequeDate" class="form-control">
+            <input type="text" id="payChequeDate" class="form-control" placeholder="DD/MM/YYYY">
           </div>
           <div class="col-12 pay-cheque" style="display:none">
             <label class="form-label fw-semibold"><i class="bi bi-image me-1 text-primary"></i>รูปเช็ค</label>
@@ -438,7 +439,8 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
-<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
+<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -481,18 +483,24 @@ window.addEventListener('DOMContentLoaded', () => {
     if (cust) document.getElementById('filterCustomer').value = cust.name;
   }
 
-  ['searchInv','filterCustomer','filterStatus','filterFrom','filterTo'].forEach(id =>
+  ['searchInv','filterCustomer','filterStatus'].forEach(id =>
     document.getElementById(id).addEventListener('input', render));
+  BEDate.byId('filterFrom', { onChange: render });
+  BEDate.byId('filterTo',   { onChange: render });
+  _fpPayDate  = BEDate.byId('payDate',      { onChange: checkPayDate });
+  _fpCheqDate = BEDate.byId('payChequeDate');
   render();
 });
+
+let _fpPayDate, _fpCheqDate;
 
 // ── Render invoice list ───────────────────────────────────────────────────────
 function render() {
   const q    = document.getElementById('searchInv').value.toLowerCase();
   const fc   = document.getElementById('filterCustomer').value.toLowerCase().trim();
   const fs   = document.getElementById('filterStatus').value;
-  const from = document.getElementById('filterFrom').value;
-  const to   = document.getElementById('filterTo').value;
+  const from = Utils.parseBEToISO(document.getElementById('filterFrom').value);
+  const to   = Utils.parseBEToISO(document.getElementById('filterTo').value);
   const customers = DB.getCustomers();
 
   const seen = new Map();
@@ -545,7 +553,7 @@ function render() {
 
   const tbody = document.getElementById('paymentTable');
   if (!list.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">ไม่พบรายการ</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">ไม่พบรายการ</td></tr>';
     return;
   }
 
@@ -561,8 +569,8 @@ function render() {
       <td class="fw-semibold">${inv.invoiceNumber}</td>
       <td>${Utils.formatDateTH(inv.createdAt)}</td>
       <td>${cust ? cust.name : '-'}</td>
-      <td class="text-end">฿${Utils.formatNumber(total)}</td>
-      <td class="text-end text-success">฿${Utils.formatNumber(paid)}</td>
+      <td class="text-end d-none d-md-table-cell">฿${Utils.formatNumber(total)}</td>
+      <td class="text-end text-success d-none d-md-table-cell">฿${Utils.formatNumber(paid)}</td>
       <td class="text-end ${rem>0?'text-danger fw-semibold':'text-muted'}">฿${Utils.formatNumber(rem)}</td>
       <td class="text-center"><span class="badge ${statusCls[status]}">${statusLbl[status]}</span></td>
       <td class="text-center">
@@ -598,9 +606,9 @@ function openPayModal(invNum, custId) {
   document.getElementById('payDestBank').value         = '';
   document.getElementById('payChequeNo').value          = '';
   document.getElementById('payChequeBank').value        = '';
-  document.getElementById('payChequeDate').value        = '';
+  if (_fpCheqDate) _fpCheqDate.clear(); else document.getElementById('payChequeDate').value = '';
   document.getElementById('payAmount').value            = '';
-  document.getElementById('payDate').value              = Utils.todayInputValue();
+  if (_fpPayDate) _fpPayDate.setDate(new Date()); else document.getElementById('payDate').value = Utils.todayBE();
   document.getElementById('payDateAlert').style.display = 'none';
   _pendingPayments = [];
   document.getElementById('pendingPaymentsList').style.display    = 'none';
@@ -635,13 +643,13 @@ function openPayModal(invNum, custId) {
 
 // ── Date check ────────────────────────────────────────────────────────────────
 function checkPayDate() {
-  const payDate = document.getElementById('payDate').value;
-  const invDate = window._currentInvDate || '';
-  const alertEl = document.getElementById('payDateAlert');
-  const msgEl   = document.getElementById('payDateAlertMsg');
-  if (payDate && invDate && payDate < invDate) {
+  const payDateISO = Utils.parseBEToISO(document.getElementById('payDate').value);
+  const invDate    = window._currentInvDate || '';
+  const alertEl    = document.getElementById('payDateAlert');
+  const msgEl      = document.getElementById('payDateAlertMsg');
+  if (payDateISO && invDate && payDateISO < invDate) {
     msgEl.textContent =
-      `วันที่ชำระ (${Utils.formatDateTH(payDate)}) อยู่ก่อนวันที่ออกใบกำกับ (${Utils.formatDateTH(invDate)}) — กรุณาตรวจสอบ`;
+      `วันที่ชำระ (${Utils.formatDateTH(payDateISO)}) อยู่ก่อนวันที่ออกใบกำกับ (${Utils.formatDateTH(invDate)}) — กรุณาตรวจสอบ`;
     alertEl.style.display = '';
   } else {
     alertEl.style.display = 'none';
@@ -1061,13 +1069,13 @@ function collectPaymentData() {
     transferDate:   document.getElementById('payTransferDate').value  || '',
     chequeNo:       document.getElementById('payChequeNo').value      || '',
     chequeBank:     document.getElementById('payChequeBank').value    || '',
-    chequeDate:     document.getElementById('payChequeDate').value    || '',
+    chequeDate:     Utils.parseBEToISO(document.getElementById('payChequeDate').value) || '',
     transferImage:  payImages.transfer,
     chequeImage:    payImages.cheque,
     signedImage:    payImages.signed,
     imageHistory,
     notes:          document.getElementById('payNote').value          || '',
-    payDate:        document.getElementById('payDate').value          || Utils.todayInputValue(),
+    payDate:        Utils.parseBEToISO(document.getElementById('payDate').value) || Utils.todayInputValue(),
     createdAt:      now,
     createdBy:      session.name,
     createdByUser:  session.username,
@@ -1156,7 +1164,7 @@ function addPaymentEntry() {
   document.getElementById('payTransferDate').value          = Utils.nowInputValue();
   document.getElementById('payChequeNo').value       = '';
   document.getElementById('payChequeBank').value     = '';
-  document.getElementById('payChequeDate').value     = '';
+  if (_fpCheqDate) _fpCheqDate.clear(); else document.getElementById('payChequeDate').value = '';
   payImages = { transfer: '', cheque: '', signed: '' };
   ['transferImagePreview','chequeImagePreview','signedImagePreview'].forEach(id =>
     document.getElementById(id).innerHTML = '');

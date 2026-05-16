@@ -262,5 +262,39 @@ const Utils = {
     const date = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     const time = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
     return `${date}T${time}`;
-  }
+  },
+
+  // ── Buddhist Era (B.E.) helpers ─────────────────────────────────────────────
+
+  /** Today as "DD/MM/YYYY" in B.E. — used as default value for date text inputs. */
+  todayBE() {
+    const d = new Date();
+    return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()+543}`;
+  },
+
+  /** Parse a "DD/MM/YYYY" B.E. string → Date object (CE). Returns null if invalid. */
+  parseBEDate(str) {
+    if (!str) return null;
+    const p = String(str).split('/');
+    if (p.length !== 3) return null;
+    const yearCE = parseInt(p[2]) - 543;
+    if (isNaN(yearCE) || yearCE < 1900 || yearCE > 2100) return null;
+    const d = new Date(yearCE, parseInt(p[1]) - 1, parseInt(p[0]));
+    return isNaN(d.getTime()) ? null : d;
+  },
+
+  /** Convert "DD/MM/YYYY" B.E. → "YYYY-MM-DD" CE ISO string (for DB storage / comparisons). */
+  parseBEToISO(str) {
+    const d = this.parseBEDate(str);
+    if (!d) return '';
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  },
+
+  /** Convert CE ISO date string → "DD/MM/YYYY" B.E. (for populating text inputs from stored data). */
+  isoToBE(isoStr) {
+    if (!isoStr) return '';
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return '';
+    return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()+543}`;
+  },
 };
