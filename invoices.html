@@ -96,7 +96,7 @@
             <th class="sort-th text-end d-none d-md-table-cell" onclick="setSort('paid')">ชำระแล้ว <span id="si_paid"></span></th>
             <th class="sort-th text-end" onclick="setSort('rem')">ค้าง <span id="si_rem"></span></th>
             <th class="sort-th text-center" onclick="setSort('status')">สถานะ <span id="si_status"></span></th>
-            <th class="text-center">จัดการ</th>
+            <th id="thActions" class="text-center">จัดการ</th>
           </tr>
         </thead>
         <tbody id="invoiceTable"><tr><td colspan="6" class="text-center text-muted py-4">ยังไม่มีใบกำกับ</td></tr></tbody>
@@ -140,20 +140,23 @@ let _selMode = false;
 
 function toggleSelMode() {
   _selMode = !_selMode;
-  const btn    = document.getElementById('selModeBtn');
-  const toolbar = document.getElementById('selToolbar');
-  const thChk  = document.getElementById('thChk');
+  const btn       = document.getElementById('selModeBtn');
+  const toolbar   = document.getElementById('selToolbar');
+  const thChk     = document.getElementById('thChk');
+  const thActions = document.getElementById('thActions');
 
   if (_selMode) {
     btn.classList.add('active', 'btn-primary');
     btn.classList.remove('btn-outline-secondary');
     toolbar.classList.remove('d-none');
     thChk.classList.remove('d-none');
+    thActions.classList.add('d-none');
   } else {
     btn.classList.remove('active', 'btn-primary');
     btn.classList.add('btn-outline-secondary');
     toolbar.classList.add('d-none');
     thChk.classList.add('d-none');
+    thActions.classList.remove('d-none');
     clearSel();
   }
   render();
@@ -221,6 +224,7 @@ function executeBulkDelete() {
   document.getElementById('selModeBtn').classList.add('btn-outline-secondary');
   document.getElementById('selToolbar').classList.add('d-none');
   document.getElementById('thChk').classList.add('d-none');
+  document.getElementById('thActions').classList.remove('d-none');
   render();
 }
 
@@ -402,7 +406,7 @@ function render() {
       <td class="text-end text-success d-none d-md-table-cell">฿${Utils.formatNumber(paid)}</td>
       <td class="text-end ${remaining>0?'text-danger fw-semibold':'text-muted'}">฿${Utils.formatNumber(remaining)}</td>
       <td class="text-center"><span class="badge ${si.cls}">${si.label}</span></td>
-      <td class="text-center">
+      <td class="text-center sel-action-cell${_selMode ? ' d-none' : ''}">
         <div class="btn-group btn-group-sm">
           <a class="btn btn-outline-primary" href="invoice-create.html?view=${inv.invoiceNumber}" title="ดู/พิมพ์"><i class="bi bi-eye"></i></a>
           ${inv.importedFrom === 'pdf' ? `<button class="btn btn-outline-danger" onclick="viewPdfInvoice('${inv.invoiceNumber}')" title="ดูไฟล์ PDF ต้นฉบับ"><i class="bi bi-file-earmark-pdf"></i></button>` : ''}
