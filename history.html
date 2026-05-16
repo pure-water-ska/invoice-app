@@ -154,7 +154,7 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 
   ['filterUser','searchText','filterRows','filterAction','filterSuccess'].forEach(id => {
-    document.getElementById(id).addEventListener('input', renderCurrent);
+    document.getElementById(id).addEventListener('input', Utils.debounce(renderCurrent, 200));
     document.getElementById(id).addEventListener('change', renderCurrent);
   });
   BEDate.byId('filterFrom', { onChange: renderCurrent });
@@ -263,18 +263,4 @@ function renderLogin() {
       </td>
       <td class="text-muted small" style="white-space:nowrap">${item.ip || '<span class="text-muted">—</span>'}</td>
       <td class="text-muted small">${location || '<span class="text-muted">—</span>'}</td>
-      <td class="text-muted small" style="white-space:nowrap">
-        ${item.device ? `<i class="bi ${deviceIcon} me-1"></i>` : ''}${item.browser || ''}${item.os ? ` <span class="text-muted">(${item.os})</span>` : ''}
-        ${!item.browser && !item.os ? '<span class="text-muted">—</span>' : ''}
-      </td>
-      <td class="text-center">
-        ${item.success
-          ? '<span class="badge bg-success"><i class="bi bi-check me-1"></i>สำเร็จ</span>'
-          : '<span class="badge bg-danger"><i class="bi bi-x me-1"></i>ล้มเหลว</span>'}
-      </td>
-    </tr>`;
-  }).join('');
-}
-</script>
-</body>
-</html>
+      <td class="text-muted small" 

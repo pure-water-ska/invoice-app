@@ -498,8 +498,9 @@ window.addEventListener('DOMContentLoaded', () => {
     if (cust) document.getElementById('filterCustomer').value = cust.name;
   }
 
-  ['searchInv','filterCustomer','filterStatus'].forEach(id =>
-    document.getElementById(id).addEventListener('input', render));
+  document.getElementById('filterStatus').addEventListener('input', render);
+  ['searchInv','filterCustomer'].forEach(id =>
+    document.getElementById(id).addEventListener('input', Utils.debounce(render, 200)));
   BEDate.byId('filterFrom', { onChange: render });
   BEDate.byId('filterTo',   { onChange: render });
   _fpPayDate  = BEDate.byId('payDate',      { onChange: checkPayDate });
@@ -516,7 +517,13 @@ function render() {
   const fs   = document.getElementById('filterStatus').value;
   const from = Utils.parseBEToISO(document.getElementById('filterFrom').value);
   const to   = Utils.parseBEToISO(document.getElementById('filterTo').value);
-  const customers = DB.getCustomers();
+
+  // Build lookup maps once — avoids O(n²) per-row DB reads
+  const custMap = Object.fromEntries(DB.getCustomers().map(c => [c.id, c]));
+  const paidMap = {};
+  for (const p of DB.getPayments()) {
+    if (!p.cancelled) paidMap[p.invoiceNumber] = (paidMap[p.invoiceNumber] || 0) + (parseFloat(p.amount) || 0);
+  }
 
   const seen = new Map();
   for (const inv of DB.getInvoices()) {
@@ -524,11 +531,11 @@ function render() {
   }
 
   let list = [...seen.values()].filter(inv => {
-    const cust   = customers.find(c => c.id === inv.customerId);
+    const cust     = custMap[inv.customerId];
     const custName = (cust ? cust.name : '').toLowerCase();
-    const paid   = DB.getInvoicePaidAmount(inv.invoiceNumber);
-    const total  = parseFloat(inv.totalAmount) || 0;
-    const status = paid <= 0 ? 'pending' : paid >= total ? 'paid' : 'partial';
+    const paid     = paidMap[inv.invoiceNumber] || 0;
+    const total    = parseFloat(inv.totalAmount) || 0;
+    const status   = paid <= 0 ? 'pending' : paid >= total ? 'paid' : 'partial';
     const d = new Date(inv.createdAt);
     if (q  && !inv.invoiceNumber.toLowerCase().includes(q) && !custName.includes(q)) return false;
     if (fc && !custName.includes(fc)) return false;
@@ -544,10 +551,10 @@ function render() {
   });
 
   list.sort((a, b) => {
-    const ca  = customers.find(c => c.id === a.customerId);
-    const cb  = customers.find(c => c.id === b.customerId);
-    const pa  = DB.getInvoicePaidAmount(a.invoiceNumber);
-    const pb  = DB.getInvoicePaidAmount(b.invoiceNumber);
+    const ca  = custMap[a.customerId];
+    const cb  = custMap[b.customerId];
+    const pa  = paidMap[a.invoiceNumber] || 0;
+    const pb  = paidMap[b.invoiceNumber] || 0;
     const ta  = parseFloat(a.totalAmount) || 0;
     const tb  = parseFloat(b.totalAmount) || 0;
     const stA = pa <= 0 ? 'pending' : pa >= ta ? 'paid' : 'partial';
@@ -573,10 +580,10 @@ function render() {
   }
 
   tbody.innerHTML = list.map(inv => {
-    const cust   = customers.find(c => c.id === inv.customerId);
-    const total  = parseFloat(inv.totalAmount) || 0;
-    const paid   = DB.getInvoicePaidAmount(inv.invoiceNumber);
-    const rem    = total - paid;
+    const cust  = custMap[inv.customerId];
+    const total = parseFloat(inv.totalAmount) || 0;
+    const paid  = paidMap[inv.invoiceNumber] || 0;
+    const rem   = total - paid;
     const status    = paid <= 0 ? 'pending' : paid >= total ? 'paid' : 'partial';
     const statusLbl = { pending:'ค้างชำระ', partial:'บางส่วน', paid:'ชำระแล้ว' };
     const statusCls = { pending:'badge-pending', partial:'badge-partial', paid:'badge-paid' };
@@ -1567,23 +1574,4 @@ function printPaymentSummary(invNum) {
       </table>
 
       <div style="border:1px dashed #aaa;border-radius:3px;padding:3mm;font-size:8pt;color:#444">
-        <strong>สถานะ:</strong> <span style="color:${statusColor};font-weight:700">${statusText}</span> &nbsp;|&nbsp;
-        <strong>จำนวนรายการ:</strong> ${payments.length} รายการ &nbsp;|&nbsp;
-        <strong>พิมพ์โดย:</strong> ${printedBy}
-      </div>
-    </div>`;
-
-  window.print();
-}
-
-async function copyOutstandingImage() {
-  try {
-    const canvas = await _captureOutstanding();
-    const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
-    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-    Utils.showAlert('<i class="bi bi-check-circle me-1 text-success"></i>คัดลอกรูปลง Clipboard แล้ว');
-  } catch (e) { Utils.showAlert('คัดลอกไม่สำเร็จ: ' + e.message, 'danger'); }
-}
-</script>
-</body>
-</html>
+        <strong>สถานะ:</strong> <span style="color:${statusColor};font-weight:700">${

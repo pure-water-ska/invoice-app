@@ -413,7 +413,7 @@ window.addEventListener('DOMContentLoaded', () => {
   noteModal = new bootstrap.Modal(document.getElementById('noteModal'));
   suspendModal = new bootstrap.Modal(document.getElementById('suspendModal'));
   render();
-  document.getElementById('searchInput').addEventListener('input', () => { _custPage = 1; render(); });
+  document.getElementById('searchInput').addEventListener('input', Utils.debounce(() => { _custPage = 1; render(); }, 200));
 });
 
 function render() {
@@ -1078,12 +1078,4 @@ function addNote() {
   render();
 }
 function deleteNote(custId, noteId) {
-  const c = DB.getCustomerById(custId);
-  const notes = (c.notes || []).filter(n => n.id !== noteId);
-  DB.updateCustomer(custId, { notes });
-  renderNotes(DB.getCustomerById(custId));
-  render();
-}
-</script>
-</body>
-</html>
+  const c = 

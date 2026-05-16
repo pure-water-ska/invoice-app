@@ -22,21 +22,40 @@ const DB = {
     RETURNS:          'wt_returns'
   },
 
+  // ── In-memory read cache — eliminates repeated JSON.parse on the same key ──
+  // Invalidated by _set() and by DB.invalidate() (called from sync.js after
+  // Firestore/Drive updates localStorage directly).
+  _cache: {},
+
   _get(key) {
-    try { return JSON.parse(localStorage.getItem(key)) || []; } catch { return []; }
+    if (!Object.prototype.hasOwnProperty.call(this._cache, key)) {
+      try { this._cache[key] = JSON.parse(localStorage.getItem(key)) || []; }
+      catch { this._cache[key] = []; }
+    }
+    return this._cache[key];
   },
   _getObj(key, def) {
-    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : def; } catch { return def; }
+    if (!Object.prototype.hasOwnProperty.call(this._cache, key)) {
+      try { const v = localStorage.getItem(key); this._cache[key] = v ? JSON.parse(v) : def; }
+      catch { this._cache[key] = def; }
+    }
+    return this._cache[key] ?? def;
   },
   _set(key, val) {
+    this._cache[key] = val;                      // update cache immediately
     localStorage.setItem(key, JSON.stringify(val));
     // Push to Firestore sync if available (sync.js loaded + ready, or queue if not yet ready)
     if (window.Sync) {
       if (Sync.ready) Sync.push(key, val);
-      else Sync._enqueue(key, val);   // will be flushed once Sync.init() completes
+      else Sync._enqueue(key, val);              // flushed once Sync.init() completes
     }
     // Queue upload to Google Drive (debounced, no-op if Drive not connected)
     if (window.DriveDbSync) DriveDbSync.queueUpload(key, val);
+  },
+  // Called by sync.js when Firestore/Drive writes localStorage directly
+  invalidate(key) {
+    if (key) delete this._cache[key];
+    else this._cache = {};
   },
 
   // ─── SETTINGS ────────────────────────────────────────────────────────────────
@@ -721,28 +740,4 @@ const DB = {
         customers: Array.isArray(data.wt_customers) ? data.wt_customers.length : 0,
         invoices:  [...new Set(invs.map(i => i.invoiceNumber))].length,
         payments:  Array.isArray(data.wt_payments)  ? data.wt_payments.length  : 0,
-        products:  Array.isArray(data.wt_products)  ? data.wt_products.length  : 0,
-        returns:   Array.isArray(data.wt_returns)   ? data.wt_returns.length   : 0,
-      },
-      data,
-    };
-    const snaps = this.getSnapshots();
-    snaps.unshift(snap);
-    if (snaps.length > 3) snaps.splice(3);   // keep latest 3
-    this.saveSnapshots(snaps);
-    return snap;
-  },
-
-  rollbackToSnapshot(id) {
-    const snap = this.getSnapshots().find(s => s.id === id);
-    if (!snap || !snap.data) return false;
-    Object.entries(snap.data).forEach(([k, v]) => {
-      if (v !== null && v !== undefined) localStorage.setItem(k, JSON.stringify(v));
-    });
-    return true;
-  },
-
-  deleteSnapshot(id) {
-    this.saveSnapshots(this.getSnapshots().filter(s => s.id !== id));
-  },
-};
+        products:  Arr

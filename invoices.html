@@ -249,7 +249,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
   ['searchInput','filterCustomer','filterStatus'].forEach(id =>
     document.getElementById(id).addEventListener('change', () => { _invPage = 1; render(); }));
-  document.getElementById('searchInput').addEventListener('input', () => { _invPage = 1; render(); });
+  document.getElementById('searchInput').addEventListener('input', Utils.debounce(() => { _invPage = 1; render(); }, 200));
   BEDate.byId('filterFrom', { onChange: () => { _invPage = 1; render(); } });
   BEDate.byId('filterTo',   { onChange: () => { _invPage = 1; render(); } });
   render();
@@ -322,7 +322,19 @@ function render() {
   const to   = Utils.parseBEToISO(document.getElementById('filterTo').value);
 
   const allInvoices = DB.getInvoices();
-  const customers = DB.getCustomers();
+  const customers   = DB.getCustomers();
+
+  // ── Build lookup maps once (O(n)) instead of per-row (O(n²)) ───────────────
+  // customer map: id → customer object
+  const custMap = Object.fromEntries(customers.map(c => [c.id, c]));
+  // paid amount map: invoiceNumber → total paid (non-cancelled)
+  const paidMap = {};
+  for (const p of DB.getPayments()) {
+    if (!p.cancelled) paidMap[p.invoiceNumber] = (paidMap[p.invoiceNumber] || 0) + (parseFloat(p.amount) || 0);
+  }
+  // page count map: invoiceNumber → number of pages
+  const pageCountMap = {};
+  for (const inv of allInvoices) pageCountMap[inv.invoiceNumber] = (pageCountMap[inv.invoiceNumber] || 0) + 1;
 
   const seen = new Map();
   for (const inv of allInvoices) {
@@ -331,11 +343,11 @@ function render() {
 
   let list = [...seen.values()];
   list = list.filter(inv => {
-    const cust = customers.find(c => c.id === inv.customerId);
-    const paid = DB.getInvoicePaidAmount(inv.invoiceNumber);
+    const cust  = custMap[inv.customerId];
+    const paid  = paidMap[inv.invoiceNumber] || 0;
     const total = parseFloat(inv.totalAmount) || 0;
-    const si = statusInfo(paid, total);
-    const d = new Date(inv.createdAt);
+    const si    = statusInfo(paid, total);
+    const d     = new Date(inv.createdAt);
     if (q && !inv.invoiceNumber.toLowerCase().includes(q) && !(cust && cust.name.toLowerCase().includes(q))) return false;
     if (fc && inv.customerId !== fc) return false;
     if (fs && si.key !== fs) return false;
@@ -351,17 +363,15 @@ function render() {
   });
 
   list.sort((a, b) => {
-    const ca  = customers.find(c => c.id === a.customerId);
-    const cb  = customers.find(c => c.id === b.customerId);
-    const pa  = DB.getInvoicePaidAmount(a.invoiceNumber);
-    const pb  = DB.getInvoicePaidAmount(b.invoiceNumber);
-    const ta  = parseFloat(a.totalAmount) || 0;
-    const tb  = parseFloat(b.totalAmount) || 0;
+    const pa = paidMap[a.invoiceNumber] || 0;
+    const pb = paidMap[b.invoiceNumber] || 0;
+    const ta = parseFloat(a.totalAmount) || 0;
+    const tb = parseFloat(b.totalAmount) || 0;
     let cmp = 0;
     switch (_sortCol) {
       case 'num':    cmp = a.invoiceNumber.localeCompare(b.invoiceNumber, 'th'); break;
       case 'date':   cmp = new Date(a.createdAt) - new Date(b.createdAt); break;
-      case 'cust':   cmp = (ca?.name||'').localeCompare(cb?.name||'', 'th'); break;
+      case 'cust':   cmp = (custMap[a.customerId]?.name||'').localeCompare(custMap[b.customerId]?.name||'', 'th'); break;
       case 'ship':   cmp = (a.shippingMethod||'').localeCompare(b.shippingMethod||'', 'th'); break;
       case 'total':  cmp = ta - tb; break;
       case 'paid':   cmp = pa - pb; break;
@@ -377,14 +387,14 @@ function render() {
 
   // Summary totals (all filtered, not just current page)
   let sumTotal = 0, sumPaid = 0;
-  list.forEach(inv => {
+  for (const inv of list) {
     const total = parseFloat(inv.totalAmount) || 0;
-    const paid = DB.getInvoicePaidAmount(inv.invoiceNumber);
+    const paid  = paidMap[inv.invoiceNumber] || 0;
     sumTotal += total; sumPaid += Math.min(paid, total);
-  });
-  document.getElementById('sumTotal').textContent = '฿' + Utils.formatNumber(sumTotal);
-  document.getElementById('sumPaid').textContent  = '฿' + Utils.formatNumber(sumPaid);
-  document.getElementById('sumUnpaid').textContent = '฿' + Utils.formatNumber(Math.max(0, sumTotal - sumPaid));
+  }
+  document.getElementById('sumTotal').textContent   = '฿' + Utils.formatNumber(sumTotal);
+  document.getElementById('sumPaid').textContent    = '฿' + Utils.formatNumber(sumPaid);
+  document.getElementById('sumUnpaid').textContent  = '฿' + Utils.formatNumber(Math.max(0, sumTotal - sumPaid));
 
   const tbody = document.getElementById('invoiceTable');
   if (list.length === 0) {
@@ -399,12 +409,12 @@ function render() {
   const pageList = list.slice((_invPage - 1) * INV_PAGE_SIZE, _invPage * INV_PAGE_SIZE);
 
   tbody.innerHTML = pageList.map(inv => {
-    const cust = customers.find(c => c.id === inv.customerId);
-    const total = parseFloat(inv.totalAmount) || 0;
-    const paid = DB.getInvoicePaidAmount(inv.invoiceNumber);
+    const cust      = custMap[inv.customerId];
+    const total     = parseFloat(inv.totalAmount) || 0;
+    const paid      = paidMap[inv.invoiceNumber] || 0;
     const remaining = Math.max(0, total - paid);
-    const si = statusInfo(paid, total);
-    const pages = allInvoices.filter(i => i.invoiceNumber === inv.invoiceNumber).length;
+    const si        = statusInfo(paid, total);
+    const pages     = pageCountMap[inv.invoiceNumber] || 1;
     return `<tr data-num="${inv.invoiceNumber}">
       <td class="text-center sel-chk-cell ${_selMode ? '' : 'd-none'}">
         <input type="checkbox" class="inv-chk" data-num="${inv.invoiceNumber}"
@@ -441,22 +451,4 @@ function render() {
     <span>แสดง ${(_invPage-1)*INV_PAGE_SIZE+1}–${Math.min(_invPage*INV_PAGE_SIZE, list.length)} จาก ${list.length} รายการ</span>
     <div class="d-flex gap-1 align-items-center">
       <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_invPage=1;render()" ${_invPage===1?'disabled':''}>«</button>
-      <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_invPage--;render()" ${_invPage===1?'disabled':''}>‹</button>
-      <span class="px-2">หน้า ${_invPage} / ${totalPages}</span>
-      <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_invPage++;render()" ${_invPage===totalPages?'disabled':''}>›</button>
-      <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_invPage=${totalPages};render()" ${_invPage===totalPages?'disabled':''}>»</button>
-    </div>`;
-}
-
-function deleteInvoice(num) {
-  if (!confirm(`ลบใบกำกับ "${num}" และข้อมูลทั้งหมดใช่หรือไม่?\nการลบไม่สามารถกู้คืนได้`)) return;
-  const all = DB.getInvoices().filter(i => i.invoiceNumber !== num);
-  DB.saveInvoices(all);
-  DB.removeCapDeductionsByInvoice(num);
-  DB.logActivity(session.userId, session.username, 'ลบใบกำกับ', { invoiceNumber: num });
-  Utils.showAlert(`ลบใบกำกับ ${num} แล้ว`, 'warning');
-  render();
-}
-</script>
-</body>
-</html>
+      <button class="btn btn-sm btn-outline-secondary py-
