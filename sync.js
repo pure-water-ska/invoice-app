@@ -15,6 +15,8 @@ const Sync = {
   _ignoreUntil:   0,          // epoch ms — listener ignores snapshots before this
   _pendingLsKey:  'wt_sync_pending',
   _lastSyncKey:   'wt_sync_lastAt',
+  _tombstoneKey:  'wt_sync_tombstones',  // persists deleted IDs across page loads
+  _tombstoneTTL:  5 * 60 * 1000,         // 5 minutes — clear after purge confirmed
 
   // ── Large collections → one Firestore doc per record ──────────────────────
   // (avoids 1 MB Firestore document limit for busy businesses)
@@ -38,6 +40,50 @@ const Sync = {
     'wt_cap_deductions':  'cap_deductions',
     'wt_price_history':   'price_history',
     'wt_inv_counter':     'inv_counter',
+  },
+
+  // ── Tombstones: persist deleted record IDs so _pullAll + listener won't restore them ──
+  _getTombstones(colName) {
+    try {
+      const all = JSON.parse(localStorage.getItem(this._tombstoneKey) || '{}');
+      return all[colName] || {};
+    } catch { return {}; }
+  },
+
+  _addTombstones(colName, ids) {
+    try {
+      const all = JSON.parse(localStorage.getItem(this._tombstoneKey) || '{}');
+      if (!all[colName]) all[colName] = {};
+      const now = Date.now();
+      ids.forEach(id => { all[colName][id] = now; });
+      localStorage.setItem(this._tombstoneKey, JSON.stringify(all));
+    } catch {}
+  },
+
+  _clearTombstones(colName, ids) {
+    try {
+      const all = JSON.parse(localStorage.getItem(this._tombstoneKey) || '{}');
+      if (!all[colName]) return;
+      ids.forEach(id => delete all[colName][id]);
+      if (!Object.keys(all[colName]).length) delete all[colName];
+      if (!Object.keys(all).length) localStorage.removeItem(this._tombstoneKey);
+      else localStorage.setItem(this._tombstoneKey, JSON.stringify(all));
+    } catch {}
+  },
+
+  // Filter a Firestore snap array through active tombstones for that collection
+  _applyTombstones(colName, snapDocs) {
+    const stones = this._getTombstones(colName);
+    const now    = Date.now();
+    return snapDocs.filter(d => {
+      const t = stones[d.id];
+      if (!t) return true;                    // not tombstoned — keep
+      if (now - t > this._tombstoneTTL) {     // tombstone expired — allow through
+        this._clearTombstones(colName, [d.id]);
+        return true;
+      }
+      return false;                           // tombstoned — skip
+    });
   },
 
   // ── Show badge helper (always makes badge item visible) ───────────────────
@@ -175,21 +221,35 @@ const Sync = {
       }
       if (ops > 0) await batch.commit();
 
-      // Purge records that were removed locally (deleted invoices/payments)
-      // We identify them by comparing IDs in Firestore vs local array.
-      // Done as a background task so it doesn't slow down the main write.
+      // Purge records that were removed locally (deleted invoices/payments).
+      // ① Tombstone the IDs first (persisted to localStorage) — this prevents
+      //   _pullAll() on the next page from restoring them even if the purge
+      //   hasn't finished yet (e.g. user navigates away mid-purge).
+      // ② Actually delete from Firestore in the background.
+      // ③ Clear tombstones only after the Firestore delete succeeds.
       const localIds = new Set(arr.filter(r => r.id).map(r => r.id));
-      colRef.get().then(snap => {
+      colRef.get().then(async snap => {
         const toDelete = snap.docs.filter(d => !localIds.has(d.id));
         if (!toDelete.length) return;
+
+        const deleteIds = toDelete.map(d => d.id);
+        this._addTombstones(colName, deleteIds);     // ① persist tombstones NOW
+        this._ignoreUntil = Date.now() + this._skipInitialMs; // extend ignore window
+
         let delBatch = this._db.batch();
         let delOps   = 0;
-        const commitDel = async () => { await delBatch.commit(); delBatch = this._db.batch(); delOps = 0; };
         for (const d of toDelete) {
           delBatch.delete(d.ref);
-          if (++delOps >= 490) commitDel();
+          if (++delOps >= 490) {
+            await delBatch.commit();
+            delBatch = this._db.batch(); delOps = 0;
+          }
         }
-        if (delOps > 0) delBatch.commit();
+        if (delOps > 0) {
+          await delBatch.commit();                   // ② Firestore delete done
+          this._ignoreUntil = Date.now() + this._skipInitialMs;
+        }
+        this._clearTombstones(colName, deleteIds);   // ③ purge confirmed — clean up
       }).catch(() => {}); // background — ignore errors
     }
 
@@ -224,7 +284,8 @@ const Sync = {
         const snap = await base.collection(colName).get();
         if (!snap.empty) {
           // Firestore has data → overwrite localStorage
-          const arr = snap.docs.map(d => {
+          // Apply tombstones so recently-deleted records aren't restored
+          const arr = this._applyTombstones(colName, snap.docs).map(d => {
             const { _by, _ts, ...rec } = d.data();
             return rec;
           });
@@ -282,7 +343,9 @@ const Sync = {
       const unsub = base.collection(colName)
         .onSnapshot({ includeMetadataChanges: true }, (snap) => {
           if (shouldSkip(snap.metadata)) return;
-          const arr = snap.docs.map(d => {
+          // Apply tombstones — prevents pre-purge snapshots from restoring
+          // records that were deleted locally but not yet purged from Firestore
+          const arr = this._applyTombstones(colName, snap.docs).map(d => {
             const { _by, _ts, ...rec } = d.data();
             return rec;
           });
