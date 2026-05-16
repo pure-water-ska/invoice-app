@@ -11,7 +11,8 @@ const Sync = {
   _uid:           null,
   _online:        navigator.onLine,
   _unsubscribers: [],
-  _skipInitialMs: 2500,       // ms to ignore incoming snapshots (= our own writes)
+  _skipInitialMs: 3000,       // ms to ignore incoming snapshots (= our own writes)
+  _ignoreUntil:   0,          // epoch ms — listener ignores snapshots before this
   _pendingLsKey:  'wt_sync_pending',
   _lastSyncKey:   'wt_sync_lastAt',
 
@@ -117,6 +118,8 @@ const Sync = {
   // ── Called by db._set() ────────────────────────────────────────────────────
   push(key, val) {
     if (!this.COLLECTIONS[key] && !this.DOCUMENTS[key]) return; // key not synced
+    // Reset the ignore window so the listener won't re-apply our own write
+    this._ignoreUntil = Date.now() + this._skipInitialMs;
     if (!this.ready || !this._online) {
       this._enqueue(key, val);
       return;
@@ -231,11 +234,12 @@ const Sync = {
   // ── Real-time listeners ────────────────────────────────────────────────────
   _setupListeners() {
     const base     = this._orgRef();
-    let ignoreUntil = Date.now() + this._skipInitialMs;
+    // Use the instance property (reset by push()) instead of a one-time closure var
+    this._ignoreUntil = Date.now() + this._skipInitialMs;
 
     const shouldSkip = (meta) => {
-      // Skip during initial window (avoids double-processing _pullAll data)
-      if (Date.now() < ignoreUntil) return true;
+      // Skip during initial window AND after any push() call for _skipInitialMs
+      if (Date.now() < this._ignoreUntil) return true;
       // Skip our own pending writes (will fire again when server confirms)
       if (meta?.hasPendingWrites) return true;
       // Skip events served from local cache (only process server-confirmed events)
