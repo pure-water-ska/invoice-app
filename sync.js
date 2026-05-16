@@ -201,7 +201,6 @@ const Sync = {
       // excluded from _pullAll because _pullAll overwrites localStorage in full)
       let batch = this._db.batch();
       let ops   = 0;
-      let written = 0;
       const commit = async () => {
         await batch.commit();
         batch = this._db.batch(); ops = 0;
@@ -214,9 +213,6 @@ const Sync = {
           _by: this._uid,
           _ts: firebase.firestore.FieldValue.serverTimestamp(),
         }, { merge: true });
-        written++;
-        if (total > 50 && typeof Utils !== 'undefined')
-          Utils.showProgress(`บันทึก ${colName} (${written}/${total})`, Math.round((written / total) * 100));
         if (++ops >= 490) await commit();
       }
       if (ops > 0) await batch.commit();
@@ -258,14 +254,7 @@ const Sync = {
 
   // ── Pull ALL data from Firestore → localStorage (initial load) ─────────────
   async _pullAll() {
-    const base  = this._orgRef();
-    const total = Object.keys(this.DOCUMENTS).length + Object.keys(this.COLLECTIONS).length;
-    let done    = 0;
-    const tick  = (name) => {
-      done++;
-      if (typeof Utils !== 'undefined')
-        Utils.showProgress(`โหลดข้อมูล Cloud: ${name} (${done}/${total})`, Math.round((done / total) * 100));
-    };
+    const base = this._orgRef();
 
     // Documents
     const docPromises = Object.entries(this.DOCUMENTS).map(async ([lsKey, docName]) => {
@@ -275,7 +264,6 @@ const Sync = {
           localStorage.setItem(lsKey, JSON.stringify(doc.data().d));
         }
       } catch (e) { console.warn('[Sync] pull doc:', docName, e.message); }
-      tick(docName);
     });
 
     // Collections
@@ -283,8 +271,7 @@ const Sync = {
       try {
         const snap = await base.collection(colName).get();
         if (!snap.empty) {
-          // Firestore has data → overwrite localStorage
-          // Apply tombstones so recently-deleted records aren't restored
+          // Apply tombstones so recently-deleted records aren't restored on page reload
           const arr = this._applyTombstones(colName, snap.docs).map(d => {
             const { _by, _ts, ...rec } = d.data();
             return rec;
@@ -301,11 +288,9 @@ const Sync = {
           } catch (be) { console.warn('[Sync] bootstrap push failed:', colName, be.message); }
         }
       } catch (e) { console.warn('[Sync] pull col:', colName, e.message); }
-      tick(colName);
     });
 
     await Promise.all([...docPromises, ...colPromises]);
-    if (typeof Utils !== 'undefined') Utils.hideProgress();
     this._triggerRerender();
     console.log('[Sync] Initial pull complete');
   },
@@ -333,7 +318,9 @@ const Sync = {
           if (shouldSkip(doc.metadata)) return;
           if (!doc.exists || doc.data()?.d === undefined) return;
           localStorage.setItem(lsKey, JSON.stringify(doc.data().d));
-          this._notifyUpdate(lsKey);
+          // Only notify when the write came from another user (not us)
+          const writtenBy = doc.data().by;
+          if (writtenBy && writtenBy !== this._uid) this._notifyUpdate(lsKey);
         });
       this._unsubscribers.push(unsub);
     }
@@ -350,7 +337,12 @@ const Sync = {
             return rec;
           });
           localStorage.setItem(lsKey, JSON.stringify(arr));
-          this._notifyUpdate(lsKey);
+          // Only notify when at least one changed doc came from another user
+          const fromOther = snap.docChanges().some(c => {
+            const by = c.doc.data()?._by;
+            return by && by !== this._uid;
+          });
+          if (fromOther) this._notifyUpdate(lsKey);
         });
       this._unsubscribers.push(unsub);
     }
