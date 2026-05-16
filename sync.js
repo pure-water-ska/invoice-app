@@ -149,12 +149,17 @@ const Sync = {
       // ── Collection write: upsert each record as its own Firestore doc ──────
       const arr    = Array.isArray(val) ? val : [];
       const colRef = base.collection(colName);
+      const total  = arr.filter(r => r.id).length;
 
       // Upsert only — no deletion (keeps writes fast; deleted records are
       // excluded from _pullAll because _pullAll overwrites localStorage in full)
       let batch = this._db.batch();
       let ops   = 0;
-      const commit = async () => { await batch.commit(); batch = this._db.batch(); ops = 0; };
+      let written = 0;
+      const commit = async () => {
+        await batch.commit();
+        batch = this._db.batch(); ops = 0;
+      };
 
       for (const record of arr) {
         if (!record.id) continue;
@@ -163,6 +168,9 @@ const Sync = {
           _by: this._uid,
           _ts: firebase.firestore.FieldValue.serverTimestamp(),
         }, { merge: true });
+        written++;
+        if (total > 50 && typeof Utils !== 'undefined')
+          Utils.showProgress(`บันทึก ${colName} (${written}/${total})`, Math.round((written / total) * 100));
         if (++ops >= 490) await commit();
       }
       if (ops > 0) await batch.commit();
@@ -190,7 +198,14 @@ const Sync = {
 
   // ── Pull ALL data from Firestore → localStorage (initial load) ─────────────
   async _pullAll() {
-    const base = this._orgRef();
+    const base  = this._orgRef();
+    const total = Object.keys(this.DOCUMENTS).length + Object.keys(this.COLLECTIONS).length;
+    let done    = 0;
+    const tick  = (name) => {
+      done++;
+      if (typeof Utils !== 'undefined')
+        Utils.showProgress(`โหลดข้อมูล Cloud: ${name} (${done}/${total})`, Math.round((done / total) * 100));
+    };
 
     // Documents
     const docPromises = Object.entries(this.DOCUMENTS).map(async ([lsKey, docName]) => {
@@ -200,6 +215,7 @@ const Sync = {
           localStorage.setItem(lsKey, JSON.stringify(doc.data().d));
         }
       } catch (e) { console.warn('[Sync] pull doc:', docName, e.message); }
+      tick(docName);
     });
 
     // Collections
@@ -224,9 +240,11 @@ const Sync = {
           } catch (be) { console.warn('[Sync] bootstrap push failed:', colName, be.message); }
         }
       } catch (e) { console.warn('[Sync] pull col:', colName, e.message); }
+      tick(colName);
     });
 
     await Promise.all([...docPromises, ...colPromises]);
+    if (typeof Utils !== 'undefined') Utils.hideProgress();
     this._triggerRerender();
     console.log('[Sync] Initial pull complete');
   },
@@ -389,7 +407,11 @@ const Sync = {
         ...Object.keys(this.COLLECTIONS),
         ...Object.keys(this.DOCUMENTS),
       ];
-      for (const key of allKeys) {
+      const total = allKeys.length;
+      for (let i = 0; i < total; i++) {
+        const key = allKeys[i];
+        const label = this.COLLECTIONS[key] || this.DOCUMENTS[key] || key;
+        if (typeof Utils !== 'undefined') Utils.showProgress(`อัปโหลด Cloud: ${label} (${i + 1}/${total})`, Math.round(((i + 1) / total) * 100));
         try {
           const raw = localStorage.getItem(key);
           if (!raw) continue;
@@ -400,10 +422,12 @@ const Sync = {
           console.warn('[Sync] pushAll error for', key, ':', e.message);
         }
       }
+      if (typeof Utils !== 'undefined') Utils.hideProgress();
       this._badge('online');
       localStorage.setItem(this._lastSyncKey, new Date().toISOString());
       console.log('[Sync] pushAll complete ✓');
     } catch (e) {
+      if (typeof Utils !== 'undefined') Utils.hideProgress();
       console.error('[Sync] pushAll failed:', e);
       this._badge('error');
     }

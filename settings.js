@@ -629,20 +629,29 @@ async function exportZip() {
     try {
       const perm = await dirHandle.requestPermission({ mode: 'read' });
       if (perm === 'granted') {
-        const pdfFolder = zip.folder('pdfs');
+        // Count PDFs first so we can show progress
+        const pdfEntries = [];
         for await (const [name, handle] of dirHandle.entries()) {
-          if (handle.kind === 'file' && name.toLowerCase().endsWith('.pdf')) {
-            const file = await handle.getFile();
-            pdfFolder.file(name, await file.arrayBuffer());
-            pdfCount++;
-          }
+          if (handle.kind === 'file' && name.toLowerCase().endsWith('.pdf')) pdfEntries.push([name, handle]);
+        }
+        const pdfFolder = zip.folder('pdfs');
+        for (let i = 0; i < pdfEntries.length; i++) {
+          const [name, handle] = pdfEntries[i];
+          Utils.showProgress(`เก็บ PDF (${i + 1}/${pdfEntries.length})`, ((i + 1) / pdfEntries.length) * 50);
+          const file = await handle.getFile();
+          pdfFolder.file(name, await file.arrayBuffer());
+          pdfCount++;
         }
       }
     } catch(e) { console.warn('exportZip PDF:', e); }
   }
 
-  Utils.showAlert('<i class="bi bi-hourglass-split me-1"></i>กำลังสร้างไฟล์ ZIP...', 'info');
-  const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+  Utils.showProgress('สร้างไฟล์ ZIP…', pdfCount > 0 ? 50 : 0);
+  const blob = await zip.generateAsync(
+    { type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } },
+    (meta) => Utils.showProgress('สร้างไฟล์ ZIP…', pdfCount > 0 ? 50 + meta.percent * 0.5 : meta.percent)
+  );
+  Utils.hideProgress();
   const fn = `backup_zip_${dateStamp()}.zip`;
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -665,8 +674,10 @@ async function importZip(input, mode) {
   if (mode === 'overwrite' && !confirm('⚠️ ยืนยันอีกครั้ง — ข้อมูลเดิมทั้งหมดจะถูกแทนที่!')) { input.value = ''; return; }
 
   try {
-    Utils.showAlert('<i class="bi bi-hourglass-split me-1"></i>กำลังอ่านไฟล์ ZIP...', 'info');
-    const zip = await JSZip.loadAsync(await file.arrayBuffer());
+    Utils.showProgress('อ่านไฟล์ ZIP…', 5);
+    const zip = await JSZip.loadAsync(await file.arrayBuffer(), {
+      onUpdate: (meta) => Utils.showProgress('อ่านไฟล์ ZIP…', 5 + meta.percent * 0.3),
+    });
 
     // ── Import JSON data ──
     const jsonEntry = zip.file('backup.json');
@@ -701,23 +712,29 @@ async function importZip(input, mode) {
       try {
         const perm = await dirHandle.requestPermission({ mode: 'readwrite' });
         if (perm === 'granted') {
-          const tasks = [];
+          // Collect PDF entries first for progress tracking
+          const pdfEntries = [];
           pdfFolder.forEach((relPath, entry) => {
-            if (!entry.dir && relPath.toLowerCase().endsWith('.pdf')) {
-              tasks.push(entry.async('arraybuffer').then(async ab => {
-                const fh = await dirHandle.getFileHandle(relPath, { create: true });
-                const w  = await fh.createWritable();
-                await w.write(ab); await w.close();
-                pdfCount++;
-              }).catch(() => { pdfSkipped++; }));
-            }
+            if (!entry.dir && relPath.toLowerCase().endsWith('.pdf')) pdfEntries.push([relPath, entry]);
           });
-          await Promise.all(tasks);
+          const pdfTotal = pdfEntries.length;
+          for (let i = 0; i < pdfTotal; i++) {
+            const [relPath, entry] = pdfEntries[i];
+            Utils.showProgress(`นำเข้า PDF (${i + 1}/${pdfTotal})`, 35 + ((i + 1) / pdfTotal) * 60);
+            try {
+              const ab = await entry.async('arraybuffer');
+              const fh = await dirHandle.getFileHandle(relPath, { create: true });
+              const w  = await fh.createWritable();
+              await w.write(ab); await w.close();
+              pdfCount++;
+            } catch { pdfSkipped++; }
+          }
         }
       } catch(e) { console.warn('importZip PDF:', e); }
     } else if (pdfFolder && !dirHandle) {
       pdfFolder.forEach((p, e) => { if (!e.dir) pdfSkipped++; });
     }
+    Utils.hideProgress();
 
     DB.logActivity(session.userId, session.username, 'Import ZIP', { file: file.name, mode, pdfs: pdfCount });
     const modeText = mode === 'overwrite' ? 'Overwrite' : 'Merge';

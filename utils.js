@@ -252,6 +252,45 @@ const Utils = {
     el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   },
 
+  // ── Progress toast (fixed bottom-right, shows label + % bar) ───────────────
+  showProgress(label, pct) {
+    let el = document.getElementById('_progressToast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = '_progressToast';
+      el.style.cssText = [
+        'position:fixed', 'bottom:80px', 'right:16px', 'z-index:9999',
+        'min-width:260px', 'max-width:320px',
+        'background:#1e2329', 'color:#f0f2f5',
+        'border-radius:12px', 'padding:12px 16px',
+        'box-shadow:0 4px 20px rgba(0,0,0,.45)',
+        'font-size:13px', 'font-family:inherit',
+      ].join(';');
+      document.body.appendChild(el);
+    }
+    const p = Math.round(Math.min(100, Math.max(0, pct || 0)));
+    const color = p < 100 ? '#0d6efd' : '#198754';
+    el.innerHTML =
+      `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px">` +
+        `<span style="opacity:.9">${label}</span>` +
+        `<strong style="color:${color};font-size:14px;margin-left:10px">${p}%</strong>` +
+      `</div>` +
+      `<div style="height:7px;background:#3a3f47;border-radius:4px;overflow:hidden">` +
+        `<div style="height:100%;width:${p}%;background:${color};border-radius:4px;` +
+             `transition:width .25s ease,background .3s"></div>` +
+      `</div>`;
+    el.style.display = '';
+  },
+
+  hideProgress() {
+    const el = document.getElementById('_progressToast');
+    if (el) {
+      // Flash green at 100%, then fade out
+      this.showProgress(el.querySelector('span')?.textContent || 'เสร็จแล้ว', 100);
+      setTimeout(() => { if (el) el.style.display = 'none'; }, 600);
+    }
+  },
+
   todayInputValue() {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
