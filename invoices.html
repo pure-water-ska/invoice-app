@@ -19,9 +19,28 @@
 <div class="page-wrap">
   <div class="d-flex justify-content-between align-items-center mb-3 page-header">
     <h5 class="mb-0 fw-bold"><i class="bi bi-receipt me-2 text-primary"></i>รายการใบกำกับสินค้า</h5>
-    <a href="invoice-create.html" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>สร้างใบใหม่</a>
+    <div class="d-flex gap-2">
+      <button id="selModeBtn" class="btn btn-outline-secondary btn-sm d-none" onclick="toggleSelMode()">
+        <i class="bi bi-check2-square me-1"></i>เลือก
+      </button>
+      <a href="invoice-create.html" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>สร้างใบใหม่</a>
+    </div>
   </div>
   <div id="alertBox" class="mb-2"></div>
+
+  <!-- Selection toolbar -->
+  <div id="selToolbar" class="d-none mb-2 px-3 py-2 rounded d-flex align-items-center gap-2 flex-wrap alert alert-primary py-2"
+    <input type="checkbox" id="selAllChk" style="width:16px;height:16px;accent-color:#0d6efd;cursor:pointer"
+           onchange="toggleAllSel(this.checked)" title="เลือก/ยกเลิกทั้งหมด">
+    <span id="selLabel" class="fw-semibold small text-primary">เลือก 0 รายการ</span>
+    <div class="ms-auto d-flex gap-2">
+      <button class="btn btn-sm btn-light border" onclick="toggleAllSel(true)">เลือกทั้งหมด</button>
+      <button class="btn btn-sm btn-outline-secondary" onclick="clearSel()">ยกเลิก</button>
+      <button class="btn btn-sm btn-danger" id="bulkDelBtn" disabled onclick="confirmBulkDelete()">
+        <i class="bi bi-trash me-1"></i>ลบที่เลือก (<span id="bulkDelCount">0</span>)
+      </button>
+    </div>
+  </div>
 
   <!-- Filters -->
   <div class="card mb-3 filter-bar">
@@ -68,6 +87,7 @@
       <table class="table table-hover mb-0">
         <thead>
           <tr>
+            <th id="thChk" class="d-none" style="width:36px"></th>
             <th class="sort-th" onclick="setSort('num')">เลขที่ <span id="si_num"></span></th>
             <th class="sort-th" onclick="setSort('date')">วันที่ <span id="si_date">▼</span></th>
             <th class="sort-th" onclick="setSort('cust')">ลูกค้า <span id="si_cust"></span></th>
@@ -86,6 +106,27 @@
   </div>
 </div>
 
+<!-- Bulk Delete Confirm Modal -->
+<div class="modal fade" id="bulkDelModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog">
+    <div class="modal-content border-danger">
+      <div class="modal-header bg-danger text-white py-2">
+        <h6 class="modal-title fw-bold"><i class="bi bi-exclamation-triangle-fill me-1"></i>ยืนยันการลบหลายรายการ</h6>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2">คุณกำลังจะลบ <strong id="bulkDelModalCount"></strong> ใบกำกับ</p>
+        <p class="text-danger small mb-0"><i class="bi bi-exclamation-circle me-1"></i>การลบไม่สามารถกู้คืนได้ และจะลบข้อมูลการชำระเงินที่เกี่ยวข้องทั้งหมดด้วย</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+        <button class="btn btn-danger fw-semibold" onclick="executeBulkDelete()">
+          <i class="bi bi-trash me-1"></i>ลบทั้งหมดเลย
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script><script src="idb.js"></script><script src="bedate.js"></script>
@@ -94,7 +135,101 @@ const session = Auth.require();
 DB.init();
 Nav.render('invoices');
 
+// ── Bulk select state ─────────────────────────────────────────────────────────
+let _selMode = false;
+
+function toggleSelMode() {
+  _selMode = !_selMode;
+  const btn    = document.getElementById('selModeBtn');
+  const toolbar = document.getElementById('selToolbar');
+  const thChk  = document.getElementById('thChk');
+
+  if (_selMode) {
+    btn.classList.add('active', 'btn-primary');
+    btn.classList.remove('btn-outline-secondary');
+    toolbar.classList.remove('d-none');
+    thChk.classList.remove('d-none');
+  } else {
+    btn.classList.remove('active', 'btn-primary');
+    btn.classList.add('btn-outline-secondary');
+    toolbar.classList.add('d-none');
+    thChk.classList.add('d-none');
+    clearSel();
+  }
+  render();
+}
+
+function onInvChkChange() {
+  updateSelCount();
+}
+
+function updateSelCount() {
+  const chks  = document.querySelectorAll('.inv-chk:checked');
+  const total = document.querySelectorAll('.inv-chk');
+  const n = chks.length;
+  document.getElementById('selLabel').textContent   = 'เลือก ' + n + ' รายการ';
+  document.getElementById('bulkDelCount').textContent = n;
+  document.getElementById('bulkDelBtn').disabled    = n === 0;
+  // Highlight selected rows
+  document.querySelectorAll('#invoiceTable tr[data-num]').forEach(tr => {
+    const chk = tr.querySelector('.inv-chk');
+    if (chk) tr.classList.toggle('table-danger', chk.checked);
+  });
+  // Sync header checkbox state
+  const allChk = document.getElementById('selAllChk');
+  if (allChk) {
+    allChk.checked       = n > 0 && n === total.length;
+    allChk.indeterminate = n > 0 && n < total.length;
+  }
+}
+
+function toggleAllSel(v) {
+  document.querySelectorAll('.inv-chk').forEach(c => c.checked = v);
+  updateSelCount();
+}
+
+function clearSel() {
+  document.querySelectorAll('.inv-chk').forEach(c => c.checked = false);
+  updateSelCount();
+}
+
+function confirmBulkDelete() {
+  const nums = [...document.querySelectorAll('.inv-chk:checked')].map(c => c.dataset.num);
+  if (!nums.length) return;
+  document.getElementById('bulkDelModalCount').textContent = nums.length;
+  new bootstrap.Modal(document.getElementById('bulkDelModal')).show();
+}
+
+function executeBulkDelete() {
+  const nums = new Set([...document.querySelectorAll('.inv-chk:checked')].map(c => c.dataset.num));
+  if (!nums.size) return;
+  bootstrap.Modal.getInstance(document.getElementById('bulkDelModal'))?.hide();
+
+  // Delete invoices + associated payments + cap deductions
+  const allInvoices = DB.getInvoices().filter(i => !nums.has(i.invoiceNumber));
+  DB.saveInvoices(allInvoices);
+  const allPayments = DB.getPayments().filter(p => !nums.has(p.invoiceNumber));
+  DB.savePayments(allPayments);
+  nums.forEach(num => DB.removeCapDeductionsByInvoice(num));
+
+  // Log activity
+  DB.logActivity(session.userId, session.username, 'ลบใบกำกับ (หลายรายการ)', { invoiceNumbers: [...nums] });
+
+  Utils.showAlert(`ลบ ${nums.size} ใบกำกับแล้ว`, 'warning');
+  _selMode = false;
+  document.getElementById('selModeBtn').classList.remove('active','btn-primary');
+  document.getElementById('selModeBtn').classList.add('btn-outline-secondary');
+  document.getElementById('selToolbar').classList.add('d-none');
+  document.getElementById('thChk').classList.add('d-none');
+  render();
+}
+
 window.addEventListener('DOMContentLoaded', () => {
+  // Show select-mode button for users with delete permission
+  if (Auth.can('invoice_delete')) {
+    document.getElementById('selModeBtn').classList.remove('d-none');
+  }
+
   const customers = DB.getCustomers();
   const custSel = document.getElementById('filterCustomer');
   custSel.innerHTML = '<option value="">— ลูกค้าทั้งหมด —</option>' +
@@ -251,7 +386,12 @@ function render() {
     const remaining = Math.max(0, total - paid);
     const si = statusInfo(paid, total);
     const pages = allInvoices.filter(i => i.invoiceNumber === inv.invoiceNumber).length;
-    return `<tr>
+    return `<tr data-num="${inv.invoiceNumber}">
+      <td class="text-center sel-chk-cell ${_selMode ? '' : 'd-none'}">
+        <input type="checkbox" class="inv-chk" data-num="${inv.invoiceNumber}"
+               style="width:15px;height:15px;accent-color:#dc3545;cursor:pointer"
+               onchange="onInvChkChange()">
+      </td>
       <td><a href="invoice-create.html?view=${inv.invoiceNumber}" class="fw-semibold text-decoration-none">${inv.invoiceNumber}</a>
         ${pages > 1 ? `<span class="badge bg-secondary ms-1">${pages} หน้า</span>` : ''}
       </td>
