@@ -167,8 +167,9 @@ async function handleFiles(filesInput) {
   const total = files.length;
   document.getElementById('clearBtn').classList.remove('d-none');
   for (let i = 0; i < total; i++) {
-    setProgress(true, files[i].name, i + 1, total);
+    setProgress(true, files[i].name, i, total);
     await processPDF(files[i]);
+    setProgress(true, files[i].name, i + 1, total);
   }
   setProgress(false);
   updateSaveBtn();
@@ -231,8 +232,8 @@ function setProgress(show, txt, current, total) {
   if (!show) return;
   document.getElementById('progressText').textContent = txt || '';
   if (total) {
-    document.getElementById('progressCounter').textContent = `${current} / ${total} ไฟล์`;
-    document.getElementById('progressBar').style.width = `${Math.round((current - 1) / total * 100)}%`;
+    document.getElementById('progressCounter').textContent = `${current} / ${total}`;
+    document.getElementById('progressBar').style.width = `${Math.round(current / total * 100)}%`;
   }
 }
 
@@ -529,6 +530,15 @@ async function _doSave() {
   let saved = 0;
   const errors = [];
 
+  // Count how many cards are actually going to be saved
+  const toSave = [];
+  for (let ci = 0; ci < _cards.length; ci++) {
+    const sel = document.getElementById(`sel_${ci}`);
+    if (sel && sel.checked && !_cards[ci].saved) toSave.push(ci);
+  }
+  const total = toSave.length;
+  if (total > 0) setProgress(true, 'กำลังบันทึก...', 0, total);
+
   for (let ci = 0; ci < _cards.length; ci++) {
     const sel = document.getElementById(`sel_${ci}`);
     if (!sel || !sel.checked || _cards[ci].saved) continue;
@@ -575,8 +585,10 @@ async function _doSave() {
       .insertAdjacentHTML('beforeend',
         '<span class="badge bg-white text-success ms-2"><i class="bi bi-check-circle-fill"></i> บันทึกแล้ว</span>');
     saved++;
+    if (total > 0) setProgress(true, `บันทึก: ${d.invoiceNumber || `การ์ด ${ci+1}`}`, saved, total);
   }
 
+  if (total > 0) setProgress(false);
   let msg = `บันทึกสำเร็จ ${saved} ใบ`;
   if (errors.length) msg += `<br><small>${errors.map(e => `⚠️ ${e}`).join('<br>')}</small>`;
   Utils.showAlert(msg, saved ? 'success' : 'warning');

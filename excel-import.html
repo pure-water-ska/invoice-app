@@ -615,6 +615,15 @@ function pickInvoice(invId) {
 // ─── Save Payments ──────────────────────────────────────────────────────
 function savePayments() {
   let saved = 0; const errors = [];
+  const total = _rows.filter(r => r.selected && !r.saved && r.match.invoice).length;
+  const wrap = document.getElementById('xlsProgressWrap');
+  const bar  = document.getElementById('xlsProgressBar');
+  const ctr  = document.getElementById('xlsProgressCounter');
+  if (total > 0) {
+    wrap.classList.remove('d-none');
+    bar.style.width = '0%';
+    ctr.textContent = `0 / ${total} รายการ`;
+  }
   for (const r of _rows) {
     if (!r.selected || r.saved || !r.match.invoice) continue;
     const inv = r.match.invoice;
@@ -647,7 +656,12 @@ function savePayments() {
         '<i class="bi bi-check-circle-fill text-success"></i>';
     }
     saved++;
+    if (total > 0) {
+      ctr.textContent = `${saved} / ${total} รายการ`;
+      bar.style.width  = `${Math.round(saved / total * 100)}%`;
+    }
   }
+  if (total > 0) wrap.classList.add('d-none');
   let msg = `บันทึกการชำระเงิน ${saved} รายการสำเร็จ`;
   if (errors.length) msg += `<br><small>${errors.map(e=>`⚠️ ${esc(e)}`).join('<br>')}</small>`;
   Utils.showAlert(msg, saved ? 'success' : 'warning');
