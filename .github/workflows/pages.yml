@@ -1,0 +1,77 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:   # allow manual trigger
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout source
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. Inject Firebase teamPassword from GitHub Secret
+      #    firebase-config.js (ไม่มี password) อยู่ใน repo แล้ว — ต้องตั้งค่าเพียง secret เดียว:
+      #      FIREBASE_TEAM_PASSWORD  ← ตั้งค่าที่: Repo → Settings → Secrets and variables → Actions
+      - name: Inject Firebase teamPassword
+        env:
+          FIREBASE_TEAM_PASSWORD: ${{ secrets.FIREBASE_TEAM_PASSWORD }}
+        run: |
+          if [ -n "$FIREBASE_TEAM_PASSWORD" ]; then
+            sed -i "s|teamPassword: \"\"|teamPassword: \"$FIREBASE_TEAM_PASSWORD\"|" firebase-config.js
+            echo "Firebase teamPassword injected from secret"
+          else
+            echo "No FIREBASE_TEAM_PASSWORD secret — will use anonymous auth on GitHub Pages"
+          fi
+
+      # 3. Inject drive-config.js from GitHub Secrets
+      #    ชื่อ secret ที่ต้องสร้าง: GOOGLE_CLIENT_ID
+      - name: Inject Drive config
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+        run: |
+          if [ -n "$GOOGLE_CLIENT_ID" ]; then
+            cat > drive-config.js << JSEOF
+          window.GOOGLE_CLIENT_ID = "$GOOGLE_CLIENT_ID";
+          JSEOF
+            echo "Drive config injected from secrets"
+          else
+            echo "No GOOGLE_CLIENT_ID secret found — using drive-config.js from repo"
+          fi
+
+      # 3. Update Service Worker cache version with build timestamp
+      #    → ทุก deploy ใหม่จะ bust cache เก่า, browser จะดาวน์โหลดไฟล์ใหม่ทั้งหมด
+      - name: Update SW cache version
+        run: |
+          BUILD_TS=$(date -u +%Y%m%dT%H%M%S)
+          sed -i "s/const CACHE_VERSION  = .*/const CACHE_VERSION  = '${BUILD_TS}';/" sw.js
+          echo "Cache version: ${BUILD_TS}"
+
+      # 4. Upload and deploy
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v5
