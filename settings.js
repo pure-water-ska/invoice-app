@@ -14,6 +14,7 @@ window.addEventListener('DOMContentLoaded', () => {
   initFolderSettings();
   initZipSections();
   if (Auth.isAdmin()) renderErrorLog();
+  renderFsStatus();
   ['companyName','address','phone'].forEach(id =>
     document.getElementById(id).addEventListener('input', updatePreview)
   );
@@ -556,6 +557,61 @@ function renderDriveFileList() {
       </td>
     </tr>`;
   }).join('');
+}
+
+/* ─── Firestore Sync ─────────────────────────────────────────────────────── */
+function renderFsStatus() {
+  const icon = document.getElementById('fsStatusIcon');
+  const text = document.getElementById('fsStatusText');
+  if (!icon || !text) return;
+
+  const hasConfig = typeof FIREBASE_CONFIG !== 'undefined' &&
+                    FIREBASE_CONFIG.apiKey &&
+                    !FIREBASE_CONFIG.apiKey.startsWith('AIzaSy...');
+  if (!hasConfig) {
+    icon.textContent = '❌'; text.textContent = 'ไม่ได้ตั้งค่า Firebase (ตั้ง Netlify env vars แล้ว redeploy)';
+    return;
+  }
+  if (!window.Sync?.ready) {
+    icon.textContent = '⏳'; text.textContent = 'กำลังเชื่อมต่อ Firestore...';
+    // Retry after a moment
+    setTimeout(renderFsStatus, 2000);
+    return;
+  }
+  const last = localStorage.getItem('wt_sync_lastAt');
+  const lastStr = last ? new Date(last).toLocaleString('th-TH') : 'ยังไม่เคย';
+  icon.textContent = '✅';
+  text.textContent = `เชื่อมต่อแล้ว (org: ${FIREBASE_CONFIG.orgId}) · ซิงค์ล่าสุด: ${lastStr}`;
+}
+
+async function fsPushAll() {
+  const btn = document.getElementById('btnFsPush');
+  const el  = document.getElementById('fsSyncMsg');
+  if (!window.Sync?.ready) {
+    el.className = 'alert alert-warning small py-2 mb-3';
+    el.classList.remove('d-none');
+    el.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Firestore ยังไม่ได้เชื่อมต่อ — ตรวจสอบ Netlify env vars แล้ว redeploy';
+    return;
+  }
+  if (!confirm('อัปโหลดข้อมูลทั้งหมดจากเครื่องนี้ไป Firestore?\nจะเขียนทับข้อมูลบน Firestore ด้วยข้อมูลจากเครื่องนี้')) return;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลัง Push...';
+  el.className = 'alert alert-info small py-2 mb-3';
+  el.classList.remove('d-none');
+  el.innerHTML = 'กำลังอัปโหลดข้อมูลทั้งหมดไป Firestore...';
+  try {
+    const result = await Sync.pushAll();
+    el.className = 'alert alert-success small py-2 mb-3';
+    el.innerHTML = `<i class="bi bi-check-circle me-1"></i>Push สำเร็จ — อัปโหลด <strong>${result.pushed} key</strong> ไป Firestore` +
+      (result.failed ? ` (ล้มเหลว ${result.failed})` : '') +
+      '<br><small class="text-muted">อุปกรณ์อื่นจะซิงค์โดยอัตโนมัติภายใน 1-2 วินาที</small>';
+    renderFsStatus();
+  } catch (e) {
+    el.className = 'alert alert-danger small py-2 mb-3';
+    el.innerHTML = '<i class="bi bi-x-circle me-1"></i>Push ล้มเหลว: ' + esc(e.message);
+  }
+  btn.disabled = false;
+  btn.innerHTML = '<i class="bi bi-cloud-upload me-1"></i>Push All → Firestore';
 }
 
 async function drivePushAll() {
@@ -1215,56 +1271,4 @@ function runHealthCheck() {
       <span class="ms-auto text-muted small">ตรวจเมื่อ ${Utils.formatDateTimeTH(new Date().toISOString())}</span>
     </div>
     <table class="table table-sm table-hover mb-0">
-      <thead class="table-light"><tr><th style="width:40%">รายการตรวจสอบ</th><th>ผล</th><th>รายละเอียด</th></tr></thead>
-      <tbody>
-        ${checks.map(c => `
-          <tr>
-            <td class="fw-semibold small">${c.label}</td>
-            <td><i class="bi bi-${iconMap[c.status]}"></i></td>
-            <td class="small text-muted">${c.detail}${c.extra||''}</td>
-          </tr>`).join('')}
-      </tbody>
-    </table>`;
-
-  DB.logActivity(session.userId, session.username, 'Health Check', { errors, warns });
-}
-
-function loadVersionInfo() {
-  document.getElementById('versionBadge').textContent = APP_VERSION.version;
-  const d = new Date(APP_VERSION.date);
-  document.getElementById('versionDate').textContent =
-    `${d.getDate()} ${['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'][d.getMonth()]} ${d.getFullYear()+543}`;
-  document.getElementById('versionDevice').textContent = window.location.hostname || 'localhost';
-}
-
-function compareVersion() {
-  const other = document.getElementById('versionOther').value.trim();
-  const el = document.getElementById('versionCompareResult');
-  if (!other) { el.innerHTML = ''; return; }
-  if (other === APP_VERSION.version) {
-    el.innerHTML = '<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>เวอร์ชันตรงกัน — โปรแกรมเป็นรุ่นเดียวกัน</span>';
-  } else {
-    el.innerHTML = `<span class="text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>เวอร์ชันไม่ตรงกัน — เครื่องนี้ <strong>${APP_VERSION.version}</strong> / เครื่องอื่น <strong>${other}</strong></span>`;
-  }
-}
-
-function loadStats() {
-  const items = [
-    { label: 'ใบกำกับ',      count: [...new Set(DB.getInvoices().map(i => i.invoiceNumber))].length, icon: 'receipt',       color: 'primary' },
-    { label: 'ลูกค้า',       count: DB.getCustomers().length,  icon: 'people',        color: 'success' },
-    { label: 'สินค้า',       count: DB.getProducts().length,   icon: 'box-seam',      color: 'info' },
-    { label: 'รายการชำระ',   count: DB.getPayments().length,   icon: 'cash-coin',     color: 'warning' },
-    { label: 'ฉลากขวด',      count: DB.getVersions().length,   icon: 'tag',           color: 'secondary' },
-    { label: 'ผู้ใช้งาน',    count: DB.getUsers().length,      icon: 'person-gear',   color: 'dark' },
-    { label: 'Activity Log', count: DB.getActivity().length,   icon: 'clock-history', color: 'primary' },
-    { label: 'Login Log',    count: DB.getLogins().length,     icon: 'shield-check',  color: 'success' },
-  ];
-  document.getElementById('statsRow').innerHTML = items.map(item => `
-    <div class="col-6 col-md-3">
-      <div class="border rounded p-2 text-center">
-        <i class="bi bi-${item.icon} text-${item.color} d-block fs-4 mb-1"></i>
-        <div class="fw-bold fs-5">${item.count.toLocaleString('th-TH')}</div>
-        <div class="text-muted" style="font-size:11px">${item.label}</div>
-      </div>
-    </div>`).join('');
-}
+      <thead class="table-light"><tr><th style="width:40%">รายการ

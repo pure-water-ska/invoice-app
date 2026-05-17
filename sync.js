@@ -261,6 +261,14 @@ const Sync = {
     localStorage.setItem(this._lastSyncKey, new Date().toISOString());
   },
 
+  // ── Safe local read — handles LZString-compressed data ────────────────────
+  // sync.js must NEVER read localStorage directly via JSON.parse(localStorage.getItem())
+  // because DB._set() now compresses values with LZString.  Always use this helper.
+  _localRead(lsKey) {
+    if (window.DB) return DB._lzRead(lsKey);          // decompresses if needed
+    return localStorage.getItem(lsKey);               // fallback (no DB yet)
+  },
+
   // ── Pull ALL data from Firestore → localStorage (initial load) ─────────────
   async _pullAll() {
     const base = this._orgRef();
@@ -270,8 +278,21 @@ const Sync = {
       try {
         const doc = await base.collection('data').doc(docName).get();
         if (doc.exists && doc.data().d !== undefined) {
+          // Write plain JSON — _lzRead first-char guard handles this on next read
           localStorage.setItem(lsKey, JSON.stringify(doc.data().d));
           if (window.DB) DB.invalidate(lsKey);
+        } else {
+          // Firestore doc missing → bootstrap: push local data up
+          try {
+            const raw = this._localRead(lsKey);
+            if (raw) {
+              const localVal = JSON.parse(raw);
+              if (localVal !== null && localVal !== undefined) {
+                console.log(`[Sync] Bootstrap doc: pushing ${docName} to Firestore`);
+                await this._writeKey(lsKey, localVal);
+              }
+            }
+          } catch (be) { console.warn('[Sync] bootstrap push doc failed:', docName, be.message); }
         }
       } catch (e) { console.warn('[Sync] pull doc:', docName, e.message); }
     });
@@ -292,8 +313,10 @@ const Sync = {
           if (window.DB) DB.invalidate(lsKey);
         } else {
           // Firestore empty → bootstrap: push local data up to Firestore
+          // BUG-FIX: must use _localRead() — localStorage may contain LZString-compressed data
           try {
-            const localArr = JSON.parse(localStorage.getItem(lsKey) || '[]');
+            const raw = this._localRead(lsKey);
+            const localArr = JSON.parse(raw || '[]');
             if (Array.isArray(localArr) && localArr.length > 0) {
               console.log(`[Sync] Bootstrap: pushing ${localArr.length} ${colName} records to Firestore`);
               await this._writeKey(lsKey, localArr);
@@ -306,6 +329,28 @@ const Sync = {
     await Promise.all([...docPromises, ...colPromises]);
     this._triggerRerender();
     console.log('[Sync] Initial pull complete');
+  },
+
+  // ── Force-push ALL local data to Firestore (use after LZString migration) ──
+  async pushAll() {
+    if (!this.ready) throw new Error('Sync not ready');
+    const allKeys = [...Object.keys(this.DOCUMENTS), ...Object.keys(this.COLLECTIONS)];
+    let pushed = 0, failed = 0;
+    for (const lsKey of allKeys) {
+      try {
+        const raw = this._localRead(lsKey);
+        if (!raw) continue;
+        const val = JSON.parse(raw);
+        if (val === null || val === undefined) continue;
+        await this._writeKey(lsKey, val);
+        pushed++;
+      } catch (e) {
+        console.warn('[Sync] pushAll failed for', lsKey, e.message);
+        failed++;
+      }
+    }
+    console.log(`[Sync] pushAll: pushed=${pushed} failed=${failed}`);
+    return { pushed, failed };
   },
 
   // ── Real-time listeners ────────────────────────────────────────────────────
@@ -474,53 +519,4 @@ const Sync = {
     console.log('[Sync] pushAll: uploading all local data to Firestore...');
     try {
       const allKeys = [
-        ...Object.keys(this.COLLECTIONS),
-        ...Object.keys(this.DOCUMENTS),
-      ];
-      const total = allKeys.length;
-      for (let i = 0; i < total; i++) {
-        const key = allKeys[i];
-        const label = this.COLLECTIONS[key] || this.DOCUMENTS[key] || key;
-        if (typeof Utils !== 'undefined') Utils.showProgress(`อัปโหลด Cloud: ${label} (${i + 1}/${total})`, Math.round(((i + 1) / total) * 100));
-        try {
-          const raw = localStorage.getItem(key);
-          if (!raw) continue;
-          const val = JSON.parse(raw);
-          await this._writeKey(key, val);
-          console.log('[Sync] pushAll:', key, '✓');
-        } catch (e) {
-          console.warn('[Sync] pushAll error for', key, ':', e.message);
-        }
-      }
-      if (typeof Utils !== 'undefined') Utils.hideProgress();
-      this._badge('online');
-      localStorage.setItem(this._lastSyncKey, new Date().toISOString());
-      console.log('[Sync] pushAll complete ✓');
-    } catch (e) {
-      if (typeof Utils !== 'undefined') Utils.hideProgress();
-      console.error('[Sync] pushAll failed:', e);
-      this._badge('error');
-    }
-  },
-
-  // ── Status info for troubleshoot / settings ────────────────────────────────
-  getStatus() {
-    const pending = this._getQueue().length;
-    const lastAt  = localStorage.getItem(this._lastSyncKey);
-    return {
-      ready:   this.ready,
-      online:  this._online,
-      pending,
-      orgId:   this._orgId,
-      uid:     this._uid,
-      lastAt,
-    };
-  },
-};
-
-// Expose globally — `const Sync` above is a lexical binding, NOT a window property,
-// so `window.Sync` would otherwise be undefined (breaks nav.js badge + connection modal).
-window.Sync = Sync;
-
-// ── Auto-initialize ───────────────────────────────────────────────────────────
-Sync.init().catch(e => console.error('[Sync]', e));
+        ...Object
