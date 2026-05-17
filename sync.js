@@ -124,11 +124,9 @@ const Sync = {
       }
       this._uid = firebase.auth().currentUser?.uid || 'anon';
 
-      // Enable offline persistence (Firestore has its own offline cache too)
+      // Enable offline persistence — non-fatal if it fails (multi-tab, private browsing, SDK bugs)
       await this._db.enablePersistence({ synchronizeTabs: true }).catch(err => {
-        if (err.code !== 'failed-precondition' && err.code !== 'unimplemented') {
-          console.warn('[Sync] Persistence:', err.code);
-        }
+        console.warn('[Sync] Persistence disabled:', err.code || err.message);
       });
 
       // Pull latest from Firestore → localStorage
