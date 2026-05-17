@@ -31,18 +31,24 @@ const DB = {
   _lzRead(key) {
     const raw = localStorage.getItem(key);
     if (raw === null) return null;
-    // Compressed values start with a char ≥ ' ' (code 32) written by LZString.
-    // Plain JSON always starts with '[' or '{' or a digit — never with a
-    // high-surrogate char produced by compressToUTF16.  We try decompress first;
-    // if the result is null/empty we fall back to the raw string (migration path
-    // so existing uncompressed data keeps working after the first deploy).
-    try {
-      if (typeof LZString !== 'undefined') {
-        const dec = LZString.decompressFromUTF16(raw);
-        if (dec) return dec;
+    // Plain JSON stored before compression was added always starts with one of
+    // these ASCII chars: [ { " t f n or a digit.  LZString output is offset +32
+    // so its first char code is almost never in this set.
+    // Guard: only attempt decompression when the first char is NOT a plain-JSON
+    // starter, so we never accidentally garbage-parse old uncompressed data.
+    if (typeof LZString !== 'undefined') {
+      const fc = raw.charCodeAt(0);
+      const isPlainJson = fc === 91 || fc === 123 || fc === 34 ||
+                          fc === 116 || fc === 102 || fc === 110 ||
+                          (fc >= 48 && fc <= 57);
+      if (!isPlainJson) {
+        try {
+          const dec = LZString.decompressFromUTF16(raw);
+          if (dec) return dec;
+        } catch {}
       }
-    } catch {}
-    return raw; // plain JSON fallback
+    }
+    return raw; // plain JSON (pre-compression data) — read as-is
   },
 
   _get(key) {
