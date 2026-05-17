@@ -160,7 +160,7 @@
     tryShow();
   }
 
-  const FB_VER = '10.14.1';
+  const FB_VER = '9.22.0';
   const FB_BASE = `https://www.gstatic.com/firebasejs/${FB_VER}`;
 
   // Hide badge helper (for when Firebase is not configured)

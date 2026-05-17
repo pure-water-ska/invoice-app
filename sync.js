@@ -110,11 +110,14 @@ const Sync = {
     this._showBadge('pending', 'Connecting to Firestore...');
 
     try {
+      console.log('[Sync] Step 1: initializeApp');
       if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+      console.log('[Sync] Step 2: firestore()');
       this._db    = firebase.firestore();
       this._orgId = FIREBASE_CONFIG.orgId || 'main';
 
       // Sign in with shared team account
+      console.log('[Sync] Step 3: signIn');
       const email = FIREBASE_CONFIG.teamEmail;
       const pass  = FIREBASE_CONFIG.teamPassword;
       if (email && pass) {
@@ -123,12 +126,17 @@ const Sync = {
         await firebase.auth().signInAnonymously();
       }
       this._uid = firebase.auth().currentUser?.uid || 'anon';
+      console.log('[Sync] Step 4: signIn OK, uid=', this._uid);
 
       // Pull latest from Firestore → localStorage
+      console.log('[Sync] Step 5: pullAll');
       await this._pullAll();
+      console.log('[Sync] Step 6: pullAll done');
 
       // Real-time listeners
+      console.log('[Sync] Step 7: setupListeners');
       this._setupListeners();
+      console.log('[Sync] Step 8: listeners ready');
 
       // Mark ready BEFORE flushing queue — so _flushQueue() can proceed
       this.ready = true;
