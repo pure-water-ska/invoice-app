@@ -27,23 +27,46 @@ const DB = {
   // Firestore/Drive updates localStorage directly).
   _cache: {},
 
+  // ── LZ-string helpers: read raw localStorage and try to decompress ──────
+  _lzRead(key) {
+    const raw = localStorage.getItem(key);
+    if (raw === null) return null;
+    // Compressed values start with a char ≥ ' ' (code 32) written by LZString.
+    // Plain JSON always starts with '[' or '{' or a digit — never with a
+    // high-surrogate char produced by compressToUTF16.  We try decompress first;
+    // if the result is null/empty we fall back to the raw string (migration path
+    // so existing uncompressed data keeps working after the first deploy).
+    try {
+      if (typeof LZString !== 'undefined') {
+        const dec = LZString.decompressFromUTF16(raw);
+        if (dec) return dec;
+      }
+    } catch {}
+    return raw; // plain JSON fallback
+  },
+
   _get(key) {
     if (!Object.prototype.hasOwnProperty.call(this._cache, key)) {
-      try { this._cache[key] = JSON.parse(localStorage.getItem(key)) || []; }
+      try { this._cache[key] = JSON.parse(this._lzRead(key)) || []; }
       catch { this._cache[key] = []; }
     }
     return this._cache[key];
   },
   _getObj(key, def) {
     if (!Object.prototype.hasOwnProperty.call(this._cache, key)) {
-      try { const v = localStorage.getItem(key); this._cache[key] = v ? JSON.parse(v) : def; }
+      try { const v = this._lzRead(key); this._cache[key] = v ? JSON.parse(v) : def; }
       catch { this._cache[key] = def; }
     }
     return this._cache[key] ?? def;
   },
   _set(key, val) {
     this._cache[key] = val;                      // update cache immediately
-    localStorage.setItem(key, JSON.stringify(val));
+    const json = JSON.stringify(val);
+    // Compress with LZString if available; plain JSON fallback keeps sync.js happy
+    const stored = (typeof LZString !== 'undefined')
+      ? LZString.compressToUTF16(json)
+      : json;
+    localStorage.setItem(key, stored);
     // Push to Firestore sync if available (sync.js loaded + ready, or queue if not yet ready)
     if (window.Sync) {
       if (Sync.ready) Sync.push(key, val);
@@ -297,6 +320,68 @@ const DB = {
     this._set('wt_activity_archive', [...old, ...arch].slice(0, 10000));
     this._set(this.K.ACTIVITY, keep);
     return { archived: old.length, remaining: keep.length };
+  },
+
+  // ─── INVOICE ARCHIVE ─────────────────────────────────────────────────────────
+  // Archives invoices that are:
+  //   • older than `months` months (based on createdAt / date field)
+  //   • fully paid OR overpaid  (paidAmount >= totalAmount)
+  // Uploads them as a JSON file to Google Drive (if connected), then removes
+  // from the local invoices array.  Returns a result object with counts.
+  async archiveOldInvoices(months = 3) {
+    const cutoff = new Date();
+    cutoff.setMonth(cutoff.getMonth() - months);
+    const cutoffIso = cutoff.toISOString();
+
+    const all = this.getInvoices();
+    const toArchive = [];
+    const toKeep    = [];
+
+    for (const inv of all) {
+      const dateStr = inv.createdAt || inv.date || '';
+      if (!dateStr || dateStr >= cutoffIso) { toKeep.push(inv); continue; }
+
+      // Calculate paid total (sum of non-cancelled payments)
+      const paid  = this.getInvoicePaidAmount(inv.invoiceNumber);
+      const total = parseFloat(inv.totalAmount || inv.total || 0);
+
+      if (total > 0 && paid >= total) {
+        toArchive.push(inv);
+      } else {
+        toKeep.push(inv);
+      }
+    }
+
+    if (!toArchive.length) return { archived: 0, remaining: toKeep.length, driveId: null };
+
+    // Try to upload to Google Drive
+    let driveId = null;
+    if (window.DriveStore?.ready) {
+      try {
+        const stamp   = new Date().toISOString().slice(0, 10);
+        const json    = JSON.stringify(toArchive, null, 2);
+        const blob    = new Blob([json], { type: 'application/json' });
+        const result  = await DriveStore.upload(blob, `invoice-archive-${stamp}.json`, {});
+        driveId = result?.driveId || null;
+      } catch (e) {
+        console.warn('[DB.archiveOldInvoices] Drive upload failed:', e.message);
+      }
+    }
+
+    // Remove archived invoices from local storage
+    this.saveInvoices(toKeep);
+
+    // Log the action
+    if (typeof Auth !== 'undefined') {
+      const u = Auth.getSession();
+      this.logActivity(u?.id || '', u?.username || 'system', 'archive_invoices', {
+        archived: toArchive.length,
+        months,
+        driveId,
+      });
+    }
+
+    return { archived: toArchive.length, remaining: toKeep.length, driveId };
   },
 
   // ─── LOGIN HISTORY ───────────────────────────────────────────────────────────

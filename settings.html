@@ -321,6 +321,29 @@
     </div>
   </div>
 
+  <!-- ── Archive Old Invoices ─────────────────────────────────────────── -->
+  <div class="card mb-4 admin-only">
+    <div class="card-header bg-warning text-dark fw-semibold py-2">
+      <i class="bi bi-archive me-1"></i>จัดเก็บใบกำกับเก่า (Archive)
+    </div>
+    <div class="card-body">
+      <p class="text-muted small mb-3">
+        ย้ายใบกำกับที่ <strong>ชำระครบหรือเกิน</strong> และมีอายุมากกว่า <strong>3 เดือน</strong>
+        ออกจาก localStorage → อัปโหลดไป Google Drive แล้วลบออกจากเครื่อง
+        เพื่อเพิ่มพื้นที่ว่าง
+      </p>
+      <div id="archivePreview" class="alert alert-info d-none small py-2 mb-3"></div>
+      <div class="d-flex gap-2 flex-wrap">
+        <button class="btn btn-outline-secondary btn-sm" onclick="previewArchive()">
+          <i class="bi bi-search me-1"></i>ดูตัวอย่างก่อน Archive
+        </button>
+        <button class="btn btn-warning btn-sm" id="btnRunArchive" disabled onclick="runArchive()">
+          <i class="bi bi-archive me-1"></i>Archive ตอนนี้
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Export Logs ───────────────────────────────────────────────────── -->
   <div class="card mb-4 admin-only">
     <div class="card-header bg-secondary text-white fw-semibold py-2">

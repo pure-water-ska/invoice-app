@@ -614,6 +614,68 @@ async function driveDeleteFile(driveId, filename) {
   }
 }
 
+/* ─── Archive Old Invoices ──────────────────────────────────────────────── */
+function previewArchive() {
+  const months = 3;
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - months);
+  const cutoffIso = cutoff.toISOString();
+
+  const all = DB.getInvoices();
+  let count = 0;
+  for (const inv of all) {
+    const dateStr = inv.createdAt || inv.date || '';
+    if (!dateStr || dateStr >= cutoffIso) continue;
+    const paid  = DB.getInvoicePaidAmount(inv.invoiceNumber);
+    const total = parseFloat(inv.totalAmount || inv.total || 0);
+    if (total > 0 && paid >= total) count++;
+  }
+
+  const el = document.getElementById('archivePreview');
+  const btn = document.getElementById('btnRunArchive');
+  el.classList.remove('d-none', 'alert-info', 'alert-warning');
+
+  if (count === 0) {
+    el.classList.add('alert-info');
+    el.innerHTML = '<i class="bi bi-check-circle me-1 text-success"></i>ไม่มีใบกำกับที่ตรงเงื่อนไข (ยังไม่มีอะไรต้อง Archive)';
+    btn.disabled = true;
+  } else {
+    const driveReady = window.DriveStore?.ready;
+    el.classList.add('alert-warning');
+    el.innerHTML = `<i class="bi bi-exclamation-triangle me-1"></i>พบ <strong>${count} ใบ</strong> ที่ชำระครบและอายุเกิน ${months} เดือน` +
+      (driveReady ? ` — จะอัปโหลดไป Google Drive ก่อนลบ` : ` — ⚠️ Google Drive ไม่ได้เชื่อมต่อ ข้อมูลจะถูกลบโดยไม่มีสำเนาบน Drive`);
+    btn.disabled = false;
+  }
+}
+
+async function runArchive() {
+  const btn = document.getElementById('btnRunArchive');
+  const el  = document.getElementById('archivePreview');
+  if (!confirm('ยืนยันการ Archive ใบกำกับ?\nใบกำกับที่ชำระครบและอายุเกิน 3 เดือนจะถูกลบออกจากเครื่อง')) return;
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลัง Archive...';
+
+  try {
+    const result = await DB.archiveOldInvoices(3);
+    el.classList.remove('alert-warning', 'alert-info', 'd-none');
+    el.classList.add('alert-success');
+    el.innerHTML = `<i class="bi bi-check-circle me-1"></i>Archive สำเร็จ — ย้ายแล้ว <strong>${result.archived} ใบ</strong>, เหลือใน localStorage <strong>${result.remaining} ใบ</strong>` +
+      (result.driveId ? ` · <small class="text-muted">Drive: ${result.driveId}</small>` : '');
+    Utils.showAlert(`Archive สำเร็จ ${result.archived} ใบ`, 'success');
+    renderStorageBar();
+    loadStats();
+  } catch (e) {
+    el.classList.remove('d-none', 'alert-warning');
+    el.classList.add('alert-danger');
+    el.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>เกิดข้อผิดพลาด: ' + esc(e.message);
+    Utils.showAlert('Archive ล้มเหลว: ' + e.message, 'danger');
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<i class="bi bi-archive me-1"></i>Archive ตอนนี้';
+}
+
 /* ─── ZIP Export / Import ───────────────────────────────────────────────── */
 async function exportZip() {
   if (!Auth.can('export_zip')) { Utils.showAlert('ไม่มีสิทธิ์ Export ZIP', 'danger'); return; }

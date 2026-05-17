@@ -17,6 +17,133 @@ window.addEventListener('unhandledrejection', e => {
   }
 });
 
+// ── LZString — UTF-16 localStorage compression ─────────────────────────────
+// Ported from lz-string by pieroxy (MIT). Only compressToUTF16 and
+// decompressFromUTF16 are included — everything else is trimmed.
+const LZString = (function () {
+  function _c(uncompressed, bitsPerChar, getCharFromInt) {
+    if (uncompressed == null) return '';
+    var i, value,
+        dict = {}, dictToCreate = {},
+        c = '', wc = '', w = '',
+        enlargeIn = 2, dictSize = 3, numBits = 2,
+        data = [], dv = 0, dp = 0;
+    for (var ii = 0; ii < uncompressed.length; ii++) {
+      c = uncompressed.charAt(ii);
+      if (!Object.prototype.hasOwnProperty.call(dict, c)) {
+        dict[c] = dictSize++;
+        dictToCreate[c] = true;
+      }
+      wc = w + c;
+      if (Object.prototype.hasOwnProperty.call(dict, wc)) {
+        w = wc;
+      } else {
+        if (Object.prototype.hasOwnProperty.call(dictToCreate, w)) {
+          if (w.charCodeAt(0) < 256) {
+            for (i = 0; i < numBits; i++) { dv <<= 1; if (dp === bitsPerChar - 1) { dp = 0; data.push(getCharFromInt(dv)); dv = 0; } else dp++; }
+            value = w.charCodeAt(0);
+            for (i = 0; i < 8; i++) { dv = (dv << 1) | (value & 1); if (dp === bitsPerChar - 1) { dp = 0; data.push(getCharFromInt(dv)); dv = 0; } else dp++; value >>= 1; }
+          } else {
+            value = 1;
+            for (i = 0; i < numBits; i++) { dv = (dv << 1) | value; if (dp === bitsPerChar - 1) { dp = 0; data.push(getCharFromInt(dv)); dv = 0; } else dp++; value = 0; }
+            value = w.charCodeAt(0);
+            for (i = 0; i < 16; i++) { dv = (dv << 1) | (value & 1); if (dp === bitsPerChar - 1) { dp = 0; data.push(getCharFromInt(dv)); dv = 0; } else dp++; value >>= 1; }
+          }
+          if (--enlargeIn === 0) { enlargeIn = Math.pow(2, numBits); numBits++; }
+          delete dictToCreate[w];
+        } else {
+          value = dict[w];
+          for (i = 0; i < numBits; i++) { dv = (dv << 1) | (value & 1); if (dp === bitsPerChar - 1) { dp = 0; data.push(getCharFromInt(dv)); dv = 0; } else dp++; value >>= 1; }
+        }
+        if (--enlargeIn === 0) { enlargeIn = Math.pow(2, numBits); numBits++; }
+        dict[wc] = dictSize++;
+        w = String(c);
+      }
+    }
+    if (w !== '') {
+      if (Object.prototype.hasOwnProperty.call(dictToCreate, w)) {
+        if (w.charCodeAt(0) < 256) {
+          for (i = 0; i < numBits; i++) { dv <<= 1; if (dp === bitsPerChar - 1) { dp = 0; data.push(getCharFromInt(dv)); dv = 0; } else dp++; }
+          value = w.charCodeAt(0);
+          for (i = 0; i < 8; i++) { dv = (dv << 1) | (value & 1); if (dp === bitsPerChar - 1) { dp = 0; data.push(getCharFromInt(dv)); dv = 0; } else dp++; value >>= 1; }
+        } else {
+          value = 1;
+          for (i = 0; i < numBits; i++) { dv = (dv << 1) | value; if (dp === bitsPerChar - 1) { dp = 0; data.push(getCharFromInt(dv)); dv = 0; } else dp++; value = 0; }
+          value = w.charCodeAt(0);
+          for (i = 0; i < 16; i++) { dv = (dv << 1) | (value & 1); if (dp === bitsPerChar - 1) { dp = 0; data.push(getCharFromInt(dv)); dv = 0; } else dp++; value >>= 1; }
+        }
+        if (--enlargeIn === 0) { enlargeIn = Math.pow(2, numBits); numBits++; }
+        delete dictToCreate[w];
+      } else {
+        value = dict[w];
+        for (i = 0; i < numBits; i++) { dv = (dv << 1) | (value & 1); if (dp === bitsPerChar - 1) { dp = 0; data.push(getCharFromInt(dv)); dv = 0; } else dp++; value >>= 1; }
+      }
+      if (--enlargeIn === 0) { enlargeIn = Math.pow(2, numBits); numBits++; }
+    }
+    value = 2;
+    for (i = 0; i < numBits; i++) { dv = (dv << 1) | (value & 1); if (dp === bitsPerChar - 1) { dp = 0; data.push(getCharFromInt(dv)); dv = 0; } else dp++; value >>= 1; }
+    for (;;) { dv <<= 1; if (dp === bitsPerChar - 1) { data.push(getCharFromInt(dv)); break; } else dp++; }
+    return data.join('');
+  }
+
+  function _d(length, resetValue, getNextValue) {
+    var dict = [], next, enlargeIn = 4, dictSize = 4, numBits = 3,
+        entry = '', result = [], i, w, bits, resb, maxpower, power, c,
+        data = { val: getNextValue(0), position: resetValue, index: 1 };
+    for (i = 0; i < 3; i++) dict[i] = i;
+    bits = 0; maxpower = 4; power = 1;
+    while (power !== maxpower) { resb = data.val & data.position; data.position >>= 1; if (!data.position) { data.position = resetValue; data.val = getNextValue(data.index++); } bits |= (resb > 0 ? 1 : 0) * power; power <<= 1; }
+    switch (next = bits) {
+      case 0:
+        bits = 0; maxpower = 256; power = 1;
+        while (power !== maxpower) { resb = data.val & data.position; data.position >>= 1; if (!data.position) { data.position = resetValue; data.val = getNextValue(data.index++); } bits |= (resb > 0 ? 1 : 0) * power; power <<= 1; }
+        c = String.fromCharCode(bits); break;
+      case 1:
+        bits = 0; maxpower = 65536; power = 1;
+        while (power !== maxpower) { resb = data.val & data.position; data.position >>= 1; if (!data.position) { data.position = resetValue; data.val = getNextValue(data.index++); } bits |= (resb > 0 ? 1 : 0) * power; power <<= 1; }
+        c = String.fromCharCode(bits); break;
+      case 2: return '';
+    }
+    dict[3] = c; w = c; result.push(c);
+    for (;;) {
+      if (data.index > length) return '';
+      bits = 0; maxpower = Math.pow(2, numBits); power = 1;
+      while (power !== maxpower) { resb = data.val & data.position; data.position >>= 1; if (!data.position) { data.position = resetValue; data.val = getNextValue(data.index++); } bits |= (resb > 0 ? 1 : 0) * power; power <<= 1; }
+      switch (c = bits) {
+        case 0:
+          bits = 0; maxpower = 256; power = 1;
+          while (power !== maxpower) { resb = data.val & data.position; data.position >>= 1; if (!data.position) { data.position = resetValue; data.val = getNextValue(data.index++); } bits |= (resb > 0 ? 1 : 0) * power; power <<= 1; }
+          dict[dictSize++] = String.fromCharCode(bits); c = dictSize - 1; if (--enlargeIn === 0) { enlargeIn = Math.pow(2, numBits); numBits++; } break;
+        case 1:
+          bits = 0; maxpower = 65536; power = 1;
+          while (power !== maxpower) { resb = data.val & data.position; data.position >>= 1; if (!data.position) { data.position = resetValue; data.val = getNextValue(data.index++); } bits |= (resb > 0 ? 1 : 0) * power; power <<= 1; }
+          dict[dictSize++] = String.fromCharCode(bits); c = dictSize - 1; if (--enlargeIn === 0) { enlargeIn = Math.pow(2, numBits); numBits++; } break;
+        case 2: return result.join('');
+      }
+      if (--enlargeIn === 0) { enlargeIn = Math.pow(2, numBits); numBits++; }
+      entry = dict[c] !== undefined ? dict[c] : (c === dictSize ? w + w.charAt(0) : null);
+      if (entry === null) return null;
+      result.push(entry);
+      dict[dictSize++] = w + entry.charAt(0);
+      if (--enlargeIn === 0) { enlargeIn = Math.pow(2, numBits); numBits++; }
+      w = entry;
+    }
+  }
+
+  return {
+    compressToUTF16(input) {
+      if (input == null) return null;
+      return _c(input, 15, a => String.fromCharCode(a + 32)) + ' ';
+    },
+    decompressFromUTF16(compressed) {
+      if (compressed == null) return null;
+      if (compressed === '') return null;
+      return _d(compressed.length, 16384, idx => compressed.charCodeAt(idx) - 32);
+    },
+  };
+})();
+// ── End LZString ────────────────────────────────────────────────────────────
+
 const APP_VERSION = {
   version: '1.0.0',
   date: '2026-05-06',
