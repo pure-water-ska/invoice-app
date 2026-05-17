@@ -532,12 +532,13 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById(id).addEventListener('input', Utils.debounce(render, 200)));
   BEDate.byId('filterFrom', { onChange: render });
   BEDate.byId('filterTo',   { onChange: render });
-  _fpPayDate  = BEDate.byId('payDate',      { onChange: checkPayDate });
-  _fpCheqDate = BEDate.byId('payChequeDate');
+  _fpPayDate      = BEDate.byId('payDate',          { onChange: checkPayDate });
+  _fpCheqDate     = BEDate.byId('payChequeDate');
+  _fpTransferDate = BEDate.byId('payTransferDateBE');
   render();
 });
 
-let _fpPayDate, _fpCheqDate;
+let _fpPayDate, _fpCheqDate, _fpTransferDate;
 
 // ── Render invoice list ───────────────────────────────────────────────────────
 function render() {
@@ -652,8 +653,8 @@ function openPayModal(invNum, custId) {
   document.getElementById('modalAlert').innerHTML      = '';
   document.getElementById('payNote').value             = '';
   (function(){ const n=new Date();
-    document.getElementById('payTransferDateBE').value = Utils.todayBE();
-    document.getElementById('payTransferTime').value   = `${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`;
+    if (_fpTransferDate) _fpTransferDate.setDate(n); else document.getElementById('payTransferDateBE').value = Utils.todayBE();
+    document.getElementById('payTransferTime').value = `${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`;
   })();
   document.getElementById('payAccountName').value      = '';
   document.getElementById('paySourceBank').value       = '';
@@ -1271,8 +1272,8 @@ function addPaymentEntry() {
   document.getElementById('payDestBank').value              = '';
   document.getElementById('payAccountName').value           = '';
   (function(){ const n=new Date();
-    document.getElementById('payTransferDateBE').value = Utils.todayBE();
-    document.getElementById('payTransferTime').value   = `${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`;
+    if (_fpTransferDate) _fpTransferDate.setDate(n); else document.getElementById('payTransferDateBE').value = Utils.todayBE();
+    document.getElementById('payTransferTime').value = `${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`;
   })();
   document.getElementById('payChequeNo').value       = '';
   document.getElementById('payChequeBank').value     = '';
