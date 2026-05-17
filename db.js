@@ -279,7 +279,7 @@ const DB = {
       const arch = this._get('wt_activity_archive');
       this._set('wt_activity_archive', [...old, ...arch].slice(0, 10000));
     }
-    if (keep.length > 2000) keep.splice(2000);
+    if (keep.length > 500) keep.splice(500);
     this._set(this.K.ACTIVITY, keep);
   },
 

@@ -503,6 +503,63 @@ let _pendingPaymentData = null;   // holds data (array) while waiting for date c
 let _pendingPayments    = [];     // staging list for multi-payment entry
 let _imgUpdateB64 = '';           // holds resized image for imgUpdateModal
 
+// ── Drive image helpers ───────────────────────────────────────────────────────
+function _isDrv(s) { return typeof s === 'string' && s.startsWith('drv|'); }
+
+function _b64ToBlob(b64) {
+  const [header, data] = b64.split(',');
+  const mime = (header.match(/:(.*?);/) || [])[1] || 'image/jpeg';
+  const bytes = atob(data);
+  const arr = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
+
+async function _drvUpload(b64, filename) {
+  if (!b64 || !window.DriveStore?.ready) return b64;
+  try {
+    const blob = _b64ToBlob(b64);
+    const meta = await DriveStore.upload(blob, filename, {});
+    return `drv|${meta.driveId}|${meta.uploadedAt}`;
+  } catch (e) {
+    console.warn('[_drvUpload]', e.message);
+    return b64;
+  }
+}
+
+function _imgTagHtml(field, cls, title) {
+  if (!field) return '';
+  const attr = title ? ` title="${title}"` : '';
+  if (_isDrv(field)) {
+    return `<img src="" data-drv="${field}" class="${cls}"${attr} onclick="openLightboxSrc('${field}')">`;
+  }
+  return `<img src="${field}" class="${cls}"${attr} onclick="openLightboxSrc('${field}')">`;
+}
+
+function _loadDrvImages() {
+  if (!window.DriveStore?.ready) return;
+  document.querySelectorAll('[data-drv]').forEach(async img => {
+    const field = img.dataset.drv;
+    if (!field || img.src) return;
+    const [, driveId, uploadedAt] = field.split('|');
+    try { img.src = await DriveStore.getFileURL(driveId, uploadedAt); } catch {}
+  });
+}
+
+async function _uploadPaymentImages(p) {
+  const ts = Date.now();
+  const inv = p.invoiceNumber || 'x';
+  if (p.transferImage) p.transferImage = await _drvUpload(p.transferImage, `transfer_${inv}_${ts}.jpg`);
+  if (p.chequeImage)   p.chequeImage   = await _drvUpload(p.chequeImage,   `cheque_${inv}_${ts}.jpg`);
+  if (p.signedImage)   p.signedImage   = await _drvUpload(p.signedImage,   `signed_${inv}_${ts}.jpg`);
+  if (Array.isArray(p.imageHistory)) {
+    for (const h of p.imageHistory) {
+      if (h.image) h.image = await _drvUpload(h.image, `hist_${h.type}_${inv}_${ts}.jpg`);
+    }
+  }
+  return p;
+}
+
 window.addEventListener('DOMContentLoaded', () => {
   payModal              = new bootstrap.Modal(document.getElementById('payModal'));
   overpayModal          = new bootstrap.Modal(document.getElementById('overpayModal'));
@@ -880,11 +937,11 @@ function loadPayImage(input, previewId) {
     img.onload = () => {
       const canvas = document.createElement('canvas');
       const MAX = 1200;
-      const scale = img.width > MAX ? MAX / img.width : 1;
+      const scale = Math.min(1, MAX / img.width, MAX / img.height);
       canvas.width  = Math.round(img.width  * scale);
       canvas.height = Math.round(img.height * scale);
       canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-      const b64 = canvas.toDataURL('image/jpeg', 0.82);
+      const b64 = canvas.toDataURL('image/jpeg', 0.55);
       if (previewId === 'transferImagePreview') payImages.transfer = b64;
       else if (previewId === 'chequeImagePreview')  payImages.cheque  = b64;
       else if (previewId === 'signedImagePreview')  payImages.signed  = b64;
@@ -914,11 +971,20 @@ function openLightbox(previewId) {
 }
 
 function openLightboxSrc(src) {
-  // supports both element id and direct data-url
-  const el = document.getElementById(src);
-  const url = el ? (el.querySelector('img')?.src || '') : src;
-  document.getElementById('lightboxImg').src = url;
-  document.getElementById('lightbox').style.display = 'flex';
+  const lbImg = document.getElementById('lightboxImg');
+  const lb    = document.getElementById('lightbox');
+  if (_isDrv(src)) {
+    lbImg.src = '';
+    lb.style.display = 'flex';
+    const [, driveId, uploadedAt] = src.split('|');
+    DriveStore.getFileURL(driveId, uploadedAt)
+      .then(url => { lbImg.src = url; })
+      .catch(() => {});
+  } else {
+    const el = document.getElementById(src);
+    lbImg.src = el ? (el.querySelector('img')?.src || '') : src;
+    lb.style.display = 'flex';
+  }
 }
 
 // ── Existing payments render ──────────────────────────────────────────────────
@@ -932,9 +998,9 @@ function renderExistingPayments(invNum) {
     payments.map((p, pi) => {
       const isCancelled = !!p.cancelled;
       const imgs = [
-        p.transferImage ? `<img src="${p.transferImage}" class="pay-hist-img" onclick="openLightboxSrc('${p.transferImage}')" title="สลิปโอน">` : '',
-        p.chequeImage   ? `<img src="${p.chequeImage}"   class="pay-hist-img" onclick="openLightboxSrc('${p.chequeImage}')"   title="รูปเช็ค">` : '',
-        p.signedImage   ? `<img src="${p.signedImage}"   class="pay-hist-img" onclick="openLightboxSrc('${p.signedImage}')"   title="ใบกำกับเซ็น">` : '',
+        p.transferImage ? _imgTagHtml(p.transferImage, 'pay-hist-img', 'สลิปโอน')    : '',
+        p.chequeImage   ? _imgTagHtml(p.chequeImage,   'pay-hist-img', 'รูปเช็ค')    : '',
+        p.signedImage   ? _imgTagHtml(p.signedImage,   'pay-hist-img', 'ใบกำกับเซ็น') : '',
       ].filter(Boolean).join('');
 
       // Image timeline (admin only)
@@ -953,7 +1019,7 @@ function renderExistingPayments(invNum) {
                     <span class="text-muted fw-normal ms-1">โดย ${h.by}</span>
                   </div>
                   ${h.reason ? `<div class="small text-muted mb-1"><i class="bi bi-chat-left-text me-1"></i>${h.reason}</div>` : ''}
-                  ${h.image  ? `<img src="${h.image}" class="img-tl-img" onclick="openLightboxSrc('${h.image}')">` : ''}
+                  ${h.image  ? _imgTagHtml(h.image, 'img-tl-img', '') : ''}
                 </div>`).join('')}
             </div>
           </div>
@@ -1004,6 +1070,7 @@ function renderExistingPayments(invNum) {
         ${timelineHtml}
       </div>`;
     }).join('');
+  _loadDrvImages();
 }
 
 // ── Image Update Modal ────────────────────────────────────────────────────────
@@ -1027,11 +1094,11 @@ function previewImgUpdate(input) {
     img.onload = () => {
       const canvas = document.createElement('canvas');
       const MAX = 1200;
-      const scale = img.width > MAX ? MAX / img.width : 1;
+      const scale = Math.min(1, MAX / img.width, MAX / img.height);
       canvas.width  = Math.round(img.width  * scale);
       canvas.height = Math.round(img.height * scale);
       canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-      _imgUpdateB64 = canvas.toDataURL('image/jpeg', 0.82);
+      _imgUpdateB64 = canvas.toDataURL('image/jpeg', 0.55);
       document.getElementById('imgUpdatePreview').innerHTML =
         `<img src="${_imgUpdateB64}" class="img-thumb">`;
     };
@@ -1040,7 +1107,7 @@ function previewImgUpdate(input) {
   reader.readAsDataURL(file);
 }
 
-function confirmImageUpdate() {
+async function confirmImageUpdate() {
   const payId  = document.getElementById('imgUpdatePayId').value;
   const invNum = document.getElementById('imgUpdateInvNum').value;
   const type   = document.getElementById('imgUpdateType').value;
@@ -1064,11 +1131,13 @@ function confirmImageUpdate() {
   const p = DB.getPayments().find(x => x.id === payId);
   if (!p) { alertEl.innerHTML = '<div class="alert alert-danger py-2">ไม่พบรายการชำระ</div>'; return; }
 
+  const imgSrc = await _drvUpload(_imgUpdateB64, `img_${type}_${payId}_${Date.now()}.jpg`);
+
   const histEntry = {
     id:        Utils.uuid(),
     type,
     typeLabel,
-    image:     _imgUpdateB64,
+    image:     imgSrc,
     reason,
     at:        new Date().toISOString(),
     by:        session.name,
@@ -1076,7 +1145,7 @@ function confirmImageUpdate() {
   };
 
   const imageHistory = [...(p.imageHistory || []), histEntry];
-  const update = { [fieldMap[type]]: _imgUpdateB64, imageHistory };
+  const update = { [fieldMap[type]]: imgSrc, imageHistory };
   DB.updatePayment(payId, update);
   DB.logActivity(session.userId, session.username, 'อัปเดตรูปการชำระเงิน',
     { invoiceNumber: invNum, type: typeLabel, reason });
@@ -1329,7 +1398,7 @@ function confirmSavePayment() {
   _pendingPaymentData = null;
 }
 
-function doSaveAllPayments(payments) {
+async function doSaveAllPayments(payments) {
   if (!payments.length) return;
   const invNum      = payments[0].invoiceNumber;
   const inv         = DB.getInvoices().find(i => i.invoiceNumber === invNum);
@@ -1338,6 +1407,7 @@ function doSaveAllPayments(payments) {
 
   let newPaid = alreadyPaid;
   for (const data of payments) {
+    await _uploadPaymentImages(data);
     DB.addPayment(data);
     DB.logActivity(session.userId, session.username, 'บันทึกชำระเงิน',
       { invoiceNumber: data.invoiceNumber, method: data.method, amount: data.amount });
