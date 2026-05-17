@@ -558,6 +558,64 @@ function renderDriveFileList() {
   }).join('');
 }
 
+async function drivePushAll() {
+  const btn = document.getElementById('btnDrivePush');
+  const el  = document.getElementById('driveSyncStatus');
+  if (!window.DriveStore?.ready || !window.DriveDbSync?._ready) {
+    el.className = 'alert alert-warning small py-2 mb-2';
+    el.classList.remove('d-none');
+    el.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>กรุณาเชื่อมต่อ Google Drive ก่อน';
+    return;
+  }
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลัง Push...';
+  el.className = 'alert alert-info small py-2 mb-2';
+  el.classList.remove('d-none');
+  el.innerHTML = 'กำลังอัปโหลดข้อมูลทั้งหมดไป Drive...';
+  try {
+    await DriveDbSync.pushAll();
+    el.className = 'alert alert-success small py-2 mb-2';
+    el.innerHTML = '<i class="bi bi-check-circle me-1"></i>Push สำเร็จ — ข้อมูลทั้งหมดอัปโหลดไป Drive แล้ว';
+    await refreshDriveStats();
+  } catch (e) {
+    el.className = 'alert alert-danger small py-2 mb-2';
+    el.innerHTML = '<i class="bi bi-x-circle me-1"></i>Push ล้มเหลว: ' + esc(e.message);
+  }
+  btn.disabled = false;
+  btn.innerHTML = '<i class="bi bi-cloud-upload me-1"></i>Push All → Drive';
+}
+
+async function drivePullAll() {
+  const btn = document.getElementById('btnDrivePull');
+  const el  = document.getElementById('driveSyncStatus');
+  if (!window.DriveStore?.ready) {
+    el.className = 'alert alert-warning small py-2 mb-2';
+    el.classList.remove('d-none');
+    el.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>กรุณาเชื่อมต่อ Google Drive ก่อน';
+    return;
+  }
+  if (!confirm('Pull All จะดึงข้อมูลจาก Drive มาเขียนทับ localStorage ในเครื่องนี้\nยืนยันหรือไม่?')) return;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลัง Pull...';
+  el.className = 'alert alert-info small py-2 mb-2';
+  el.classList.remove('d-none');
+  el.innerHTML = 'กำลังสแกน Drive folder และดาวน์โหลดข้อมูล...';
+  try {
+    // pullAllScan works even when local meta is empty (new computer)
+    const result = await DriveDbSync.pullAllScan();
+    el.className = 'alert alert-success small py-2 mb-2';
+    el.innerHTML = `<i class="bi bi-check-circle me-1"></i>Pull สำเร็จ — ดึงข้อมูล <strong>${result.restored} key</strong> จาก Drive` +
+      (result.failed ? ` (ล้มเหลว ${result.failed})` : '') +
+      ' — <strong>กรุณารีโหลดหน้าเพื่อให้ข้อมูลมีผล</strong>';
+    renderStorageBar();
+  } catch (e) {
+    el.className = 'alert alert-danger small py-2 mb-2';
+    el.innerHTML = '<i class="bi bi-x-circle me-1"></i>Pull ล้มเหลว: ' + esc(e.message);
+  }
+  btn.disabled = false;
+  btn.innerHTML = '<i class="bi bi-cloud-download me-1"></i>Pull All ← Drive';
+}
+
 async function driveSignIn() {
   const btn = document.getElementById('driveSignInBtn');
   btn.disabled = true;

@@ -579,9 +579,18 @@
               ไฟล์ &lt; 30 วัน: เปิดเร็ว (จาก cache ในเครื่อง) |
               ไฟล์ &gt; 30 วัน: โหลดจาก Google Drive อัตโนมัติ
             </div>
-            <button class="btn btn-outline-secondary btn-sm" onclick="refreshDriveStats()">
-              <i class="bi bi-arrow-clockwise me-1"></i>รีเฟรชสถิติ
-            </button>
+            <div id="driveSyncStatus" class="alert d-none small py-2 mb-2"></div>
+            <div class="d-flex flex-wrap gap-2">
+              <button class="btn btn-outline-secondary btn-sm" onclick="refreshDriveStats()">
+                <i class="bi bi-arrow-clockwise me-1"></i>รีเฟรชสถิติ
+              </button>
+              <button class="btn btn-success btn-sm" onclick="drivePushAll()" id="btnDrivePush">
+                <i class="bi bi-cloud-upload me-1"></i>Push All → Drive
+              </button>
+              <button class="btn btn-primary btn-sm" onclick="drivePullAll()" id="btnDrivePull">
+                <i class="bi bi-cloud-download me-1"></i>Pull All ← Drive
+              </button>
+            </div>
           </div>
           <div id="driveNoConfig" class="d-none">
             <div class="alert alert-warning py-2 small mb-0">

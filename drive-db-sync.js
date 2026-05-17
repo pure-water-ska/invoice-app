@@ -39,9 +39,18 @@ window.DriveDbSync = {
       this._ready = true;
       console.log('[DriveDbSync] Folder ready:', this._folderId);
 
-      // Restore any stale / missing keys from Drive in the background
-      this._restoreStaleKeys().catch(e =>
-        console.warn('[DriveDbSync] restore error:', e.message));
+      // If local meta is empty (new computer / cleared storage) → full scan restore.
+      // Otherwise just restore individual stale/missing keys as before.
+      const meta = this._getMeta();
+      const hasMeta = Object.keys(meta).length > 0;
+      if (!hasMeta) {
+        console.log('[DriveDbSync] No local meta — running full Drive scan restore');
+        this.pullAllScan().catch(e =>
+          console.warn('[DriveDbSync] auto pullAllScan error:', e.message));
+      } else {
+        this._restoreStaleKeys().catch(e =>
+          console.warn('[DriveDbSync] restore error:', e.message));
+      }
 
       // Flush pending writes on page unload
       window.addEventListener('beforeunload', () => {
@@ -238,6 +247,57 @@ window.DriveDbSync = {
       }
     }
     console.log('[DriveDbSync] pullAll complete');
+  },
+
+  // ── Scan Drive folder, rebuild meta, download everything ──────────────────
+  // Works even when local meta (wt_drive_db_meta) is empty — i.e. first time
+  // opening on a new computer.  Lists all wt_*.json files in the DB folder,
+  // updates meta with their Drive IDs, then downloads each one.
+  async pullAllScan() {
+    if (!this._checkToken()) throw new Error('Drive not connected');
+
+    // Ensure folder exists (also sets this._folderId)
+    if (!this._folderId) this._folderId = await this._ensureFolder();
+
+    // List all files in the DB folder
+    const q = `'${this._folderId}' in parents and trashed=false`;
+    const r = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)&pageSize=200`,
+      { headers: { Authorization: `Bearer ${DriveStore._token}` } }
+    );
+    if (!r.ok) throw new Error(`Drive list: ${r.status}`);
+    const d = await r.json();
+    const files = d.files || [];
+
+    const meta = this._getMeta();
+    let restored = 0, failed = 0;
+
+    for (const file of files) {
+      // Match exactly wt_<name>.json (DB keys only — ignore invoice-archive-*.json etc.)
+      const match = file.name.match(/^(wt_[a-z_]+)\.json$/);
+      if (!match) continue;
+      const key = match[1];
+      if (!this.SYNC_KEYS.includes(key)) continue;
+
+      // Rebuild meta entry so _downloadKey has a record
+      if (!meta[key]) meta[key] = {};
+      meta[key].driveId      = file.id;
+      meta[key].lastModified = file.modifiedTime || new Date().toISOString();
+
+      try {
+        await this._downloadKey(key, file.id);
+        restored++;
+      } catch (e) {
+        console.warn(`[DriveDbSync] pullAllScan ${key}:`, e.message);
+        failed++;
+      }
+    }
+
+    this._setMeta(meta);
+    this._ready = true; // mark ready so normal queueUpload works from here on
+    if (window.DB) DB.invalidate(); // flush cache so next read sees new data
+    console.log(`[DriveDbSync] pullAllScan: restored=${restored} failed=${failed} total=${files.length}`);
+    return { restored, failed, total: files.length };
   },
 
   // ── Status for settings/debug page ────────────────────────────────────────
