@@ -15,6 +15,8 @@ window.addEventListener('DOMContentLoaded', () => {
   initZipSections();
   if (Auth.isAdmin()) renderErrorLog();
   renderFsStatus();
+  window.addEventListener('sync:error', renderFsStatus);
+  window.addEventListener('sync:ready', renderFsStatus);
   ['companyName','address','phone'].forEach(id =>
     document.getElementById(id).addEventListener('input', updatePreview)
   );
@@ -563,25 +565,78 @@ function renderDriveFileList() {
 function renderFsStatus() {
   const icon = document.getElementById('fsStatusIcon');
   const text = document.getElementById('fsStatusText');
+  const msg  = document.getElementById('fsSyncMsg');
   if (!icon || !text) return;
 
+  // ── No config ────────────────────────────────────────────────────────────
   const hasConfig = typeof FIREBASE_CONFIG !== 'undefined' &&
                     FIREBASE_CONFIG.apiKey &&
                     !FIREBASE_CONFIG.apiKey.startsWith('AIzaSy...');
   if (!hasConfig) {
-    icon.textContent = '❌'; text.textContent = 'ไม่ได้ตั้งค่า Firebase (ตั้ง Netlify env vars แล้ว redeploy)';
+    icon.textContent = '❌';
+    text.textContent = 'ไม่ได้ตั้งค่า Firebase';
+    if (msg) {
+      msg.className = 'alert alert-danger small py-2 mb-3';
+      msg.classList.remove('d-none');
+      msg.innerHTML = `<strong>Firebase ไม่ได้ตั้งค่า</strong><br>
+        ตั้ง environment variables ใน Netlify แล้ว redeploy:<br>
+        <code>FIREBASE_API_KEY, FIREBASE_TEAM_EMAIL, FIREBASE_TEAM_PASSWORD</code> เป็นต้น`;
+    }
     return;
   }
+
+  // ── Check for stored error ────────────────────────────────────────────────
+  const errRaw = localStorage.getItem('wt_sync_last_error');
+  let lastErr = null;
+  try { lastErr = errRaw ? JSON.parse(errRaw) : null; } catch {}
+
+  if (!window.Sync?.ready && lastErr) {
+    icon.textContent = '❌';
+    text.textContent = 'เชื่อมต่อล้มเหลว';
+    if (msg) {
+      msg.className = 'alert alert-danger small py-2 mb-3';
+      msg.classList.remove('d-none');
+      msg.innerHTML = `<strong>Firebase error:</strong> <code>${lastErr.msg}</code><br><br>
+        <strong>สาเหตุที่พบบ่อย:</strong><br>
+        • <code>auth/user-not-found</code> หรือ <code>auth/wrong-password</code> →
+          ยังไม่ได้สร้าง user ใน Firebase Authentication Console<br>
+        • <code>auth/operation-not-allowed</code> →
+          Email/Password auth ยังไม่ได้เปิดใน Firebase Console<br>
+        • <code>permission-denied</code> →
+          Firestore Security Rules ไม่อนุญาต<br>
+        • <code>auth/invalid-credential</code> →
+          password ใน Netlify env var ไม่ตรงกับที่สร้างใน Firebase Auth<br><br>
+        <button class="btn btn-sm btn-outline-danger" onclick="fsRetry()">
+          <i class="bi bi-arrow-clockwise me-1"></i>ลองเชื่อมต่อใหม่
+        </button>`;
+    }
+    return;
+  }
+
   if (!window.Sync?.ready) {
-    icon.textContent = '⏳'; text.textContent = 'กำลังเชื่อมต่อ Firestore...';
-    // Retry after a moment
+    icon.textContent = '⏳';
+    text.textContent = 'กำลังเชื่อมต่อ Firestore...';
     setTimeout(renderFsStatus, 2000);
     return;
   }
+
+  // ── Connected ─────────────────────────────────────────────────────────────
+  localStorage.removeItem('wt_sync_last_error'); // clear old errors on success
   const last = localStorage.getItem('wt_sync_lastAt');
   const lastStr = last ? new Date(last).toLocaleString('th-TH') : 'ยังไม่เคย';
   icon.textContent = '✅';
   text.textContent = `เชื่อมต่อแล้ว (org: ${FIREBASE_CONFIG.orgId}) · ซิงค์ล่าสุด: ${lastStr}`;
+  if (msg) { msg.className = 'alert d-none small py-2 mb-3'; }
+}
+
+async function fsRetry() {
+  localStorage.removeItem('wt_sync_last_error');
+  renderFsStatus();
+  if (window.Sync) {
+    Sync.ready = false;
+    try { await Sync.init(); } catch {}
+  }
+  renderFsStatus();
 }
 
 async function fsPushAll() {
@@ -1271,4 +1326,56 @@ function runHealthCheck() {
       <span class="ms-auto text-muted small">ตรวจเมื่อ ${Utils.formatDateTimeTH(new Date().toISOString())}</span>
     </div>
     <table class="table table-sm table-hover mb-0">
-      <thead class="table-light"><tr><th style="width:40%">รายการ
+      <thead class="table-light"><tr><th style="width:40%">รายการตรวจสอบ</th><th>ผล</th><th>รายละเอียด</th></tr></thead>
+      <tbody>
+        ${checks.map(c => `
+          <tr>
+            <td class="fw-semibold small">${c.label}</td>
+            <td><i class="bi bi-${iconMap[c.status]}"></i></td>
+            <td class="small text-muted">${c.detail}${c.extra||''}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+
+  DB.logActivity(session.userId, session.username, 'Health Check', { errors, warns });
+}
+
+function loadVersionInfo() {
+  document.getElementById('versionBadge').textContent = APP_VERSION.version;
+  const d = new Date(APP_VERSION.date);
+  document.getElementById('versionDate').textContent =
+    `${d.getDate()} ${['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'][d.getMonth()]} ${d.getFullYear()+543}`;
+  document.getElementById('versionDevice').textContent = window.location.hostname || 'localhost';
+}
+
+function compareVersion() {
+  const other = document.getElementById('versionOther').value.trim();
+  const el = document.getElementById('versionCompareResult');
+  if (!other) { el.innerHTML = ''; return; }
+  if (other === APP_VERSION.version) {
+    el.innerHTML = '<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>เวอร์ชันตรงกัน — โปรแกรมเป็นรุ่นเดียวกัน</span>';
+  } else {
+    el.innerHTML = `<span class="text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>เวอร์ชันไม่ตรงกัน — เครื่องนี้ <strong>${APP_VERSION.version}</strong> / เครื่องอื่น <strong>${other}</strong></span>`;
+  }
+}
+
+function loadStats() {
+  const items = [
+    { label: 'ใบกำกับ',      count: [...new Set(DB.getInvoices().map(i => i.invoiceNumber))].length, icon: 'receipt',       color: 'primary' },
+    { label: 'ลูกค้า',       count: DB.getCustomers().length,  icon: 'people',        color: 'success' },
+    { label: 'สินค้า',       count: DB.getProducts().length,   icon: 'box-seam',      color: 'info' },
+    { label: 'รายการชำระ',   count: DB.getPayments().length,   icon: 'cash-coin',     color: 'warning' },
+    { label: 'ฉลากขวด',      count: DB.getVersions().length,   icon: 'tag',           color: 'secondary' },
+    { label: 'ผู้ใช้งาน',    count: DB.getUsers().length,      icon: 'person-gear',   color: 'dark' },
+    { label: 'Activity Log', count: DB.getActivity().length,   icon: 'clock-history', color: 'primary' },
+    { label: 'Login Log',    count: DB.getLogins().length,     icon: 'shield-check',  color: 'success' },
+  ];
+  document.getElementById('statsRow').innerHTML = items.map(item => `
+    <div class="col-6 col-md-3">
+      <div class="border rounded p-2 text-center">
+        <i class="bi bi-${item.icon} text-${item.color} d-block fs-4 mb-1"></i>
+        <div class="fw-bold fs-5">${item.count.toLocaleString('th-TH')}</div>
+        <div class="text-muted" style="font-size:11px">${item.label}</div>
+      </div>
+    </div>`).join('');
+}
