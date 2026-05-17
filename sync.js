@@ -356,7 +356,8 @@ const Sync = {
     });
 
     await Promise.all([...docPromises, ...colPromises]);
-    this._triggerRerender();
+    // Notify pages that fresh data is available so they can re-render
+    window.dispatchEvent(new CustomEvent('sync:pulled'));
     console.log('[Sync] Initial pull complete');
   },
 
