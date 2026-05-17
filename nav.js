@@ -182,12 +182,14 @@
     }
 
     // Try loading local credentials override (firebase-credentials.js)
-    // Gitignored — only exists on local dev machines. Use fetch to probe first
-    // so the browser never logs a 404 when it's absent (e.g. on GitHub Pages).
-    fetch('./firebase-credentials.js', { method: 'HEAD' })
-      .then(r => r.ok ? loadScript('./firebase-credentials.js', startFirebaseSDK, startFirebaseSDK)
-                      : startFirebaseSDK())
-      .catch(() => startFirebaseSDK());
+    // Gitignored — only exists on local dev machines (localhost / 127.0.0.1).
+    // Skip entirely on GitHub Pages / Netlify to avoid a console 404.
+    const _isLocal = ['localhost','127.0.0.1'].includes(location.hostname) || location.protocol === 'file:';
+    if (_isLocal) {
+      loadScript('./firebase-credentials.js', startFirebaseSDK, startFirebaseSDK);
+    } else {
+      startFirebaseSDK();
+    }
 
     function startFirebaseSDK() {
     // Firebase IS configured — show badge immediately
