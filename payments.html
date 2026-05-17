@@ -201,11 +201,14 @@
           <!-- payDestBank / payAccountName hidden — auto-filled by account select -->
           <input type="hidden" id="payDestBank">
           <input type="hidden" id="payAccountName">
-          <div class="col-12 col-md-6 pay-transfer" style="display:none">
-            <label class="form-label fw-semibold">วันและเวลาที่โอน</label>
-            <input type="datetime-local" id="payTransferDate" class="form-control">
+          <div class="col-6 col-md-3 pay-transfer" style="display:none">
+            <label class="form-label fw-semibold">วันที่โอน (พ.ศ.)</label>
+            <input type="text" id="payTransferDateBE" class="form-control" placeholder="DD/MM/YYYY" autocomplete="off">
           </div>
-          <div class="col-12 col-md-6 pay-transfer" style="display:none"></div>
+          <div class="col-6 col-md-3 pay-transfer" style="display:none">
+            <label class="form-label fw-semibold">เวลาที่โอน</label>
+            <input type="time" id="payTransferTime" class="form-control">
+          </div>
           <div class="col-12 pay-transfer" style="display:none">
             <label class="form-label fw-semibold"><i class="bi bi-image me-1 text-primary"></i>รูปสลิปโอนเงิน</label>
             <input type="file" id="payTransferImage" class="form-control" accept="image/*" onchange="loadPayImage(this,'transferImagePreview')">
@@ -349,6 +352,32 @@
       </div>
       <div class="modal-body p-3">
         <ul class="list-group list-group-flush mb-3" id="transferAccountList"></ul>
+
+        <!-- Edit account form (hidden until pencil clicked) -->
+        <div id="editAcctWrap" style="display:none" class="border border-primary rounded p-2 mb-3 bg-body-secondary">
+          <div class="fw-semibold small mb-2 text-primary"><i class="bi bi-pencil me-1"></i>แก้ไขบัญชี</div>
+          <input type="hidden" id="editAcctIdx">
+          <div class="row g-2">
+            <div class="col-12">
+              <input type="text" id="editAcctName" class="form-control form-control-sm" placeholder="ชื่อบัญชี">
+            </div>
+            <div class="col-6">
+              <input type="text" id="editAcctBank" class="form-control form-control-sm" list="bankDatalist" placeholder="ธนาคาร" autocomplete="off">
+            </div>
+            <div class="col-6">
+              <input type="text" id="editAcctNo" class="form-control form-control-sm" placeholder="เลขบัญชี">
+            </div>
+            <div class="col-6">
+              <button class="btn btn-secondary btn-sm w-100" onclick="cancelEditAccount()">ยกเลิก</button>
+            </div>
+            <div class="col-6">
+              <button class="btn btn-primary btn-sm w-100" onclick="saveEditTransferAccount()">
+                <i class="bi bi-save me-1"></i>บันทึก
+              </button>
+            </div>
+          </div>
+        </div>
+
         <hr class="my-2">
         <div class="fw-semibold small mb-2 text-muted">เพิ่มบัญชีใหม่</div>
         <div class="row g-2">
@@ -622,7 +651,10 @@ function openPayModal(invNum, custId) {
   document.getElementById('payCustIdHidden').value     = custId;
   document.getElementById('modalAlert').innerHTML      = '';
   document.getElementById('payNote').value             = '';
-  document.getElementById('payTransferDate').value     = Utils.nowInputValue();
+  (function(){ const n=new Date();
+    document.getElementById('payTransferDateBE').value = Utils.todayBE();
+    document.getElementById('payTransferTime').value   = `${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`;
+  })();
   document.getElementById('payAccountName').value      = '';
   document.getElementById('paySourceBank').value       = '';
   document.getElementById('payDestBank').value         = '';
@@ -737,10 +769,65 @@ function renderTransferAccountList() {
             <div class="fw-semibold">${a.name}</div>
             <div class="text-muted small">${a.bank}${a.accountNo ? ' · ' + a.accountNo : ''}</div>
           </div>
-          <button class="btn btn-sm btn-outline-danger py-0 px-1"
-                  onclick="deleteTransferAccount(${i})"><i class="bi bi-trash"></i></button>
+          <div class="d-flex gap-1">
+            <button class="btn btn-sm btn-outline-primary py-0 px-1"
+                    onclick="editTransferAccount(${i})"><i class="bi bi-pencil"></i></button>
+            <button class="btn btn-sm btn-outline-danger py-0 px-1"
+                    onclick="deleteTransferAccount(${i})"><i class="bi bi-trash"></i></button>
+          </div>
         </li>`).join('')
     : '<li class="list-group-item text-muted small text-center py-2">ยังไม่มีบัญชี</li>';
+}
+
+function editTransferAccount(idx) {
+  const accounts = DB.getTransferAccounts();
+  const a = accounts[idx];
+  if (!a) return;
+  document.getElementById('editAcctIdx').value  = idx;
+  document.getElementById('editAcctName').value = a.name      || '';
+  document.getElementById('editAcctBank').value = a.bank      || '';
+  document.getElementById('editAcctNo').value   = a.accountNo || '';
+  document.getElementById('editAcctWrap').style.display = '';
+}
+
+function cancelEditAccount() {
+  document.getElementById('editAcctWrap').style.display = 'none';
+}
+
+function saveEditTransferAccount() {
+  const idx     = parseInt(document.getElementById('editAcctIdx').value);
+  const newName = document.getElementById('editAcctName').value.trim();
+  const newBank = document.getElementById('editAcctBank').value.trim();
+  const newNo   = document.getElementById('editAcctNo').value.trim();
+  if (!newName || !newBank) { Utils.showAlert('กรุณากรอกชื่อบัญชีและธนาคาร', 'warning', 'alertBox'); return; }
+
+  const accounts = DB.getTransferAccounts();
+  if (isNaN(idx) || !accounts[idx]) return;
+
+  const oldName = accounts[idx].name;
+  const oldBank = accounts[idx].bank;
+
+  // Update the account record
+  accounts[idx] = { name: newName, bank: newBank, accountNo: newNo };
+  DB.saveTransferAccounts(accounts);
+
+  // Backfill all previous payments that matched the old name+bank
+  const payments = DB.getPayments();
+  let changed = 0;
+  payments.forEach(p => {
+    if (p.accountName === oldName && p.destBank === oldBank) {
+      p.accountName = newName;
+      p.destBank    = newBank;
+      changed++;
+    }
+  });
+  if (changed > 0) DB.savePayments(payments);
+
+  cancelEditAccount();
+  renderTransferAccountList();
+  buildTransferAccountSelect();
+  if (changed > 0) Utils.showAlert(`อัพเดตบัญชีและแก้ไขรายการชำระเงินก่อนหน้า ${changed} รายการ`, 'success', 'alertBox');
+  else Utils.showAlert('อัพเดตบัญชีเรียบร้อย', 'success', 'alertBox');
 }
 
 function confirmAddTransferAccount() {
@@ -1088,7 +1175,7 @@ function collectPaymentData() {
     sourceBank:     document.getElementById('paySourceBank').value    || '',
     destBank:       document.getElementById('payDestBank').value      || '',
     accountName:    document.getElementById('payAccountName').value   || '',
-    transferDate:   document.getElementById('payTransferDate').value  || '',
+    transferDate:   (function(){ const iso=Utils.parseBEToISO(document.getElementById('payTransferDateBE').value); const t=document.getElementById('payTransferTime').value; return iso?(iso+'T'+(t||'00:00')):''; })(),
     chequeNo:       document.getElementById('payChequeNo').value      || '',
     chequeBank:     document.getElementById('payChequeBank').value    || '',
     chequeDate:     Utils.parseBEToISO(document.getElementById('payChequeDate').value) || '',
@@ -1183,7 +1270,10 @@ function addPaymentEntry() {
   document.getElementById('paySourceBank').value            = '';
   document.getElementById('payDestBank').value              = '';
   document.getElementById('payAccountName').value           = '';
-  document.getElementById('payTransferDate').value          = Utils.nowInputValue();
+  (function(){ const n=new Date();
+    document.getElementById('payTransferDateBE').value = Utils.todayBE();
+    document.getElementById('payTransferTime').value   = `${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`;
+  })();
   document.getElementById('payChequeNo').value       = '';
   document.getElementById('payChequeBank').value     = '';
   if (_fpCheqDate) _fpCheqDate.clear(); else document.getElementById('payChequeDate').value = '';
