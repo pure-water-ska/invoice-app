@@ -10,6 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Hosting:** Netlify (static), deployed from GitHub on push to `main`
 - **Offline-first:** Service Worker + localStorage as primary data store
 
+- show example before push
 ## Running Locally
 
 No install step. Serve the directory with any HTTP server:
