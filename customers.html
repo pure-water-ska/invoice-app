@@ -1078,4 +1078,12 @@ function addNote() {
   render();
 }
 function deleteNote(custId, noteId) {
-  const c = 
+  const c = DB.getCustomerById(custId);
+  const notes = (c.notes || []).filter(n => n.id !== noteId);
+  DB.updateCustomer(custId, { notes });
+  renderNotes(DB.getCustomerById(custId));
+  render();
+}
+</script>
+</body>
+</html>

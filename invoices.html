@@ -451,4 +451,22 @@ function render() {
     <span>แสดง ${(_invPage-1)*INV_PAGE_SIZE+1}–${Math.min(_invPage*INV_PAGE_SIZE, list.length)} จาก ${list.length} รายการ</span>
     <div class="d-flex gap-1 align-items-center">
       <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_invPage=1;render()" ${_invPage===1?'disabled':''}>«</button>
-      <button class="btn btn-sm btn-outline-secondary py-
+      <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_invPage--;render()" ${_invPage===1?'disabled':''}>‹</button>
+      <span class="px-2">หน้า ${_invPage} / ${totalPages}</span>
+      <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_invPage++;render()" ${_invPage===totalPages?'disabled':''}>›</button>
+      <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_invPage=${totalPages};render()" ${_invPage===totalPages?'disabled':''}>»</button>
+    </div>`;
+}
+
+function deleteInvoice(num) {
+  if (!confirm(`ลบใบกำกับ "${num}" และข้อมูลทั้งหมดใช่หรือไม่?\nการลบไม่สามารถกู้คืนได้`)) return;
+  const all = DB.getInvoices().filter(i => i.invoiceNumber !== num);
+  DB.saveInvoices(all);
+  DB.removeCapDeductionsByInvoice(num);
+  DB.logActivity(session.userId, session.username, 'ลบใบกำกับ', { invoiceNumber: num });
+  Utils.showAlert(`ลบใบกำกับ ${num} แล้ว`, 'warning');
+  render();
+}
+</script>
+</body>
+</html>

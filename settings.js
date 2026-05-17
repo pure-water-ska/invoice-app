@@ -1053,4 +1053,17 @@ function loadStats() {
     { label: 'ลูกค้า',       count: DB.getCustomers().length,  icon: 'people',        color: 'success' },
     { label: 'สินค้า',       count: DB.getProducts().length,   icon: 'box-seam',      color: 'info' },
     { label: 'รายการชำระ',   count: DB.getPayments().length,   icon: 'cash-coin',     color: 'warning' },
-    { label: 'ฉลากขวด',      count: DB
+    { label: 'ฉลากขวด',      count: DB.getVersions().length,   icon: 'tag',           color: 'secondary' },
+    { label: 'ผู้ใช้งาน',    count: DB.getUsers().length,      icon: 'person-gear',   color: 'dark' },
+    { label: 'Activity Log', count: DB.getActivity().length,   icon: 'clock-history', color: 'primary' },
+    { label: 'Login Log',    count: DB.getLogins().length,     icon: 'shield-check',  color: 'success' },
+  ];
+  document.getElementById('statsRow').innerHTML = items.map(item => `
+    <div class="col-6 col-md-3">
+      <div class="border rounded p-2 text-center">
+        <i class="bi bi-${item.icon} text-${item.color} d-block fs-4 mb-1"></i>
+        <div class="fw-bold fs-5">${item.count.toLocaleString('th-TH')}</div>
+        <div class="text-muted" style="font-size:11px">${item.label}</div>
+      </div>
+    </div>`).join('');
+}

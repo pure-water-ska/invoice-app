@@ -1574,4 +1574,23 @@ function printPaymentSummary(invNum) {
       </table>
 
       <div style="border:1px dashed #aaa;border-radius:3px;padding:3mm;font-size:8pt;color:#444">
-        <strong>สถานะ:</strong> <span style="color:${statusColor};font-weight:700">${
+        <strong>สถานะ:</strong> <span style="color:${statusColor};font-weight:700">${statusText}</span> &nbsp;|&nbsp;
+        <strong>จำนวนรายการ:</strong> ${payments.length} รายการ &nbsp;|&nbsp;
+        <strong>พิมพ์โดย:</strong> ${printedBy}
+      </div>
+    </div>`;
+
+  window.print();
+}
+
+async function copyOutstandingImage() {
+  try {
+    const canvas = await _captureOutstanding();
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    Utils.showAlert('<i class="bi bi-check-circle me-1 text-success"></i>คัดลอกรูปลง Clipboard แล้ว');
+  } catch (e) { Utils.showAlert('คัดลอกไม่สำเร็จ: ' + e.message, 'danger'); }
+}
+</script>
+</body>
+</html>

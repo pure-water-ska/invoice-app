@@ -740,4 +740,28 @@ const DB = {
         customers: Array.isArray(data.wt_customers) ? data.wt_customers.length : 0,
         invoices:  [...new Set(invs.map(i => i.invoiceNumber))].length,
         payments:  Array.isArray(data.wt_payments)  ? data.wt_payments.length  : 0,
-        products:  Arr
+        products:  Array.isArray(data.wt_products)  ? data.wt_products.length  : 0,
+        returns:   Array.isArray(data.wt_returns)   ? data.wt_returns.length   : 0,
+      },
+      data,
+    };
+    const snaps = this.getSnapshots();
+    snaps.unshift(snap);
+    if (snaps.length > 3) snaps.splice(3);   // keep latest 3
+    this.saveSnapshots(snaps);
+    return snap;
+  },
+
+  rollbackToSnapshot(id) {
+    const snap = this.getSnapshots().find(s => s.id === id);
+    if (!snap || !snap.data) return false;
+    Object.entries(snap.data).forEach(([k, v]) => {
+      if (v !== null && v !== undefined) localStorage.setItem(k, JSON.stringify(v));
+    });
+    return true;
+  },
+
+  deleteSnapshot(id) {
+    this.saveSnapshots(this.getSnapshots().filter(s => s.id !== id));
+  },
+};
