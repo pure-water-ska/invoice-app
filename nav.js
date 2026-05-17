@@ -182,10 +182,12 @@
     }
 
     // Try loading local credentials override (firebase-credentials.js)
-    // This file is gitignored and only exists on local dev machines.
-    // On GitHub Pages the teamPassword is injected by CI instead.
-    // 404 is normal on GitHub Pages — ignore error silently.
-    loadScript('./firebase-credentials.js', startFirebaseSDK, startFirebaseSDK);
+    // Gitignored — only exists on local dev machines. Use fetch to probe first
+    // so the browser never logs a 404 when it's absent (e.g. on GitHub Pages).
+    fetch('./firebase-credentials.js', { method: 'HEAD' })
+      .then(r => r.ok ? loadScript('./firebase-credentials.js', startFirebaseSDK, startFirebaseSDK)
+                      : startFirebaseSDK())
+      .catch(() => startFirebaseSDK());
 
     function startFirebaseSDK() {
     // Firebase IS configured — show badge immediately
