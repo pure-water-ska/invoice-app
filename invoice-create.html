@@ -34,6 +34,11 @@
 #custDropdown .copt:last-child { border-bottom: none; }
 #custDropdown .copt:hover, #custDropdown .copt.hi { background: #e8f0ff; color: #0d6efd; }
 #custDropdown .copt-empty { padding: 10px 12px; color: #999; font-size: 13px; }
+#custNote {
+  display:none; margin-top:6px; background:#fff8e1; border:0.5px solid #ffe082;
+  border-radius:6px; padding:7px 10px; font-size:13px; color:#7c5e00;
+  line-height:1.4; gap:7px; align-items:flex-start;
+}
 </style>
 </head>
 <body>
@@ -69,6 +74,10 @@
                    autocomplete="off" oninput="_custFilter()" onfocus="_custOpen()" onkeydown="_custKey(event)">
             <input type="hidden" id="invCustomer">
             <div id="custDropdown"></div>
+            <div id="custNote">
+              <i class="bi bi-journal-text" style="font-size:14px;flex-shrink:0;margin-top:1px"></i>
+              <span id="custNoteText"></span>
+            </div>
           </div>
         </div>
         <div class="col-12 col-md-2">
@@ -349,6 +358,17 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('invCustomer').value = id || '';
     document.getElementById('invCustomerSearch').value = (name || (c && c.name) || '');
     _custClose();
+    // Show most recent note if customer has one
+    const noteBox  = document.getElementById('custNote');
+    const noteText = document.getElementById('custNoteText');
+    const notes    = (c && Array.isArray(c.notes) && c.notes.length) ? c.notes : null;
+    if (notes) {
+      const latest = notes.reduce((a, b) => (a.createdAt > b.createdAt ? a : b));
+      noteText.textContent = latest.text;
+      noteBox.style.display = 'flex';
+    } else {
+      noteBox.style.display = 'none';
+    }
     if (id) onCustomerChange();
   };
 

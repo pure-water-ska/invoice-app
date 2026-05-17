@@ -92,6 +92,22 @@ td.editable-cell input, td.editable-cell select { font-size: 13px; }
     </div>
   </div>
 
+  <!-- Excel Processing Progress -->
+  <div id="xlsProgressWrap" class="d-none mb-3">
+    <div class="d-flex align-items-center gap-2">
+      <div class="spinner-border spinner-border-sm text-success flex-shrink-0"></div>
+      <div style="flex:1;min-width:0">
+        <div class="d-flex justify-content-between align-items-baseline mb-1">
+          <span class="text-success small">กำลังประมวลผลแถวข้อมูล...</span>
+          <span id="xlsProgressCounter" class="fw-semibold text-success small ms-2 flex-shrink-0"></span>
+        </div>
+        <div style="height:5px;background:#e9ecef;border-radius:3px;overflow:hidden">
+          <div id="xlsProgressBar" style="height:100%;width:0%;background:#198754;border-radius:3px;transition:width .25s ease"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Step 3: Preview Table -->
   <div id="step3" class="d-none">
     <div class="card mb-3">
@@ -285,7 +301,18 @@ function applyMapping() {
   const hRow = parseInt(document.getElementById('headerRowNum').value || 1) - 1;
   const dataRows = _sheetData.slice(hRow + 1).filter(r => r.some(c => c !== ''));
 
+  // Show progress briefly so user sees how many rows are being processed
+  const total = dataRows.length;
+  const wrap = document.getElementById('xlsProgressWrap');
+  const bar  = document.getElementById('xlsProgressBar');
+  const ctr  = document.getElementById('xlsProgressCounter');
+  wrap.classList.remove('d-none');
+  bar.style.width = '0%';
+  ctr.textContent = `0 / ${total} แถว`;
+
   _rows = dataRows.map((row, idx) => {
+    ctr.textContent = `${idx + 1} / ${total} แถว`;
+    bar.style.width = `${Math.round((idx + 1) / total * 100)}%`;
     const get = key => {
       const ci = _colMap[key];
       return ci !== undefined ? String(row[ci] ?? '').trim() : '';
@@ -325,6 +352,7 @@ function applyMapping() {
     };
   }).filter(r => r.amount > 0 || r.invoiceNumber);
 
+  wrap.classList.add('d-none');
   renderPreview();
   document.getElementById('step3').classList.remove('d-none');
 }
