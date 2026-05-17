@@ -333,7 +333,7 @@
         เพื่อเพิ่มพื้นที่ว่าง
       </p>
       <div id="archivePreview" class="alert alert-info d-none small py-2 mb-3"></div>
-      <div class="d-flex gap-2 flex-wrap">
+      <div class="d-flex gap-2 flex-wrap mb-4">
         <button class="btn btn-outline-secondary btn-sm" onclick="previewArchive()">
           <i class="bi bi-search me-1"></i>ดูตัวอย่างก่อน Archive
         </button>
@@ -341,6 +341,18 @@
           <i class="bi bi-archive me-1"></i>Archive ตอนนี้
         </button>
       </div>
+
+      <hr class="my-3">
+      <p class="fw-semibold mb-1"><i class="bi bi-images me-1"></i>ย้ายรูปภาพเก่าไป Google Drive</p>
+      <p class="text-muted small mb-3">
+        สแกนรายการชำระเงินทั้งหมด — รูปภาพที่ยังเป็น base64 (เก่า) จะถูก
+        อัปโหลดไป Drive แล้วแทนที่ด้วย link เพื่อเพิ่มพื้นที่ว่างทันที
+        ต้องเชื่อมต่อ Google Drive ก่อน
+      </p>
+      <div id="imgMigrateStatus" class="alert d-none small py-2 mb-3"></div>
+      <button class="btn btn-outline-primary btn-sm" id="btnMigrateImgs" onclick="migratePaymentImages()">
+        <i class="bi bi-cloud-upload me-1"></i>ย้ายรูปภาพไป Drive
+      </button>
     </div>
   </div>
 

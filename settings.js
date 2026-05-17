@@ -648,6 +648,87 @@ function previewArchive() {
   }
 }
 
+async function migratePaymentImages() {
+  const btn = document.getElementById('btnMigrateImgs');
+  const el  = document.getElementById('imgMigrateStatus');
+
+  if (!window.DriveStore?.ready) {
+    el.className = 'alert alert-warning small py-2 mb-3';
+    el.classList.remove('d-none');
+    el.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>กรุณาเชื่อมต่อ Google Drive ก่อน';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลังย้ายรูปภาพ...';
+  el.className = 'alert alert-info small py-2 mb-3';
+  el.classList.remove('d-none');
+  el.innerHTML = 'กำลังสแกนรายการชำระเงิน...';
+
+  const IMAGE_FIELDS = ['transferImage', 'chequeImage', 'signedImage'];
+  const payments = DB.getPayments();
+  let uploadCount = 0, errorCount = 0, processed = 0;
+
+  function b64ToBlob(b64) {
+    const [header, data] = b64.split(',');
+    const mime = (header.match(/:(.*?);/) || [])[1] || 'image/jpeg';
+    const bin  = atob(data);
+    const arr  = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], { type: mime });
+  }
+
+  async function uploadOne(b64, filename) {
+    const blob   = b64ToBlob(b64);
+    const result = await DriveStore.upload(blob, filename, {});
+    return `drv|${result.driveId}|${result.uploadedAt}`;
+  }
+
+  for (const p of payments) {
+    let changed = false;
+    for (const field of IMAGE_FIELDS) {
+      const val = p[field];
+      if (typeof val === 'string' && val.startsWith('data:')) {
+        try {
+          const ext = val.startsWith('data:image/png') ? 'png' : 'jpg';
+          p[field] = await uploadOne(val, `pay_${p.id}_${field}.${ext}`);
+          uploadCount++; changed = true;
+        } catch { errorCount++; }
+      }
+    }
+    // imageHistory array
+    if (Array.isArray(p.imageHistory)) {
+      for (let i = 0; i < p.imageHistory.length; i++) {
+        const h = p.imageHistory[i];
+        if (h && typeof h.src === 'string' && h.src.startsWith('data:')) {
+          try {
+            const ext = h.src.startsWith('data:image/png') ? 'png' : 'jpg';
+            p.imageHistory[i] = { ...h, src: await uploadOne(h.src, `pay_${p.id}_hist_${i}.${ext}`) };
+            uploadCount++; changed = true;
+          } catch { errorCount++; }
+        }
+      }
+    }
+    if (changed) processed++;
+    // Update status message periodically
+    if (processed % 5 === 0) {
+      el.innerHTML = `สแกนแล้ว ${payments.indexOf(p) + 1}/${payments.length} รายการ — อัปโหลดแล้ว ${uploadCount} รูป`;
+    }
+  }
+
+  if (uploadCount > 0) DB.savePayments(payments);
+
+  el.className = `alert ${uploadCount > 0 ? 'alert-success' : 'alert-info'} small py-2 mb-3`;
+  el.innerHTML = uploadCount > 0
+    ? `<i class="bi bi-check-circle me-1"></i>ย้ายสำเร็จ <strong>${uploadCount} รูป</strong> จาก <strong>${processed} รายการ</strong>${errorCount ? ` (ล้มเหลว ${errorCount} รูป)` : ''}`
+    : `<i class="bi bi-info-circle me-1"></i>ไม่พบรูปภาพ base64 เก่า — ทุกรูปอยู่บน Drive แล้ว`;
+
+  btn.disabled = false;
+  btn.innerHTML = '<i class="bi bi-cloud-upload me-1"></i>ย้ายรูปภาพไป Drive';
+  renderStorageBar();
+  if (uploadCount > 0) Utils.showAlert(`ย้ายรูปภาพสำเร็จ ${uploadCount} รูป`, 'success');
+}
+
 async function runArchive() {
   const btn = document.getElementById('btnRunArchive');
   const el  = document.getElementById('archivePreview');

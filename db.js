@@ -401,6 +401,33 @@ const DB = {
 
   // ─── INIT ────────────────────────────────────────────────────────────────────
   init() {
+    // ── One-time LZString migration ─────────────────────────────────────────
+    // Compresses any plain-JSON wt_* keys written before compression was added.
+    // Collect keys first to avoid modifying localStorage while iterating it.
+    if (!localStorage.getItem('wt_lz_migrated') && typeof LZString !== 'undefined') {
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('wt_')) keys.push(k);
+      }
+      let migrated = 0;
+      for (const key of keys) {
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const fc = raw.charCodeAt(0);
+        // Plain JSON first chars: [ { " t f n or digit (LZString output starts much higher)
+        if (fc === 91 || fc === 123 || fc === 34 ||
+            fc === 116 || fc === 102 || fc === 110 ||
+            (fc >= 48 && fc <= 57)) {
+          try { localStorage.setItem(key, LZString.compressToUTF16(raw)); migrated++; }
+          catch (e) { console.warn('[DB] LZ migration failed for', key, e.message); }
+        }
+      }
+      localStorage.setItem('wt_lz_migrated', '1');
+      this._cache = {}; // invalidate cache — re-read from now-compressed storage
+      if (migrated) console.log(`[DB] LZString migration: compressed ${migrated} legacy keys`);
+    }
+
     if (this.getUsers().length === 0) {
       this.addUser({
         id: Utils.uuid(),
