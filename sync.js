@@ -18,6 +18,7 @@ const Sync = {
   _tombstoneKey:  'wt_sync_tombstones',  // persists deleted IDs across page loads
   _tombstoneTTL:  5 * 60 * 1000,         // 5 minutes — auto-expire if purge never ran
   _serverIds:     {},                    // { [colName]: Set<id> } cached from last _pullAll
+  _pushDebounce:  {},                    // { [lsKey]: timeoutId } — debounce rapid collection writes
 
   // ── Large collections → one Firestore doc per record ──────────────────────
   // (avoids 1 MB Firestore document limit for busy businesses)
@@ -177,6 +178,24 @@ const Sync = {
       this._enqueue(key, val);
       return;
     }
+    // ── Debounce collection writes (invoices, payments) ───────────────────────
+    // Rapid imports (PDF/Excel) call addInvoice() many times in a loop.
+    // Without debounce each call triggers _writeKey → the background purge of
+    // push N can race against push N+1 and DELETE the just-added record.
+    // Debouncing 600 ms means the full batch lands in ONE write after the loop.
+    if (this.COLLECTIONS[key]) {
+      clearTimeout(this._pushDebounce[key]);
+      this._pushDebounce[key] = setTimeout(() => {
+        // Read fresh value from DB cache at fire time (not the stale closure val)
+        const fresh = window.DB ? DB._cache[key] ?? val : val;
+        this._writeKey(key, fresh).catch(e => {
+          console.warn('[Sync] push failed, queuing:', key, e.message);
+          this._enqueue(key, fresh);
+          this._badge('pending');
+        });
+      }, 600);
+      return;
+    }
     this._writeKey(key, val).catch(e => {
       console.warn('[Sync] push failed, queuing:', key, e.message);
       this._enqueue(key, val);
@@ -236,15 +255,21 @@ const Sync = {
       }
       if (ops > 0) await batch.commit();
 
-      // ── ③ Background purge: delete from Firestore any IDs not in localIds ─
-      // Also handles edge case where another user added records between our
-      // _pullAll() and now (those IDs wouldn't be in _serverIds).
+      // ── ③ Background purge: delete Firestore docs that were deleted locally ──
+      // IMPORTANT: only delete docs that existed at _pullAll() time (knownServerIds).
+      // Docs NOT in knownServerIds were added AFTER our pull — either by a later
+      // push from this tab (rapid import race) or by another device. Deleting them
+      // here would silently drop data that was just written.
+      const purgeBase = new Set(knownServerIds || []);  // snapshot from pull time
       colRef.get().then(async snap => {
-        const toDelete = snap.docs.filter(d => !localIds.has(d.id));
+        const toDelete = snap.docs.filter(d =>
+          !localIds.has(d.id) &&   // not in our current local array
+          purgeBase.has(d.id)      // was on server at pull time → legitimately deleted
+        );
         if (!toDelete.length) return;
 
         const purgeIds = toDelete.map(d => d.id);
-        this._addTombstones(colName, purgeIds);      // extra safety for late IDs
+        this._addTombstones(colName, purgeIds);
         this._ignoreUntil = Date.now() + this._skipInitialMs;
 
         let delBatch = this._db.batch();
@@ -257,7 +282,7 @@ const Sync = {
           await delBatch.commit();
           this._ignoreUntil = Date.now() + this._skipInitialMs;
         }
-        this._clearTombstones(colName, purgeIds);    // purge done — lift tombstones
+        this._clearTombstones(colName, purgeIds);
       }).catch(() => {});
     }
 
@@ -479,96 +504,20 @@ const Sync = {
       if (!toast) {
         toast = document.createElement('div');
         toast.id = 'syncToast';
-        toast.setAttribute('style',
-          'position:fixed;bottom:70px;right:16px;z-index:9990;min-width:200px;' +
-          'background:#198754;color:#fff;border-radius:10px;padding:9px 16px;' +
-          'font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.25);' +
-          'transition:opacity .4s;pointer-events:none');
+        toast.style.cssText = 'position:fixed;bottom:1rem;right:1rem;z-index:9999;min-width:180px;';
+        toast.className = 'toast show align-items-center text-white border-0';
+        toast.setAttribute('role', 'alert');
         document.body.appendChild(toast);
       }
-      toast.textContent = `🔄 ${label} อัปเดตจากผู้ใช้อื่น`;
-      toast.style.opacity = '1';
-      clearTimeout(toast._t);
-      toast._t = setTimeout(() => { toast.style.opacity = '0'; }, 3500);
+      toast.innerHTML = `
+        <div class="d-flex">
+          <div class="toast-body fw-semibold">
+            <i class="bi bi-arrow-repeat me-1"></i>ซิงค์ <strong>${label}</strong> แล้ว
+          </div>
+          <button type="button" class="btn-close btn-close-white me-2 m-auto" onclick="this.closest('.toast').remove()"></button>
+        </div>`;
+      clearTimeout(toast._hide);
+      toast._hide = setTimeout(() => toast.remove(), 3000);
     }
-
-    // Re-render current page (works for pages with global render() function)
-    this._triggerRerender();
-  },
-
-  _triggerRerender() {
-    if (typeof window.render === 'function') {
-      try { window.render(); } catch {}
-    }
-  },
-
-  // ── Manual pull (user-triggered refresh from Firestore) ───────────────────
-  async pull() {
-    if (!this.ready) return;
-    this._badge('pending');
-    try {
-      await this._pullAll();
-      this._badge('online');
-    } catch (e) {
-      console.error('[Sync] manual pull failed:', e);
-      this._badge('error');
-    }
-  },
-
-  // ── Push ALL local data to Firestore (force full upload) ──────────────────
-  async pushAll() {
-    if (!this.ready) { console.warn('[Sync] pushAll called before ready'); return; }
-    this._badge('pending');
-    console.log('[Sync] pushAll: uploading all local data to Firestore...');
-    try {
-      const allKeys = [
-        ...Object.keys(this.COLLECTIONS),
-        ...Object.keys(this.DOCUMENTS),
-      ];
-      const total = allKeys.length;
-      for (let i = 0; i < total; i++) {
-        const key = allKeys[i];
-        const label = this.COLLECTIONS[key] || this.DOCUMENTS[key] || key;
-        if (typeof Utils !== 'undefined') Utils.showProgress(`อัปโหลด Cloud: ${label} (${i + 1}/${total})`, Math.round(((i + 1) / total) * 100));
-        try {
-          const raw = localStorage.getItem(key);
-          if (!raw) continue;
-          const val = JSON.parse(raw);
-          await this._writeKey(key, val);
-          console.log('[Sync] pushAll:', key, '✓');
-        } catch (e) {
-          console.warn('[Sync] pushAll error for', key, ':', e.message);
-        }
-      }
-      if (typeof Utils !== 'undefined') Utils.hideProgress();
-      this._badge('online');
-      localStorage.setItem(this._lastSyncKey, new Date().toISOString());
-      console.log('[Sync] pushAll complete ✓');
-    } catch (e) {
-      if (typeof Utils !== 'undefined') Utils.hideProgress();
-      console.error('[Sync] pushAll failed:', e);
-      this._badge('error');
-    }
-  },
-
-  // ── Status info for troubleshoot / settings ────────────────────────────────
-  getStatus() {
-    const pending = this._getQueue().length;
-    const lastAt  = localStorage.getItem(this._lastSyncKey);
-    return {
-      ready:   this.ready,
-      online:  this._online,
-      pending,
-      orgId:   this._orgId,
-      uid:     this._uid,
-      lastAt,
-    };
   },
 };
-
-// Expose globally — `const Sync` above is a lexical binding, NOT a window property,
-// so `window.Sync` would otherwise be undefined (breaks nav.js badge + connection modal).
-window.Sync = Sync;
-
-// ── Auto-initialize ───────────────────────────────────────────────────────────
-Sync.init().catch(e => console.error('[Sync]', e));
