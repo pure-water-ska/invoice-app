@@ -521,3 +521,6 @@ const Sync = {
     }
   },
 };
+
+// Auto-start on load (nav.js loads this script after Firebase SDK is ready)
+Sync.init();
