@@ -1,0 +1,1089 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0d6efd">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ใบกำกับ">
+<title>ลูกค้า</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+.brand-tag {
+  display:inline-flex;align-items:center;gap:3px;
+  background:#e0f2fe;color:#0369a1;border:1px solid #7dd3fc;
+  border-radius:20px;padding:1px 8px 1px 10px;font-size:12px;font-weight:600;
+}
+.brand-tag .rm { background:none;border:none;padding:0;line-height:1;color:#0369a1;cursor:pointer;font-size:13px; }
+.brand-tag .rm:hover { color:#dc2626; }
+.brand-add-btn { background:none;border:1px dashed #94a3b8;border-radius:20px;padding:1px 9px;font-size:12px;color:#64748b;cursor:pointer; }
+.brand-add-btn:hover { border-color:#0d6efd;color:#0d6efd; }
+.brand-inline-input { font-size:12px;border:1px solid #7dd3fc;border-radius:20px;padding:1px 8px;width:90px;outline:none; }
+
+/* ── Suspended customer ── */
+.card.is-suspended { opacity:.72;border-color:#dc3545 !important; }
+.suspended-ribbon { background:#dc3545;color:#fff;font-size:10px;font-weight:700;padding:1px 8px;border-radius:0 0 6px 6px;letter-spacing:.5px; }
+
+/* ── Selection ── */
+.cust-card-wrap { position:relative; }
+.cust-checkbox {
+  position:absolute;top:10px;left:10px;z-index:10;
+  width:18px;height:18px;cursor:pointer;
+  accent-color:#0d6efd;
+}
+.cust-card-wrap.selected > .card {
+  outline:2px solid #0d6efd;
+  background-color:rgba(13,110,253,.05);
+}
+[data-bs-theme="dark"] .cust-card-wrap.selected > .card {
+  background-color:rgba(13,110,253,.12);
+}
+
+/* Selection toolbar */
+#selToolbar {
+  position:sticky;top:56px;z-index:100;
+  background:#0d6efd;color:#fff;
+  border-radius:10px;padding:.6rem 1rem;
+  display:none;
+  align-items:center;gap:.75rem;flex-wrap:wrap;
+  box-shadow:0 4px 16px rgba(13,110,253,.35);
+  margin-bottom:.75rem;
+}
+#selToolbar.show { display:flex; }
+</style>
+</head>
+<body>
+<div id="navContainer"></div>
+<div class="page-wrap">
+
+  <!-- Header -->
+  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h5 class="mb-0 fw-bold"><i class="bi bi-people me-2 text-primary"></i>ฐานข้อมูลลูกค้า</h5>
+    <div class="d-flex gap-2 flex-wrap">
+      <button class="btn btn-outline-secondary btn-sm" id="selModeBtn" onclick="toggleSelMode()">
+        <i class="bi bi-check2-square me-1"></i>เลือก
+      </button>
+      <button class="btn btn-outline-danger btn-sm" onclick="confirmClearAll()">
+        <i class="bi bi-trash3 me-1"></i>ลบทั้งหมด
+      </button>
+      <button class="btn btn-primary" onclick="openModal()">
+        <i class="bi bi-plus-lg me-1"></i>เพิ่มลูกค้า
+      </button>
+    </div>
+  </div>
+
+  <div id="alertBox" class="mb-2"></div>
+
+  <!-- Selection Toolbar (sticky) -->
+  <div id="selToolbar">
+    <input type="checkbox" id="selAllChk" style="width:16px;height:16px;accent-color:#fff;cursor:pointer"
+           onchange="selAllChange(this.checked)" title="เลือก/ยกเลิกทั้งหมด">
+    <span id="selLabel" class="fw-semibold">เลือก 0 ราย</span>
+    <div class="ms-auto d-flex gap-2">
+      <button class="btn btn-sm btn-light" onclick="selectVisible(true)">เลือกทั้งหมด</button>
+      <button class="btn btn-sm btn-outline-light" onclick="selectVisible(false)">ยกเลิก</button>
+      <button class="btn btn-sm btn-danger" id="delSelBtn" disabled onclick="confirmDelSelected()">
+        <i class="bi bi-trash3 me-1"></i>ลบที่เลือก (<span id="delSelCount">0</span>)
+      </button>
+    </div>
+  </div>
+
+  <!-- Search + Sort -->
+  <div class="card mb-3">
+    <div class="card-body py-2">
+      <div class="d-flex gap-2 flex-wrap align-items-center">
+        <div class="input-group input-group-sm" style="max-width:360px">
+          <span class="input-group-text"><i class="bi bi-search"></i></span>
+          <input type="text" id="searchInput" class="form-control" placeholder="ค้นหาชื่อ, เบอร์, ยี่ห้อ...">
+        </div>
+        <select id="sortCust" class="form-select form-select-sm" style="max-width:190px" onchange="_custPage=1;render()">
+          <option value="name_asc">ชื่อ A → Z</option>
+          <option value="name_desc">ชื่อ Z → A</option>
+          <option value="bal_desc">ยอดค้าง มาก → น้อย</option>
+          <option value="bal_asc">ยอดค้าง น้อย → มาก</option>
+        </select>
+        <button class="btn btn-outline-secondary btn-sm" onclick="document.getElementById('searchInput').value='';_custPage=1;render()">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Customer Cards -->
+  <div id="customerList" class="row g-3"></div>
+  <div id="custPagination" class="d-flex justify-content-between align-items-center px-1 py-2 mt-2 small text-muted" style="display:none!important"></div>
+</div>
+
+<!-- ── Delete Selected Confirm Modal ── -->
+<div class="modal fade" id="delSelModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header bg-danger text-white">
+        <h5 class="modal-title"><i class="bi bi-exclamation-triangle-fill me-2"></i>ยืนยันการลบ</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-1">ลบลูกค้าที่เลือก <strong class="text-danger" id="delSelModalCount">0</strong> ราย?</p>
+        <div id="delSelNameList" class="mt-2 p-2 border rounded small" style="max-height:180px;overflow-y:auto;background:var(--bs-light)"></div>
+        <p class="text-muted small mt-2 mb-0">ข้อมูลใบกำกับและการชำระเงินยังคงอยู่</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+        <button type="button" class="btn btn-danger" onclick="doDelSelected()">
+          <i class="bi bi-trash3 me-1"></i>ลบ
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Clear All Confirm Modal ── -->
+<div class="modal fade" id="clearAllModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header bg-danger text-white">
+        <h5 class="modal-title"><i class="bi bi-exclamation-triangle-fill me-2"></i>ยืนยันการลบลูกค้าทั้งหมด</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-1">คุณกำลังจะ<strong class="text-danger">ลบข้อมูลลูกค้าทั้งหมด <span id="clearCount">0</span> ราย</strong> ออกจากระบบ</p>
+        <p class="text-muted small mb-0">การดำเนินการนี้<strong>ไม่สามารถกู้คืนได้</strong> — ข้อมูลใบกำกับและการชำระเงินยังคงอยู่</p>
+        <div class="mt-3 p-2 bg-danger bg-opacity-10 border border-danger rounded small">
+          <i class="bi bi-info-circle me-1 text-danger"></i>
+          พิมพ์ <strong>ลบทั้งหมด</strong> เพื่อยืนยัน
+        </div>
+        <input type="text" id="clearConfirmInput" class="form-control mt-2" placeholder='พิมพ์ "ลบทั้งหมด" ที่นี่'
+               oninput="document.getElementById('doClearBtn').disabled = this.value !== 'ลบทั้งหมด'">
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+        <button type="button" class="btn btn-danger" id="doClearBtn" disabled onclick="doClearAll()">
+          <i class="bi bi-trash3 me-1"></i>ลบทั้งหมด
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Customer Modal ── -->
+<div class="modal fade" id="custModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="modalTitle">เพิ่มลูกค้าใหม่</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="modalAlert"></div>
+        <input type="hidden" id="custId">
+        <div class="row g-3">
+          <div class="col-md-8">
+            <label class="form-label fw-semibold">ชื่อลูกค้า <span class="text-danger">*</span></label>
+            <input type="text" id="custName" class="form-control" placeholder="ชื่อบริษัท/ร้าน/บุคคล">
+          </div>
+          <div class="col-md-4"></div>
+          <div class="col-12">
+            <label class="form-label fw-semibold">ยี่ห้อสินค้า</label>
+            <div id="modalBrandTags" class="d-flex flex-wrap gap-1 mb-2 p-2 border rounded bg-light" style="min-height:38px"></div>
+            <div class="input-group input-group-sm">
+              <input type="text" id="custBrandInput" class="form-control" placeholder="พิมพ์ยี่ห้อแล้วกด Enter หรือกดปุ่ม +"
+                     onkeydown="if(event.key==='Enter'){event.preventDefault();addModalBrand()}">
+              <button class="btn btn-outline-primary" onclick="addModalBrand()"><i class="bi bi-plus-lg"></i></button>
+            </div>
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold">ที่อยู่</label>
+            <textarea id="custAddress" class="form-control" rows="2" placeholder="ที่อยู่จัดส่ง"></textarea>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">เบอร์โทร</label>
+            <input type="text" id="custPhone" class="form-control" placeholder="0xx-xxx-xxxx">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">เลขประจำตัวผู้เสียภาษี</label>
+            <input type="text" id="custTaxId" class="form-control" placeholder="13 หลัก">
+          </div>
+          <div class="col-md-10">
+            <label class="form-label fw-semibold"><i class="bi bi-pin-map me-1 text-danger"></i>Google Maps Link</label>
+            <input type="url" id="custMapLink" class="form-control" placeholder="https://maps.google.com/?q=...">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label fw-semibold">ระยะทาง (กม.)</label>
+            <input type="number" id="custDistance" class="form-control" min="0" step="0.1" placeholder="0.0">
+          </div>
+          <div class="col-12"><hr class="mb-2 mt-0"><span class="fw-semibold"><i class="bi bi-calendar-check me-1 text-info"></i>เงื่อนไขการชำระเงิน</span></div>
+          <div class="col-md-5">
+            <label class="form-label small fw-semibold">วันชำระ</label>
+            <div class="input-group input-group-sm">
+              <select id="custPayDayType" class="form-select" onchange="onPayDayTypeChange()">
+                <option value="">ไม่กำหนด</option>
+                <option value="date">ทุกวันที่</option>
+                <option value="weekday">ทุกวัน</option>
+              </select>
+              <input type="number" id="custPayDayNum" class="form-control d-none" min="1" max="31" placeholder="1-31" style="max-width:72px">
+              <select id="custPayDayWeekday" class="form-select d-none" style="max-width:130px">
+                <option>จันทร์</option><option>อังคาร</option><option>พุธ</option>
+                <option>พฤหัสบดี</option><option>ศุกร์</option><option>เสาร์</option><option>อาทิตย์</option>
+              </select>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small fw-semibold">ค้างได้ไม่เกิน</label>
+            <div class="input-group input-group-sm">
+              <input type="number" id="custMaxBills" class="form-control" min="0" placeholder="ไม่จำกัด">
+              <span class="input-group-text">บิล</span>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small fw-semibold">ค้างนานไม่เกิน</label>
+            <div class="input-group input-group-sm">
+              <input type="number" id="custMaxDays" class="form-control" min="0" placeholder="ไม่จำกัด">
+              <span class="input-group-text">วัน</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+        <button class="btn btn-primary" onclick="saveCustomer()"><i class="bi bi-save me-1"></i>บันทึก</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Note Modal ── -->
+<div class="modal fade" id="noteModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">บันทึกข้อความ: <span id="noteCustomerName"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="noteList" class="mb-3"></div>
+        <div class="input-group">
+          <textarea id="noteText" class="form-control" rows="2" placeholder="พิมพ์บันทึกข้อความ..."></textarea>
+          <button class="btn btn-primary" onclick="addNote()"><i class="bi bi-plus-lg"></i></button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Suspend / Unsuspend Modal ──────────────────────────────────────────── -->
+<div class="modal fade" id="suspendModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header" id="suspendModalHeader">
+        <h5 class="modal-title" id="suspendModalTitle"><i class="bi bi-slash-circle me-2"></i>ระงับลูกค้า</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2">ลูกค้า: <strong id="suspendCustName"></strong></p>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">หมายเหตุ / เหตุผล <span class="text-danger" id="suspendReasonRequired">*</span></label>
+          <textarea id="suspendComment" class="form-control" rows="3" placeholder="กรอกเหตุผล..."></textarea>
+        </div>
+        <div id="suspendLogContainer" style="display:none">
+          <hr class="my-2">
+          <div class="fw-semibold small text-muted mb-1"><i class="bi bi-clock-history me-1"></i>ประวัติการระงับ</div>
+          <div id="suspendLogList" style="max-height:160px;overflow-y:auto;font-size:12px"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+        <button class="btn" id="suspendConfirmBtn" onclick="doSuspend()">ยืนยัน</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Outstanding Preview Modal ─────────────────────────────────────────── -->
+<div class="modal fade" id="outstandingModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header bg-danger text-white py-2">
+        <h6 class="modal-title fw-bold mb-0"><i class="bi bi-card-list me-2"></i>รายการค้างชำระ</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0">
+        <!-- พื้นที่ capture เป็นรูป -->
+        <div id="outstandingCapture" style="background:#fff;padding:20px">
+          <div id="outstandingContent"></div>
+        </div>
+      </div>
+      <div class="modal-footer gap-2">
+        <button class="btn btn-outline-secondary btn-sm" onclick="copyOutstandingImage()">
+          <i class="bi bi-clipboard-image me-1"></i>คัดลอกเป็นรูป
+        </button>
+        <button class="btn btn-primary btn-sm" onclick="saveOutstandingImage()">
+          <i class="bi bi-download me-1"></i>บันทึกรูป
+        </button>
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">ปิด</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script>
+<script>
+const session = Auth.require();
+DB.init();
+Nav.render('customers');
+
+let custModal, noteModal, suspendModal, currentNoteId;
+let modalBrands = [];
+let _suspendCustId = null, _suspendAction = null;
+
+// ── Pagination ───────────────────────────────────────────────────────────────
+const CUST_PAGE_SIZE = 24;
+let _custPage = 1;
+
+// ── Selection state ──────────────────────────────────────────────────────────
+let _selMode    = false;        // โหมดเลือก on/off
+let _selected   = new Set();   // ชุด id ที่เลือก
+let _visibleIds = [];           // id ที่กำลังแสดงอยู่ (หลัง filter)
+
+function toggleSelMode() {
+  _selMode = !_selMode;
+  _selected.clear();
+  const btn = document.getElementById('selModeBtn');
+  btn.innerHTML = _selMode
+    ? '<i class="bi bi-x-lg me-1"></i>ยกเลิกการเลือก'
+    : '<i class="bi bi-check2-square me-1"></i>เลือก';
+  btn.className = _selMode
+    ? 'btn btn-secondary btn-sm'
+    : 'btn btn-outline-secondary btn-sm';
+  document.getElementById('selToolbar').classList.toggle('show', _selMode);
+  render();
+}
+
+function updateSelToolbar() {
+  const cnt = _selected.size;
+  document.getElementById('selLabel').textContent = `เลือก ${cnt} ราย`;
+  document.getElementById('delSelCount').textContent = cnt;
+  document.getElementById('delSelBtn').disabled = cnt === 0;
+  // header checkbox state
+  const vis = _visibleIds.length;
+  const selVis = _visibleIds.filter(id => _selected.has(id)).length;
+  const chk = document.getElementById('selAllChk');
+  chk.checked       = vis > 0 && selVis === vis;
+  chk.indeterminate = selVis > 0 && selVis < vis;
+}
+
+function toggleSelect(id) {
+  if (_selected.has(id)) _selected.delete(id);
+  else _selected.add(id);
+  // update card outline
+  const wrap = document.getElementById('cwrap-' + id);
+  if (wrap) wrap.classList.toggle('selected', _selected.has(id));
+  const chk = document.getElementById('cchk-' + id);
+  if (chk) chk.checked = _selected.has(id);
+  updateSelToolbar();
+}
+
+function selectVisible(val) {
+  _visibleIds.forEach(id => {
+    if (val) _selected.add(id); else _selected.delete(id);
+    const wrap = document.getElementById('cwrap-' + id);
+    if (wrap) wrap.classList.toggle('selected', val);
+    const chk = document.getElementById('cchk-' + id);
+    if (chk) chk.checked = val;
+  });
+  updateSelToolbar();
+}
+
+function selAllChange(val) { selectVisible(val); }
+
+// ── Render ───────────────────────────────────────────────────────────────────
+function getBrands(c) {
+  if (Array.isArray(c.brands) && c.brands.length) return c.brands;
+  if (c.brand) return [c.brand];
+  return [];
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  custModal = new bootstrap.Modal(document.getElementById('custModal'));
+  noteModal = new bootstrap.Modal(document.getElementById('noteModal'));
+  suspendModal = new bootstrap.Modal(document.getElementById('suspendModal'));
+  render();
+  document.getElementById('searchInput').addEventListener('input', Utils.debounce(() => { _custPage = 1; render(); }, 200));
+});
+
+function render() {
+  const q = document.getElementById('searchInput').value.toLowerCase();
+  let list = DB.getCustomers().filter(c => {
+    const brands = getBrands(c).join(' ').toLowerCase();
+    return !q ||
+      c.name.toLowerCase().includes(q) ||
+      (c.phone||'').includes(q) ||
+      (c.taxId||'').includes(q) ||
+      brands.includes(q);
+  });
+  const sortMode = document.getElementById('sortCust')?.value || 'name_asc';
+  const _custBalance = c => {
+    const invs = DB.getInvoices().filter(i => i.customerId === c.id);
+    const nums = [...new Set(invs.map(i => i.invoiceNumber))];
+    return nums.reduce((s, n) => {
+      const pg1 = invs.find(i => i.invoiceNumber === n && i.page === 1) || invs.find(i => i.invoiceNumber === n);
+      const t = parseFloat(pg1?.totalAmount) || 0;
+      return s + Math.max(0, t - DB.getInvoicePaidAmount(n));
+    }, 0);
+  };
+  list.sort((a, b) => {
+    switch (sortMode) {
+      case 'name_asc':  return a.name.localeCompare(b.name, 'th');
+      case 'name_desc': return b.name.localeCompare(a.name, 'th');
+      case 'bal_desc':  return _custBalance(b) - _custBalance(a);
+      case 'bal_asc':   return _custBalance(a) - _custBalance(b);
+      default:          return a.name.localeCompare(b.name, 'th');
+    }
+  });
+  _visibleIds = list.map(c => c.id);  // full filtered list for select-all
+
+  const el = document.getElementById('customerList');
+  const pg = document.getElementById('custPagination');
+  if (list.length === 0) {
+    el.innerHTML = '<div class="col-12 text-center text-muted py-5"><i class="bi bi-people fs-1 d-block mb-2"></i>ยังไม่มีข้อมูลลูกค้า</div>';
+    pg.style.display = 'none';
+    if (_selMode) updateSelToolbar();
+    return;
+  }
+
+  // Pagination
+  const totalPages = Math.ceil(list.length / CUST_PAGE_SIZE);
+  if (_custPage > totalPages) _custPage = totalPages;
+  const pageList = list.slice((_custPage - 1) * CUST_PAGE_SIZE, _custPage * CUST_PAGE_SIZE);
+
+  el.innerHTML = pageList.map(c => {
+    const invoices = DB.getInvoices().filter(i => i.customerId === c.id);
+    const uniqNums = [...new Set(invoices.map(i => i.invoiceNumber))];
+    const totalBill = uniqNums.length;
+    const unpaid = uniqNums.filter(num => {
+      const inv = invoices.find(i => i.invoiceNumber === num);
+      return DB.getInvoicePaidAmount(num) < (inv ? parseFloat(inv.totalAmount)||0 : 0);
+    }).length;
+    // Last invoice date
+    const lastInv = invoices.length
+      ? invoices.reduce((a, b) => (a.createdAt||'') > (b.createdAt||'') ? a : b)
+      : null;
+    const lastDaysAgo = lastInv
+      ? Math.floor((Date.now() - new Date(lastInv.createdAt).getTime()) / 86400000)
+      : null;
+    const lastInvHtml = lastInv
+      ? `<div class="small mb-1" style="color:#6c757d">
+           <i class="bi bi-clock-history me-1"></i>ใบล่าสุด:
+           <strong>${lastInv.createdAt.slice(0,10)}</strong>
+           <span class="badge ms-1 ${lastDaysAgo <= 7 ? 'bg-success' : lastDaysAgo <= 30 ? 'bg-warning text-dark' : 'bg-secondary'}" style="font-size:10px">
+             ${lastDaysAgo === 0 ? 'วันนี้' : lastDaysAgo + ' วันที่แล้ว'}
+           </span>
+         </div>`
+      : `<div class="small mb-1 text-muted"><i class="bi bi-clock-history me-1"></i>ยังไม่มีใบกำกับ</div>`;
+
+    const brands = getBrands(c);
+    const brandTags = brands.map(b => `
+      <span class="brand-tag">
+        ${b}
+        <button class="rm" onclick="removeBrand('${c.id}','${b.replace(/'/g,"\\'")}',event)" title="ลบยี่ห้อนี้">×</button>
+      </span>`).join('');
+
+    const isSel = _selected.has(c.id);
+
+    return `
+    <div class="col-md-6 col-xl-4">
+      <div class="cust-card-wrap${isSel?' selected':''}" id="cwrap-${c.id}"
+           onclick="${_selMode ? `toggleSelect('${c.id}')` : ''}">
+        ${_selMode ? `<input type="checkbox" class="cust-checkbox" id="cchk-${c.id}"
+          ${isSel?'checked':''} onclick="event.stopPropagation();toggleSelect('${c.id}')">` : ''}
+        <div class="card h-100${c.suspended?' is-suspended':''}" style="${_selMode?'cursor:pointer':''}">
+          ${c.suspended ? `<div class="suspended-ribbon text-center">⛔ ระงับการใช้งาน</div>` : ''}
+          <div class="card-body ${_selMode?'ps-4':''}">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+              <h6 class="fw-bold mb-0">${c.name}${c.suspended?'':''}</h6>
+              ${_selMode ? '' : `
+              <div class="dropdown">
+                <button class="btn btn-sm btn-light" data-bs-toggle="dropdown"><i class="bi bi-three-dots-vertical"></i></button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                  <li><a class="dropdown-item" href="#" onclick="openModal('${c.id}')"><i class="bi bi-pencil me-1"></i>แก้ไข</a></li>
+                  <li><a class="dropdown-item" href="#" onclick="openNotes('${c.id}')"><i class="bi bi-chat-text me-1"></i>บันทึกข้อความ</a></li>
+                  <li><a class="dropdown-item" href="invoices.html?cust=${c.id}"><i class="bi bi-receipt me-1"></i>ดูใบกำกับ</a></li>
+                  <li><a class="dropdown-item" href="#" onclick="showOutstandingPreview('${c.id}')"><i class="bi bi-card-list me-1"></i>รายการค้างชำระ</a></li>
+                  <li><hr class="dropdown-divider"></li>
+                  ${c.suspended
+                    ? `<li><a class="dropdown-item text-success" href="#" onclick="openSuspendModal('${c.id}','unsuspend')"><i class="bi bi-check-circle me-1"></i>ยกเลิกระงับ</a></li>`
+                    : `<li><a class="dropdown-item text-warning" href="#" onclick="openSuspendModal('${c.id}','suspend')"><i class="bi bi-slash-circle me-1"></i>ระงับลูกค้า</a></li>`}
+                  <li><a class="dropdown-item text-danger" href="#" onclick="deleteCustomer('${c.id}')"><i class="bi bi-trash me-1"></i>ลบ</a></li>
+                </ul>
+              </div>`}
+            </div>
+
+            <!-- Brands -->
+            <div class="d-flex flex-wrap align-items-center gap-1 mb-2" id="brandrow-${c.id}">
+              ${brandTags}
+              ${_selMode ? '' : `
+              <button class="brand-add-btn" onclick="showBrandInput('${c.id}')" id="addbtn-${c.id}">
+                <i class="bi bi-plus-lg"></i> ยี่ห้อ
+              </button>
+              <span id="brandinput-${c.id}" style="display:none;align-items:center;gap:3px">
+                <input class="brand-inline-input" id="brandinputval-${c.id}" placeholder="ยี่ห้อ"
+                       onkeydown="handleBrandKey(event,'${c.id}')">
+                <button class="btn btn-sm btn-primary py-0 px-1" onclick="confirmBrandInput('${c.id}')"><i class="bi bi-check-lg"></i></button>
+                <button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="cancelBrandInput('${c.id}')"><i class="bi bi-x-lg"></i></button>
+              </span>`}
+            </div>
+
+            <div class="small text-muted mb-1"><i class="bi bi-geo-alt me-1"></i>${c.address||'-'}</div>
+            <div class="small mb-1"><i class="bi bi-telephone me-1 text-success"></i>${c.phone||'-'}</div>
+            <div class="small mb-1"><i class="bi bi-card-text me-1 text-primary"></i>${c.taxId||'-'}</div>
+            ${lastInvHtml}
+            <div class="small mb-2" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              ${c.mapLink
+                ? `<a href="${c.mapLink}" target="_blank" rel="noopener" class="text-decoration-none text-danger small" onclick="event.stopPropagation()"><i class="bi bi-pin-map-fill me-1"></i>Google Maps</a>`
+                : '<span class="text-muted small"><i class="bi bi-pin-map me-1"></i>ไม่มีแผนที่</span>'}
+              ${c.distance ? `<span class="badge bg-light text-dark border"><i class="bi bi-signpost me-1"></i>${c.distance} กม.</span>` : ''}
+            </div>
+            ${(() => {
+              const txt = payTermsText(c.payTerms);
+              return txt ? `<div class="small text-muted mb-1"><i class="bi bi-calendar-check me-1 text-info"></i>${txt}</div>` : '';
+            })()}
+            ${(() => {
+              const viol = getPayTermsViolations(c, invoices, uniqNums);
+              if (!viol.length) return '';
+              return `<div class="d-flex align-items-start gap-1 mb-1 flex-wrap">
+                <div class="flex-grow-1">
+                  ${viol.map(v => `<div class="small text-danger fw-semibold"><i class="bi bi-exclamation-triangle-fill me-1"></i>${v}</div>`).join('')}
+                </div>
+                <button class="btn btn-outline-danger btn-sm py-0 px-1 flex-shrink-0" style="font-size:11px"
+                  onclick="event.stopPropagation();copyOverdueMsg('${c.id}')" title="คัดลอกข้อความแจ้งเตือน">
+                  <i class="bi bi-clipboard me-1"></i>คัดลอก
+                </button>
+              </div>`;
+            })()}
+            <div class="d-flex gap-2 small flex-wrap">
+              <span class="badge bg-light text-dark border">${totalBill} ใบกำกับ</span>
+              ${unpaid > 0 ? `<span class="badge bg-danger">${unpaid} ค้างชำระ</span>` : '<span class="badge bg-success">ชำระครบ</span>'}
+              <span class="badge bg-warning text-dark">${(c.notes||[]).length} บันทึก</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Render pagination bar
+  if (totalPages <= 1) {
+    pg.style.display = 'none';
+  } else {
+    pg.style.display = '';
+    pg.innerHTML = `
+      <span>แสดง ${(_custPage-1)*CUST_PAGE_SIZE+1}–${Math.min(_custPage*CUST_PAGE_SIZE, list.length)} จาก ${list.length} ราย</span>
+      <div class="d-flex gap-1 align-items-center">
+        <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_custPage=1;render()" ${_custPage===1?'disabled':''}>«</button>
+        <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_custPage--;render()" ${_custPage===1?'disabled':''}>‹</button>
+        <span class="px-2">หน้า ${_custPage} / ${totalPages}</span>
+        <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_custPage++;render()" ${_custPage===totalPages?'disabled':''}>›</button>
+        <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_custPage=${totalPages};render()" ${_custPage===totalPages?'disabled':''}>»</button>
+      </div>`;
+  }
+
+  if (_selMode) updateSelToolbar();
+}
+
+// ── Suspend / Unsuspend ──────────────────────────────────────────────────────
+function openSuspendModal(custId, action) {
+  _suspendCustId = custId;
+  _suspendAction = action;
+  const c = DB.getCustomerById(custId);
+  if (!c) return;
+
+  const isSuspend = action === 'suspend';
+  const header = document.getElementById('suspendModalHeader');
+  header.className = 'modal-header ' + (isSuspend ? 'bg-warning' : 'bg-success text-white');
+  document.getElementById('suspendModalTitle').innerHTML =
+    `<i class="bi bi-${isSuspend?'slash-circle':'check-circle'} me-2"></i>${isSuspend?'ระงับลูกค้า':'ยกเลิกระงับลูกค้า'}`;
+  document.getElementById('suspendCustName').textContent = c.name;
+  document.getElementById('suspendComment').value = '';
+  document.getElementById('suspendReasonRequired').style.display = isSuspend ? '' : 'none';
+
+  const confirmBtn = document.getElementById('suspendConfirmBtn');
+  confirmBtn.className = 'btn ' + (isSuspend ? 'btn-warning' : 'btn-success');
+  confirmBtn.textContent = isSuspend ? 'ระงับ' : 'ยกเลิกระงับ';
+
+  // Show log if exists
+  const log = c.suspensionLog || [];
+  if (log.length) {
+    document.getElementById('suspendLogContainer').style.display = '';
+    document.getElementById('suspendLogList').innerHTML = log
+      .slice().reverse()
+      .map(e => `<div class="d-flex gap-2 py-1 border-bottom">
+        <span class="badge ${e.action==='suspend'?'bg-warning text-dark':'bg-success'}" style="white-space:nowrap">${e.action==='suspend'?'ระงับ':'ยกเลิกระงับ'}</span>
+        <div>
+          <div class="text-muted">${e.at?e.at.slice(0,16).replace('T',' '):''} — <strong>${e.by||''}</strong></div>
+          ${e.reason ? `<div>${e.reason}</div>` : ''}
+        </div>
+      </div>`).join('');
+  } else {
+    document.getElementById('suspendLogContainer').style.display = 'none';
+  }
+
+  suspendModal.show();
+}
+
+function doSuspend() {
+  if (!_suspendCustId || !_suspendAction) return;
+  const comment = document.getElementById('suspendComment').value.trim();
+  if (_suspendAction === 'suspend' && !comment) {
+    document.getElementById('suspendComment').classList.add('is-invalid');
+    document.getElementById('suspendComment').focus();
+    return;
+  }
+  document.getElementById('suspendComment').classList.remove('is-invalid');
+
+  const c = DB.getCustomerById(_suspendCustId);
+  if (!c) return;
+
+  const now = new Date().toISOString();
+  const logEntry = {
+    action:  _suspendAction,
+    at:      now,
+    by:      session.username,
+    reason:  comment || ''
+  };
+  const log = [...(c.suspensionLog || []), logEntry];
+
+  const patch = {
+    suspended:    _suspendAction === 'suspend',
+    suspendedAt:  now,
+    suspendedBy:  session.username,
+    suspendReason: comment || '',
+    suspensionLog: log
+  };
+  DB.updateCustomer(_suspendCustId, patch);
+  DB.logActivity(session.userId, session.username,
+    _suspendAction === 'suspend' ? 'ระงับลูกค้า' : 'ยกเลิกระงับลูกค้า',
+    { customerName: c.name, reason: comment || '' });
+
+  suspendModal.hide();
+  const actionTh = _suspendAction === 'suspend' ? 'ระงับ' : 'ยกเลิกระงับ';
+  Utils.showAlert(`<i class="bi bi-check-circle me-1"></i>${actionTh}ลูกค้า "${c.name}" สำเร็จ`,
+    _suspendAction === 'suspend' ? 'warning' : 'success');
+  render();
+}
+
+// ── Inline map editing ───────────────────────────────────────────────────────
+// ── Overdue short message ────────────────────────────────────────────────────
+function copyOverdueMsg(id) {
+  const c = DB.getCustomerById(id);
+  if (!c) return;
+  const invoices  = DB.getInvoices().filter(i => i.customerId === id);
+  const uniqNums  = [...new Set(invoices.map(i => i.invoiceNumber))];
+  const unpaidNums = uniqNums.filter(num => {
+    const inv = invoices.find(i => i.invoiceNumber === num);
+    return inv && DB.getInvoicePaidAmount(num) < (parseFloat(inv.totalAmount)||0);
+  });
+  const totalUnpaid = unpaidNums.reduce((sum, num) => {
+    const inv = invoices.find(i => i.invoiceNumber === num);
+    const paid = DB.getInvoicePaidAmount(num);
+    return sum + ((parseFloat(inv?.totalAmount)||0) - paid);
+  }, 0);
+  const msg = `เรียน ${c.name}\nมียอดค้างชำระ ${unpaidNums.length} ใบ รวม ${totalUnpaid.toLocaleString('th-TH',{minimumFractionDigits:2})} บาท\nกรุณาติดต่อชำระ ขอบคุณครับ/ค่ะ`;
+  navigator.clipboard.writeText(msg).then(() => {
+    Utils.showAlert('<i class="bi bi-check-circle me-1"></i>คัดลอกข้อความแจ้งเตือนแล้ว');
+  }).catch(() => {
+    prompt('คัดลอกข้อความด้านล่าง:', msg);
+  });
+}
+
+// ── Outstanding list preview + image ────────────────────────────────────────
+function showOutstandingPreview(id) {
+  const c = DB.getCustomerById(id);
+  if (!c) return;
+  const cfg       = DB.getSettings();
+  const invoices  = DB.getInvoices().filter(i => i.customerId === id);
+  const uniqNums  = [...new Set(invoices.map(i => i.invoiceNumber))];
+  const unpaidRows = uniqNums.map(num => {
+    const inv  = invoices.find(i => i.invoiceNumber === num);
+    const paid = DB.getInvoicePaidAmount(num);
+    const rem  = (parseFloat(inv?.totalAmount)||0) - paid;
+    return rem > 0 ? { num, date: inv?.createdAt, total: parseFloat(inv?.totalAmount)||0, paid, rem } : null;
+  }).filter(Boolean).sort((a,b) => new Date(a.date)-new Date(b.date));
+
+  const totalRem = unpaidRows.reduce((s,r) => s+r.rem, 0);
+  const today    = Utils.formatDateTH ? Utils.formatDateTH(new Date().toISOString()) : new Date().toLocaleDateString('th-TH');
+
+  document.getElementById('outstandingContent').innerHTML = `
+    <div style="font-family:Sarabun,sans-serif;color:#222">
+      <div style="text-align:center;margin-bottom:12px">
+        <div style="font-size:18px;font-weight:700">${cfg.companyName||'บริษัท'}</div>
+        <div style="font-size:13px;color:#555">ใบแจ้งยอดค้างชำระ · ${today}</div>
+      </div>
+      <div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:12px;margin-bottom:12px">
+        <div style="font-size:15px;font-weight:700">${c.name}</div>
+        ${c.phone ? `<div style="font-size:12px;color:#555">${c.phone}</div>` : ''}
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr style="background:#dc2626;color:#fff">
+            <th style="padding:6px 8px;text-align:left">เลขที่ใบกำกับ</th>
+            <th style="padding:6px 8px;text-align:center">วันที่</th>
+            <th style="padding:6px 8px;text-align:right">ยอดรวม</th>
+            <th style="padding:6px 8px;text-align:right">ชำระแล้ว</th>
+            <th style="padding:6px 8px;text-align:right;color:#fde68a">คงค้าง</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${unpaidRows.map((r,i) => `
+          <tr style="background:${i%2?'#fef2f2':'#fff'}">
+            <td style="padding:5px 8px;font-weight:600">${r.num}</td>
+            <td style="padding:5px 8px;text-align:center;color:#666">${r.date?r.date.slice(0,10):'-'}</td>
+            <td style="padding:5px 8px;text-align:right">${r.total.toLocaleString('th-TH',{minimumFractionDigits:2})}</td>
+            <td style="padding:5px 8px;text-align:right;color:#16a34a">${r.paid.toLocaleString('th-TH',{minimumFractionDigits:2})}</td>
+            <td style="padding:5px 8px;text-align:right;font-weight:700;color:#dc2626">${r.rem.toLocaleString('th-TH',{minimumFractionDigits:2})}</td>
+          </tr>`).join('')}
+        </tbody>
+        <tfoot>
+          <tr style="background:#1e293b;color:#fff">
+            <td colspan="4" style="padding:7px 8px;font-weight:700">รวมยอดค้างชำระทั้งหมด</td>
+            <td style="padding:7px 8px;text-align:right;font-weight:700;font-size:15px;color:#fde68a">${totalRem.toLocaleString('th-TH',{minimumFractionDigits:2})} บาท</td>
+          </tr>
+        </tfoot>
+      </table>
+      ${unpaidRows.length===0 ? '<div style="text-align:center;color:#16a34a;padding:16px;font-weight:600">ไม่มียอดค้างชำระ</div>' : ''}
+    </div>`;
+
+  new bootstrap.Modal(document.getElementById('outstandingModal')).show();
+}
+
+async function _captureOutstanding() {
+  const el = document.getElementById('outstandingCapture');
+  return html2canvas(el, { scale: 3, useCORS: true, backgroundColor: '#ffffff' });
+}
+
+async function saveOutstandingImage() {
+  const canvas = await _captureOutstanding();
+  // ลองใช้ File System Access API ก่อน
+  if (window.showSaveFilePicker) {
+    try {
+      const fh = await window.showSaveFilePicker({
+        suggestedName: `outstanding_${Date.now()}.png`,
+        types: [{ description: 'PNG Image', accept: { 'image/png': ['.png'] } }]
+      });
+      const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+      const w = await fh.createWritable();
+      await w.write(blob); await w.close();
+      Utils.showAlert('<i class="bi bi-check-circle me-1"></i>บันทึกรูปสำเร็จ');
+      return;
+    } catch(e) { if (e.name === 'AbortError') return; }
+  }
+  // fallback: download
+  const a = document.createElement('a');
+  a.href = canvas.toDataURL('image/png');
+  a.download = `outstanding_${Date.now()}.png`;
+  a.click();
+  Utils.showAlert('<i class="bi bi-download me-1"></i>ดาวน์โหลดรูปแล้ว');
+}
+
+async function copyOutstandingImage() {
+  try {
+    const canvas = await _captureOutstanding();
+    const blob   = await new Promise(r => canvas.toBlob(r, 'image/png'));
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    Utils.showAlert('<i class="bi bi-check-circle me-1"></i>คัดลอกรูปไปยัง Clipboard แล้ว');
+  } catch(e) {
+    Utils.showAlert('ไม่สามารถคัดลอกรูปได้ — ลองบันทึกแทน', 'warning');
+  }
+}
+
+function editMapInline(id) {
+  const c = DB.getCustomerById(id);
+  document.getElementById('mapedit-'+id).style.display = 'flex';
+  document.getElementById('mapurl-'+id).value = c.mapLink || '';
+  document.getElementById('mapdist-'+id).value = c.distance || '';
+  document.getElementById('mapview-'+id).style.display = 'none';
+}
+function saveMapInline(id) {
+  const url  = document.getElementById('mapurl-'+id).value.trim();
+  const dist = document.getElementById('mapdist-'+id).value;
+  DB.updateCustomer(id, { mapLink: url, distance: dist ? parseFloat(dist) : '' });
+  DB.logActivity(session.userId, session.username, 'แก้ไขลูกค้า', { field: 'mapLink' });
+  render();
+}
+function clearMapInline(id) {
+  DB.updateCustomer(id, { mapLink: '', distance: '' });
+  render();
+}
+
+// ── Inline brand editing ──────────────────────────────────────────────────────
+function showBrandInput(custId) {
+  document.getElementById(`addbtn-${custId}`).style.display = 'none';
+  const wrap = document.getElementById(`brandinput-${custId}`);
+  wrap.style.display = 'inline-flex';
+  document.getElementById(`brandinputval-${custId}`).focus();
+}
+function cancelBrandInput(custId) {
+  document.getElementById(`brandinput-${custId}`).style.display = 'none';
+  document.getElementById(`addbtn-${custId}`).style.display = '';
+  document.getElementById(`brandinputval-${custId}`).value = '';
+}
+function handleBrandKey(e, custId) {
+  if (e.key === 'Enter') { e.preventDefault(); confirmBrandInput(custId); }
+  if (e.key === 'Escape') cancelBrandInput(custId);
+}
+function confirmBrandInput(custId) {
+  const val = document.getElementById(`brandinputval-${custId}`).value.trim();
+  if (!val) { cancelBrandInput(custId); return; }
+  const c = DB.getCustomerById(custId);
+  const brands = getBrands(c);
+  if (!brands.includes(val)) {
+    brands.push(val);
+    DB.updateCustomer(custId, { brands, brand: brands[0] });
+    DB.logActivity(session.userId, session.username, 'เพิ่มยี่ห้อลูกค้า', { customerName: c.name, brand: val });
+  }
+  render();
+}
+function removeBrand(custId, brand, e) {
+  e.stopPropagation();
+  const c = DB.getCustomerById(custId);
+  const brands = getBrands(c).filter(b => b !== brand);
+  DB.updateCustomer(custId, { brands, brand: brands[0] || '' });
+  DB.logActivity(session.userId, session.username, 'ลบยี่ห้อลูกค้า', { customerName: c.name, brand });
+  render();
+}
+
+// ── Modal brand management ────────────────────────────────────────────────────
+function renderModalBrands() {
+  document.getElementById('modalBrandTags').innerHTML = modalBrands.length === 0
+    ? '<span class="text-muted small">ยังไม่มียี่ห้อ</span>'
+    : modalBrands.map(b => `
+        <span class="brand-tag">
+          ${b}
+          <button class="rm" onclick="removeModalBrand('${b.replace(/'/g,"\\'")}')">×</button>
+        </span>`).join('');
+}
+function addModalBrand() {
+  const inp = document.getElementById('custBrandInput');
+  const val = inp.value.trim();
+  if (!val || modalBrands.includes(val)) { inp.value = ''; return; }
+  modalBrands.push(val);
+  inp.value = '';
+  renderModalBrands();
+}
+function removeModalBrand(brand) {
+  modalBrands = modalBrands.filter(b => b !== brand);
+  renderModalBrands();
+}
+
+// ── Payment Terms helpers ─────────────────────────────────────────────────────
+function onPayDayTypeChange() {
+  const t = document.getElementById('custPayDayType').value;
+  document.getElementById('custPayDayNum').classList.toggle('d-none', t !== 'date');
+  document.getElementById('custPayDayWeekday').classList.toggle('d-none', t !== 'weekday');
+}
+function payTermsText(pt) {
+  if (!pt) return '';
+  const parts = [];
+  if (pt.payDayType === 'date'    && pt.payDayNum)     parts.push(`ทุกวันที่ ${pt.payDayNum}`);
+  if (pt.payDayType === 'weekday' && pt.payDayWeekday) parts.push(`ทุกวัน${pt.payDayWeekday}`);
+  if (pt.maxBills) parts.push(`≤${pt.maxBills} บิล`);
+  if (pt.maxDays)  parts.push(`≤${pt.maxDays} วัน`);
+  return parts.join(' · ');
+}
+function getPayTermsViolations(c, invoices, uniqNums) {
+  const pt = c.payTerms;
+  if (!pt || (!pt.maxBills && !pt.maxDays)) return [];
+  const unpaidNums = uniqNums.filter(num => {
+    const inv = invoices.find(i => i.invoiceNumber === num);
+    return inv && DB.getInvoicePaidAmount(num) < (parseFloat(inv.totalAmount) || 0);
+  });
+  const result = [];
+  if (pt.maxBills && unpaidNums.length > pt.maxBills)
+    result.push(`ค้างชำระ ${unpaidNums.length} บิล (เกินกำหนด ${pt.maxBills} บิล)`);
+  if (pt.maxDays && unpaidNums.length > 0) {
+    const now = Date.now();
+    const oldestTs = Math.min(...unpaidNums.map(num => {
+      const inv = invoices.find(i => i.invoiceNumber === num);
+      return inv ? new Date(inv.createdAt).getTime() : now;
+    }));
+    const days = Math.floor((now - oldestTs) / 86400000);
+    if (days > pt.maxDays) result.push(`ค้างนานสุด ${days} วัน (เกินกำหนด ${pt.maxDays} วัน)`);
+  }
+  return result;
+}
+
+// ── CRUD ──────────────────────────────────────────────────────────────────────
+function openModal(id) {
+  document.getElementById('custId').value = id || '';
+  document.getElementById('modalTitle').textContent = id ? 'แก้ไขข้อมูลลูกค้า' : 'เพิ่มลูกค้าใหม่';
+  document.getElementById('modalAlert').innerHTML = '';
+  document.getElementById('custBrandInput').value = '';
+  if (id) {
+    const c = DB.getCustomerById(id);
+    document.getElementById('custName').value    = c.name||'';
+    document.getElementById('custAddress').value = c.address||'';
+    document.getElementById('custPhone').value   = c.phone||'';
+    document.getElementById('custTaxId').value   = c.taxId||'';
+    document.getElementById('custMapLink').value  = c.mapLink||'';
+    document.getElementById('custDistance').value = c.distance||'';
+    modalBrands = getBrands(c).slice();
+    const pt = c.payTerms || {};
+    document.getElementById('custPayDayType').value    = pt.payDayType || '';
+    document.getElementById('custPayDayNum').value     = pt.payDayNum  || '';
+    document.getElementById('custPayDayWeekday').value = pt.payDayWeekday || 'จันทร์';
+    document.getElementById('custMaxBills').value      = pt.maxBills || '';
+    document.getElementById('custMaxDays').value       = pt.maxDays  || '';
+    onPayDayTypeChange();
+  } else {
+    ['custName','custAddress','custPhone','custTaxId','custMapLink','custDistance'].forEach(f => document.getElementById(f).value = '');
+    modalBrands = [];
+    document.getElementById('custPayDayType').value = '';
+    document.getElementById('custPayDayNum').value  = '';
+    document.getElementById('custPayDayWeekday').value = 'จันทร์';
+    document.getElementById('custMaxBills').value   = '';
+    document.getElementById('custMaxDays').value    = '';
+    onPayDayTypeChange();
+  }
+  renderModalBrands();
+  custModal.show();
+}
+
+function saveCustomer() {
+  const id   = document.getElementById('custId').value;
+  const name = document.getElementById('custName').value.trim();
+  if (!name) { Utils.showAlert('กรุณากรอกชื่อลูกค้า', 'warning', 'modalAlert'); return; }
+  const payDayType = document.getElementById('custPayDayType').value;
+  const payTerms = {
+    payDayType,
+    payDayNum:     payDayType === 'date'    ? (parseInt(document.getElementById('custPayDayNum').value)||0)    : 0,
+    payDayWeekday: payDayType === 'weekday' ? document.getElementById('custPayDayWeekday').value : '',
+    maxBills: parseInt(document.getElementById('custMaxBills').value)||0,
+    maxDays:  parseInt(document.getElementById('custMaxDays').value)||0,
+  };
+  const data = {
+    name,
+    brands:   modalBrands.slice(),
+    brand:    modalBrands[0] || '',
+    address:  document.getElementById('custAddress').value.trim(),
+    phone:    document.getElementById('custPhone').value.trim(),
+    taxId:    document.getElementById('custTaxId').value.trim(),
+    mapLink:  document.getElementById('custMapLink').value.trim(),
+    distance: document.getElementById('custDistance').value ? parseFloat(document.getElementById('custDistance').value) : '',
+    payTerms,
+  };
+  if (id) {
+    DB.updateCustomer(id, data);
+    DB.logActivity(session.userId, session.username, 'แก้ไขลูกค้า', { customerName: name });
+    Utils.showAlert('บันทึกสำเร็จ');
+  } else {
+    DB.addCustomer({ id: Utils.uuid(), ...data, notes: [], createdAt: new Date().toISOString() });
+    DB.logActivity(session.userId, session.username, 'เพิ่มลูกค้า', { customerName: name });
+    Utils.showAlert('เพิ่มลูกค้าสำเร็จ');
+  }
+  custModal.hide();
+  render();
+}
+
+// ── Delete single ─────────────────────────────────────────────────────────────
+function deleteCustomer(id) {
+  const c = DB.getCustomerById(id);
+  if (!confirm(`ลบลูกค้า "${c.name}" ใช่หรือไม่?`)) return;
+  DB.deleteCustomer(id);
+  _selected.delete(id);
+  DB.logActivity(session.userId, session.username, 'ลบลูกค้า', { customerName: c.name });
+  Utils.showAlert('ลบลูกค้าแล้ว', 'info');
+  render();
+}
+
+// ── Delete selected ───────────────────────────────────────────────────────────
+function confirmDelSelected() {
+  const ids = [..._selected];
+  if (!ids.length) return;
+  const custs = DB.getCustomers();
+  const names = ids.map(id => custs.find(c => c.id === id)?.name || id);
+  document.getElementById('delSelModalCount').textContent = ids.length;
+  document.getElementById('delSelNameList').innerHTML =
+    names.map(n => `<div class="py-1 border-bottom"><i class="bi bi-person me-1 text-muted"></i>${n}</div>`).join('');
+  new bootstrap.Modal(document.getElementById('delSelModal')).show();
+}
+
+function doDelSelected() {
+  const ids = [..._selected];
+  const custs = DB.getCustomers();
+  ids.forEach(id => {
+    const c = custs.find(x => x.id === id);
+    DB.deleteCustomer(id);
+    if (c) DB.logActivity(session.userId, session.username, 'ลบลูกค้า', { customerName: c.name });
+  });
+  _selected.clear();
+  bootstrap.Modal.getInstance(document.getElementById('delSelModal')).hide();
+  Utils.showAlert(`🗑️ ลบลูกค้าที่เลือก <strong>${ids.length} ราย</strong> เรียบร้อยแล้ว`, 'success');
+  render();
+}
+
+// ── Delete all ────────────────────────────────────────────────────────────────
+function confirmClearAll() {
+  const cnt = DB.getCustomers().length;
+  if (cnt === 0) { Utils.showAlert('ไม่มีข้อมูลลูกค้าในระบบ', 'info'); return; }
+  document.getElementById('clearCount').textContent = cnt;
+  document.getElementById('clearConfirmInput').value = '';
+  document.getElementById('doClearBtn').disabled = true;
+  new bootstrap.Modal(document.getElementById('clearAllModal')).show();
+}
+
+function doClearAll() {
+  const cnt = DB.getCustomers().length;
+  DB.saveCustomers([]);
+  _selected.clear();
+  DB.logActivity(session.userId, session.username, 'ลบลูกค้าทั้งหมด', { count: cnt });
+  bootstrap.Modal.getInstance(document.getElementById('clearAllModal')).hide();
+  Utils.showAlert(`🗑️ ลบข้อมูลลูกค้าทั้งหมด <strong>${cnt} ราย</strong> เรียบร้อยแล้ว`, 'success');
+  render();
+}
+
+// ── Notes ─────────────────────────────────────────────────────────────────────
+function openNotes(id) {
+  currentNoteId = id;
+  const c = DB.getCustomerById(id);
+  document.getElementById('noteCustomerName').textContent = c.name;
+  document.getElementById('noteText').value = '';
+  renderNotes(c);
+  noteModal.show();
+}
+function renderNotes(c) {
+  const notes = (c.notes || []).slice().reverse();
+  document.getElementById('noteList').innerHTML = notes.length === 0
+    ? '<p class="text-muted text-center">ยังไม่มีบันทึก</p>'
+    : notes.map(n => `
+      <div class="note-item">
+        <div class="fw-semibold small">${n.text}</div>
+        <div class="text-muted" style="font-size:11px">${Utils.formatDateTimeTH(n.createdAt)} โดย ${n.createdBy}
+          <button class="btn btn-link btn-sm text-danger p-0 ms-2" onclick="deleteNote('${c.id}','${n.id}')"><i class="bi bi-x"></i></button>
+        </div>
+      </div>`).join('');
+}
+function addNote() {
+  const text = document.getElementById('noteText').value.trim();
+  if (!text) return;
+  const c = DB.getCustomerById(currentNoteId);
+  const notes = c.notes || [];
+  notes.push({ id: Utils.uuid(), text, createdAt: new Date().toISOString(), createdBy: session.name });
+  DB.updateCustomer(currentNoteId, { notes });
+  document.getElementById('noteText').value = '';
+  renderNotes(DB.getCustomerById(currentNoteId));
+  render();
+}
+function deleteNote(custId, noteId) {
+  const c = DB.getCustomerById(custId);
+  const notes = (c.notes || []).filter(n => n.id !== noteId);
+  DB.updateCustomer(custId, { notes });
+  renderNotes(DB.getCustomerById(custId));
+  render();
+}
+</script>
+</body>
+</html>

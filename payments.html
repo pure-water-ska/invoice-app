@@ -1,0 +1,1757 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0d6efd">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ใบกำกับ">
+<title>ชำระเงิน</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css">
+<style>
+.img-thumb     { max-height:140px; border-radius:6px; border:1px solid #dee2e6; cursor:pointer; }
+.pay-hist-img  { max-height:60px;  border-radius:4px; border:1px solid #dee2e6; cursor:pointer; }
+.img-fullscreen{ position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:zoom-out; }
+.img-fullscreen img { max-width:95vw;max-height:95vh;border-radius:8px; }
+
+/* ── Image timeline ── */
+.img-timeline { border-left: 3px solid #0d6efd; padding-left: 12px; }
+.img-timeline-item { position: relative; margin-bottom: 14px; }
+.img-timeline-item::before {
+  content:''; position:absolute; left:-18px; top:5px;
+  width:10px; height:10px; border-radius:50%;
+  background:#0d6efd; border:2px solid #fff; box-shadow:0 0 0 2px #0d6efd;
+}
+.img-timeline-item:last-child { margin-bottom: 0; }
+.img-tl-img { max-height:72px; border-radius:4px; border:1px solid #dee2e6; cursor:pointer; }
+[data-bs-theme="dark"] .img-timeline-item::before { border-color: var(--bs-card-bg); }
+
+/* ── Payment summary print ── */
+#payPrintArea { display: none; }
+@media print {
+  body > *:not(#payPrintArea) { display: none !important; }
+  #payPrintArea { display: block !important; margin: 0; padding: 0; }
+  @page { size: A5 portrait; margin: 0; }
+}
+</style>
+</head>
+<body>
+<div id="navContainer"></div>
+<div class="page-wrap">
+  <div class="d-flex justify-content-between align-items-center mb-3 page-header">
+    <h5 class="mb-0 fw-bold"><i class="bi bi-cash-coin me-2 text-primary"></i>ติดตามการชำระเงิน</h5>
+  </div>
+  <div id="alertBox" class="mb-2"></div>
+
+  <!-- Filters -->
+  <div class="card mb-3 filter-bar">
+    <div class="card-body py-2">
+      <div class="row g-2">
+        <div class="col-md-3">
+          <div class="input-group input-group-sm">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input type="text" id="searchInv" class="form-control" placeholder="เลขที่ใบกำกับ...">
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="input-group input-group-sm">
+            <span class="input-group-text"><i class="bi bi-person"></i></span>
+            <input type="text" id="filterCustomer" class="form-control" placeholder="ค้นหาชื่อลูกค้า..."
+                   list="custNameDatalist" autocomplete="off">
+          </div>
+          <datalist id="custNameDatalist"></datalist>
+        </div>
+        <div class="col-md-2">
+          <select id="filterStatus" class="form-select form-select-sm">
+            <option value="">— สถานะทั้งหมด —</option>
+            <option value="pending">ค้างชำระ</option>
+            <option value="partial">บางส่วน</option>
+            <option value="paid">ชำระแล้ว</option>
+          </select>
+        </div>
+        <div class="col-6 col-md-2">
+          <input type="text" id="filterFrom" class="form-control form-control-sm" placeholder="DD/MM/YYYY">
+        </div>
+        <div class="col-6 col-md-2">
+          <input type="text" id="filterTo" class="form-control form-control-sm" placeholder="DD/MM/YYYY">
+        </div>
+        <div class="col-12 col-md-auto">
+          <button class="btn btn-outline-secondary btn-sm w-100" onclick="clearFilters()">
+            <i class="bi bi-x-lg me-1"></i>ล้าง
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Invoice list -->
+  <div class="card mb-3">
+    <div class="card-header bg-white fw-semibold py-2">รายการใบกำกับ</div>
+    <div class="table-responsive">
+      <table class="table table-hover mb-0 table-sm">
+        <thead><tr>
+          <th class="sort-th" onclick="setSort('num')">เลขที่ <span id="si_num"></span></th>
+          <th class="sort-th" onclick="setSort('date')">วันที่ <span id="si_date">▼</span></th>
+          <th class="sort-th" onclick="setSort('cust')">ลูกค้า <span id="si_cust"></span></th>
+          <th class="sort-th text-end d-none d-md-table-cell" onclick="setSort('total')">ยอดรวม <span id="si_total"></span></th>
+          <th class="sort-th text-end d-none d-md-table-cell" onclick="setSort('paid')">ชำระแล้ว <span id="si_paid"></span></th>
+          <th class="sort-th text-end" onclick="setSort('rem')">ค้าง <span id="si_rem"></span></th>
+          <th class="sort-th text-center" onclick="setSort('status')">สถานะ <span id="si_status"></span></th>
+          <th class="text-center">จัดการ</th>
+        </tr></thead>
+        <tbody id="paymentTable"><tr><td colspan="6" class="text-center text-muted py-3">ยังไม่มีข้อมูล</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- lightbox -->
+<div id="lightbox" class="img-fullscreen" style="display:none" onclick="this.style.display='none'">
+  <img id="lightboxImg" src="">
+</div>
+
+<!-- Payment Modal -->
+<div class="modal fade" id="payModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">บันทึกชำระเงิน — <span id="payInvNum"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="modalAlert"></div>
+        <input type="hidden" id="payInvNumHidden">
+        <input type="hidden" id="payCustIdHidden">
+
+        <!-- Invoice summary -->
+        <div class="alert alert-info py-2 mb-3" id="invSummary"></div>
+
+        <!-- Existing payments -->
+        <div id="existingPayments" class="mb-3"></div>
+
+        <hr>
+        <h6 class="fw-semibold mb-3">บันทึกการชำระใหม่</h6>
+
+        <!-- Pending payments staging list -->
+        <div id="pendingPaymentsList" class="mb-3" style="display:none">
+          <div class="d-flex align-items-center mb-2">
+            <h6 class="fw-semibold text-primary mb-0 me-2">
+              <i class="bi bi-list-check me-1"></i>รายการที่รอบันทึก
+            </h6>
+            <span id="pendingCount" class="badge bg-primary">0</span>
+          </div>
+          <div id="pendingPaymentsContainer"></div>
+        </div>
+
+        <!-- Date warning -->
+        <div id="payDateAlert" class="mb-2" style="display:none">
+          <div class="alert alert-warning py-2 mb-0">
+            <i class="bi bi-exclamation-triangle-fill me-1"></i>
+            <span id="payDateAlertMsg"></span>
+          </div>
+        </div>
+
+        <div class="row g-3">
+          <div class="col-12 col-md-6">
+            <label class="form-label fw-semibold">วันที่ชำระเงิน <span class="text-danger">*</span></label>
+            <input type="text" id="payDate" class="form-control" placeholder="DD/MM/YYYY">
+          </div>
+          <div class="col-12 col-md-6"></div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label fw-semibold">วิธีชำระเงิน <span class="text-danger">*</span></label>
+            <select id="payMethod" class="form-select" onchange="onMethodChange()"></select>
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label fw-semibold">จำนวนเงิน (บาท) <span class="text-danger">*</span></label>
+            <div class="input-group">
+              <span class="input-group-text">฿</span>
+              <input type="number" id="payAmount" class="form-control" min="0" step="0.01" placeholder="0.00">
+            </div>
+          </div>
+
+          <!-- ผู้รับเงิน (เงินสดเท่านั้น — ผู้ล็อกอินอยู่เท่านั้น) -->
+          <div class="col-12 col-md-6 pay-cash" style="display:none">
+            <label class="form-label fw-semibold">ผู้รับเงิน</label>
+            <input type="text" id="payCashCollector" class="form-control" readonly>
+          </div>
+
+          <!-- โอน -->
+          <div class="col-12 col-md-6 pay-transfer" style="display:none">
+            <label class="form-label fw-semibold">บัญชีผู้รับโอน</label>
+            <div class="d-flex gap-1">
+              <select id="payTransferAccountSelect" class="form-select" onchange="onTransferAccountChange()">
+                <option value="">— เลือกบัญชี —</option>
+              </select>
+              <button class="btn btn-outline-secondary btn-sm px-2" onclick="openTransferAccountManager()" title="จัดการบัญชีผู้รับโอน">
+                <i class="bi bi-list-ul"></i>
+              </button>
+            </div>
+          </div>
+          <div class="col-12 col-md-6 pay-transfer" style="display:none">
+            <label class="form-label fw-semibold">ธนาคารต้นทาง</label>
+            <input type="text" id="paySourceBank" class="form-control" list="bankDatalist" placeholder="พิมพ์ชื่อธนาคาร..." autocomplete="off">
+          </div>
+          <!-- payDestBank / payAccountName hidden — auto-filled by account select -->
+          <input type="hidden" id="payDestBank">
+          <input type="hidden" id="payAccountName">
+          <div class="col-6 col-md-3 pay-transfer" style="display:none">
+            <label class="form-label fw-semibold">วันที่โอน (พ.ศ.)</label>
+            <input type="text" id="payTransferDateBE" class="form-control" placeholder="DD/MM/YYYY" autocomplete="off">
+          </div>
+          <div class="col-6 col-md-3 pay-transfer" style="display:none">
+            <label class="form-label fw-semibold">เวลาที่โอน</label>
+            <input type="time" id="payTransferTime" class="form-control">
+          </div>
+          <div class="col-12 pay-transfer" style="display:none">
+            <label class="form-label fw-semibold"><i class="bi bi-image me-1 text-primary"></i>รูปสลิปโอนเงิน</label>
+            <input type="file" id="payTransferImage" class="form-control" accept="image/*" onchange="loadPayImage(this,'transferImagePreview')">
+            <div id="transferImagePreview" class="mt-2 d-flex gap-2 flex-wrap"></div>
+          </div>
+
+          <!-- เช็ค -->
+          <div class="col-12 col-md-6 pay-cheque" style="display:none">
+            <label class="form-label fw-semibold">บัญชีผู้รับเงิน (เช็ค)</label>
+            <div class="d-flex gap-1">
+              <select id="payChequeAccountSelect" class="form-select" onchange="onChequeAccountChange()">
+                <option value="">— เลือกบัญชี —</option>
+              </select>
+              <button class="btn btn-outline-secondary btn-sm px-2" onclick="openTransferAccountManager()" title="จัดการบัญชีผู้รับเงิน">
+                <i class="bi bi-list-ul"></i>
+              </button>
+            </div>
+          </div>
+          <div class="col-12 col-md-6 pay-cheque" style="display:none">
+            <label class="form-label fw-semibold">เลขที่เช็ค</label>
+            <input type="text" id="payChequeNo" class="form-control" placeholder="หมายเลขเช็ค">
+          </div>
+          <div class="col-12 col-md-6 pay-cheque" style="display:none">
+            <label class="form-label fw-semibold">ธนาคารต้นทาง (ออกเช็ค)</label>
+            <input type="text" id="payChequeBank" class="form-control" list="bankDatalist" placeholder="พิมพ์ชื่อธนาคาร..." autocomplete="off">
+          </div>
+          <div class="col-12 col-md-6 pay-cheque" style="display:none">
+            <label class="form-label fw-semibold">วันที่บนเช็ค</label>
+            <input type="text" id="payChequeDate" class="form-control" placeholder="DD/MM/YYYY">
+          </div>
+          <div class="col-12 pay-cheque" style="display:none">
+            <label class="form-label fw-semibold"><i class="bi bi-image me-1 text-primary"></i>รูปเช็ค</label>
+            <input type="file" id="payChequeImage" class="form-control" accept="image/*" onchange="loadPayImage(this,'chequeImagePreview')">
+            <div id="chequeImagePreview" class="mt-2 d-flex gap-2 flex-wrap"></div>
+          </div>
+
+          <!-- หมายเหตุ -->
+          <div class="col-12">
+            <label class="form-label fw-semibold">หมายเหตุ</label>
+            <input type="text" id="payNote" class="form-control" placeholder="หมายเหตุเพิ่มเติม">
+          </div>
+        </div>
+
+        <hr>
+        <h6 class="fw-semibold mb-2"><i class="bi bi-file-earmark-image me-1 text-success"></i>ใบกำกับที่ลูกค้าเซ็นรับแล้ว</h6>
+        <p class="text-muted small mb-2">บันทึกภาพใบกำกับสินค้าที่ลูกค้าเซนต์แล้ว</p>
+        <input type="file" id="paySignedImage" class="form-control mb-2" accept="image/*,.pdf"
+               onchange="loadPayImage(this,'signedImagePreview')">
+        <div id="signedImagePreview" class="d-flex gap-2 flex-wrap"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+        <button class="btn btn-outline-primary" onclick="addPaymentEntry()">
+          <i class="bi bi-plus-circle me-1"></i>เพิ่มรายการ
+        </button>
+        <button class="btn btn-success" onclick="savePayment()">
+          <i class="bi bi-save me-1"></i>บันทึกทั้งหมด
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Date Confirm Modal ──────────────────────────────────────────────────── -->
+<div class="modal fade" id="dateConfirmModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog">
+    <div class="modal-content border-warning">
+      <div class="modal-header bg-warning py-2">
+        <h6 class="modal-title fw-bold"><i class="bi bi-calendar-x me-1"></i>ยืนยันวันที่ชำระเงิน</h6>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-warning">
+          <i class="bi bi-exclamation-triangle-fill me-2 fs-5"></i>
+          <span id="dateConfirmMsg"></span>
+        </div>
+        <p class="mb-0">ต้องการดำเนินการต่อหรือไม่?</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก — กลับแก้ไขวันที่</button>
+        <button class="btn btn-warning fw-semibold" onclick="confirmSavePayment()">
+          <i class="bi bi-check-lg me-1"></i>ยืนยัน บันทึกต่อไป
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Image Update Modal ─────────────────────────────────────────────────── -->
+<div class="modal fade" id="imgUpdateModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title fw-bold"><i class="bi bi-image me-1 text-primary"></i>เพิ่ม / เปลี่ยนรูป</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="imgUpdatePayId">
+        <input type="hidden" id="imgUpdateInvNum">
+        <div id="imgUpdateAlert"></div>
+
+        <div class="mb-3">
+          <label class="form-label fw-semibold">ประเภทรูป <span class="text-danger">*</span></label>
+          <select id="imgUpdateType" class="form-select">
+            <option value="transfer">สลิปโอนเงิน</option>
+            <option value="cheque">รูปเช็ค</option>
+            <option value="signed">ใบกำกับที่เซ็นแล้ว</option>
+          </select>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label fw-semibold">เลือกรูปใหม่ <span class="text-danger">*</span></label>
+          <input type="file" id="imgUpdateFile" class="form-control" accept="image/*"
+                 onchange="previewImgUpdate(this)">
+          <div id="imgUpdatePreview" class="mt-2"></div>
+        </div>
+
+        <div class="mb-2">
+          <label class="form-label fw-semibold">เหตุผล / บันทึกการเปลี่ยนแปลง <span class="text-danger">*</span></label>
+          <textarea id="imgUpdateReason" class="form-control" rows="2"
+                    placeholder="เช่น รูปเดิมไม่ชัด, แนบรูปเพิ่มเติม, แก้ไขสลิปผิดฉบับ..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+        <button class="btn btn-primary" onclick="confirmImageUpdate()">
+          <i class="bi bi-save me-1"></i>บันทึกรูป
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- Transfer Account Manager Modal -->
+<div class="modal fade" id="transferAccountModal" tabindex="-1" data-bs-backdrop="false">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title fw-bold"><i class="bi bi-bank me-1"></i>บัญชีผู้รับโอน</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-3">
+        <ul class="list-group list-group-flush mb-3" id="transferAccountList"></ul>
+
+        <!-- Edit account form (hidden until pencil clicked) -->
+        <div id="editAcctWrap" style="display:none" class="border border-primary rounded p-2 mb-3 bg-body-secondary">
+          <div class="fw-semibold small mb-2 text-primary"><i class="bi bi-pencil me-1"></i>แก้ไขบัญชี</div>
+          <input type="hidden" id="editAcctIdx">
+          <div class="row g-2">
+            <div class="col-12">
+              <input type="text" id="editAcctName" class="form-control form-control-sm" placeholder="ชื่อบัญชี">
+            </div>
+            <div class="col-6">
+              <input type="text" id="editAcctBank" class="form-control form-control-sm" list="bankDatalist" placeholder="ธนาคาร" autocomplete="off">
+            </div>
+            <div class="col-6">
+              <input type="text" id="editAcctNo" class="form-control form-control-sm" placeholder="เลขบัญชี">
+            </div>
+            <div class="col-6">
+              <button class="btn btn-secondary btn-sm w-100" onclick="cancelEditAccount()">ยกเลิก</button>
+            </div>
+            <div class="col-6">
+              <button class="btn btn-primary btn-sm w-100" onclick="saveEditTransferAccount()">
+                <i class="bi bi-save me-1"></i>บันทึก
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <hr class="my-2">
+        <div class="fw-semibold small mb-2 text-muted">เพิ่มบัญชีใหม่</div>
+        <div class="row g-2">
+          <div class="col-12">
+            <input type="text" id="newAcctName" class="form-control form-control-sm" placeholder="ชื่อบัญชี (เช่น บริษัท ABC)">
+          </div>
+          <div class="col-6">
+            <input type="text" id="newAcctBank" class="form-control form-control-sm" list="bankDatalist" placeholder="ธนาคาร" autocomplete="off">
+          </div>
+          <div class="col-6">
+            <input type="text" id="newAcctNo" class="form-control form-control-sm" placeholder="เลขบัญชี">
+          </div>
+          <div class="col-12">
+            <button class="btn btn-primary btn-sm w-100" onclick="confirmAddTransferAccount()">
+              <i class="bi bi-plus-lg me-1"></i>เพิ่มบัญชี
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Cancel Payment Modal -->
+<div class="modal fade" id="cancelPayModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog">
+    <div class="modal-content border-danger">
+      <div class="modal-header bg-danger text-white py-2">
+        <h6 class="modal-title fw-bold"><i class="bi bi-x-circle me-1"></i>ยืนยันยกเลิกรายการชำระเงิน</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="cancelPaySummary" class="alert alert-warning py-2 mb-3"></div>
+        <label class="form-label fw-semibold">เหตุผล / บันทึกเพิ่มเติม <span class="text-danger">*</span></label>
+        <textarea id="cancelPayNote" class="form-control" rows="3" placeholder="กรอกเหตุผลในการยกเลิก..."></textarea>
+        <input type="hidden" id="cancelPayId">
+        <input type="hidden" id="cancelPayInvNum">
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">ปิด</button>
+        <button class="btn btn-danger" onclick="confirmCancelPayment()">
+          <i class="bi bi-x-circle me-1"></i>ยืนยันยกเลิก
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Overpay modal -->
+<div class="modal fade" id="overpayModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog">
+    <div class="modal-content border-warning">
+      <div class="modal-header bg-warning">
+        <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-1"></i>แจ้งเตือนส่วนต่าง</h5>
+      </div>
+      <div class="modal-body" id="overpayBody"></div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeOverpay(false)">ไม่ต้องสร้างใบใหม่</button>
+        <button class="btn btn-warning" onclick="closeOverpay(true)">สร้างใบกำกับใหม่</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Outstanding Preview Modal -->
+<div class="modal fade" id="outstandingModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title fw-bold"><i class="bi bi-list-check me-2 text-primary"></i>รายการค้างชำระ — <span id="outstandingCustName"></span></h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-2">
+        <div id="outstandingCapture" class="p-3"></div>
+      </div>
+      <div class="modal-footer py-2 gap-2">
+        <button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">ปิด</button>
+        <button class="btn btn-outline-primary btn-sm" onclick="copyOutstandingImage()">
+          <i class="bi bi-clipboard-image me-1"></i>คัดลอกรูป
+        </button>
+        <button class="btn btn-primary btn-sm" onclick="saveOutstandingImage()">
+          <i class="bi bi-download me-1"></i>บันทึกรูป
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<datalist id="bankDatalist"></datalist>
+
+<!-- A5 Payment Summary Print Area -->
+<div id="payPrintArea"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
+<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script><script src="bedate.js"></script>
+<script>
+const session = Auth.require();
+DB.init();
+Nav.render('payments');
+
+let payModal, overpayModal, transferAccountModal, cancelPayModal, dateConfirmModal, imgUpdateModal;
+let _sortCol = 'date', _sortDir = -1;
+
+function clearFilters() {
+  ['searchInv','filterCustomer','filterStatus'].forEach(id => document.getElementById(id).value = '');
+  ['filterFrom','filterTo'].forEach(id => {
+    const el = document.getElementById(id);
+    el.value = '';
+    if (el._flatpickr) el._flatpickr.clear();
+  });
+  render();
+}
+
+function setSort(col) {
+  if (_sortCol === col) _sortDir = -_sortDir; else { _sortCol = col; _sortDir = -1; }
+  render();
+}
+let pendingOverpayData = null;
+let payImages = { transfer: '', cheque: '', signed: '' };
+let _pendingPaymentData = null;   // holds data (array) while waiting for date confirmation
+let _pendingPayments    = [];     // staging list for multi-payment entry
+let _imgUpdateB64 = '';           // holds resized image for imgUpdateModal
+
+// ── Drive image helpers ───────────────────────────────────────────────────────
+function _isDrv(s) { return typeof s === 'string' && s.startsWith('drv|'); }
+
+function _b64ToBlob(b64) {
+  const [header, data] = b64.split(',');
+  const mime = (header.match(/:(.*?);/) || [])[1] || 'image/jpeg';
+  const bytes = atob(data);
+  const arr = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
+
+async function _drvUpload(b64, filename) {
+  if (!b64 || !window.DriveStore?.ready) return b64;
+  try {
+    const blob = _b64ToBlob(b64);
+    const meta = await DriveStore.upload(blob, filename, {});
+    return `drv|${meta.driveId}|${meta.uploadedAt}`;
+  } catch (e) {
+    console.warn('[_drvUpload]', e.message);
+    return b64;
+  }
+}
+
+function _imgTagHtml(field, cls, title) {
+  if (!field) return '';
+  const attr = title ? ` title="${title}"` : '';
+  if (_isDrv(field)) {
+    return `<img src="" data-drv="${field}" class="${cls}"${attr} onclick="openLightboxSrc('${field}')">`;
+  }
+  return `<img src="${field}" class="${cls}"${attr} onclick="openLightboxSrc('${field}')">`;
+}
+
+function _loadDrvImages() {
+  if (!window.DriveStore?.ready) return;
+  document.querySelectorAll('[data-drv]').forEach(async img => {
+    const field = img.dataset.drv;
+    if (!field || img.src) return;
+    const [, driveId, uploadedAt] = field.split('|');
+    try { img.src = await DriveStore.getFileURL(driveId, uploadedAt); } catch {}
+  });
+}
+
+async function _uploadPaymentImages(p) {
+  const ts = Date.now();
+  const inv = p.invoiceNumber || 'x';
+  if (p.transferImage) p.transferImage = await _drvUpload(p.transferImage, `transfer_${inv}_${ts}.jpg`);
+  if (p.chequeImage)   p.chequeImage   = await _drvUpload(p.chequeImage,   `cheque_${inv}_${ts}.jpg`);
+  if (p.signedImage)   p.signedImage   = await _drvUpload(p.signedImage,   `signed_${inv}_${ts}.jpg`);
+  if (Array.isArray(p.imageHistory)) {
+    for (const h of p.imageHistory) {
+      if (h.image) h.image = await _drvUpload(h.image, `hist_${h.type}_${inv}_${ts}.jpg`);
+    }
+  }
+  return p;
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  payModal              = new bootstrap.Modal(document.getElementById('payModal'));
+  overpayModal          = new bootstrap.Modal(document.getElementById('overpayModal'));
+  // backdrop:false lets this sub-modal open on top of payModal without conflict
+  transferAccountModal  = new bootstrap.Modal(document.getElementById('transferAccountModal'), { backdrop: false });
+  cancelPayModal        = new bootstrap.Modal(document.getElementById('cancelPayModal'));
+  dateConfirmModal      = new bootstrap.Modal(document.getElementById('dateConfirmModal'));
+  imgUpdateModal        = new bootstrap.Modal(document.getElementById('imgUpdateModal'));
+
+  document.getElementById('bankDatalist').innerHTML = Utils.bankDatalistOptions();
+
+  DB.getCustomers().sort((a,b) => a.name.localeCompare(b.name,'th')).forEach(c => {
+    document.getElementById('custNameDatalist').innerHTML +=
+      `<option value="${c.name}">`;
+  });
+
+  const params = new URLSearchParams(location.search);
+  if (params.get('inv'))  document.getElementById('searchInv').value = params.get('inv');
+  if (params.get('cust')) {
+    const custId = params.get('cust');
+    const cust = DB.getCustomerById(custId);
+    if (cust) document.getElementById('filterCustomer').value = cust.name;
+  }
+
+  document.getElementById('filterStatus').addEventListener('input', render);
+  ['searchInv','filterCustomer'].forEach(id =>
+    document.getElementById(id).addEventListener('input', Utils.debounce(render, 200)));
+  BEDate.byId('filterFrom', { onChange: render });
+  BEDate.byId('filterTo',   { onChange: render });
+  _fpPayDate      = BEDate.byId('payDate',          { onChange: checkPayDate });
+  _fpCheqDate     = BEDate.byId('payChequeDate');
+  _fpTransferDate = BEDate.byId('payTransferDateBE');
+  render();
+});
+
+let _fpPayDate, _fpCheqDate, _fpTransferDate;
+
+// ── Render invoice list ───────────────────────────────────────────────────────
+function render() {
+  const q    = document.getElementById('searchInv').value.toLowerCase();
+  const fc   = document.getElementById('filterCustomer').value.toLowerCase().trim();
+  const fs   = document.getElementById('filterStatus').value;
+  const from = Utils.parseBEToISO(document.getElementById('filterFrom').value);
+  const to   = Utils.parseBEToISO(document.getElementById('filterTo').value);
+
+  // Build lookup maps once — avoids O(n²) per-row DB reads
+  const custMap = Object.fromEntries(DB.getCustomers().map(c => [c.id, c]));
+  const paidMap = {};
+  for (const p of DB.getPayments()) {
+    if (!p.cancelled) paidMap[p.invoiceNumber] = (paidMap[p.invoiceNumber] || 0) + (parseFloat(p.amount) || 0);
+  }
+
+  const seen = new Map();
+  for (const inv of DB.getInvoices()) {
+    if (!seen.has(inv.invoiceNumber)) seen.set(inv.invoiceNumber, inv);
+  }
+
+  let list = [...seen.values()].filter(inv => {
+    const cust     = custMap[inv.customerId];
+    const custName = (cust ? cust.name : '').toLowerCase();
+    const paid     = paidMap[inv.invoiceNumber] || 0;
+    const total    = parseFloat(inv.totalAmount) || 0;
+    const status   = paid <= 0 ? 'pending' : paid >= total ? 'paid' : 'partial';
+    const d = new Date(inv.createdAt);
+    if (q  && !inv.invoiceNumber.toLowerCase().includes(q) && !custName.includes(q)) return false;
+    if (fc && !custName.includes(fc)) return false;
+    if (fs && status !== fs) return false;
+    if (from && d < new Date(from)) return false;
+    if (to   && d > new Date(to+'T23:59:59')) return false;
+    return true;
+  });
+  // Update sort indicators
+  ['num','date','cust','total','paid','rem','status'].forEach(k => {
+    const el = document.getElementById('si_' + k);
+    if (el) el.textContent = k === _sortCol ? (_sortDir === 1 ? '▲' : '▼') : '';
+  });
+
+  list.sort((a, b) => {
+    const ca  = custMap[a.customerId];
+    const cb  = custMap[b.customerId];
+    const pa  = paidMap[a.invoiceNumber] || 0;
+    const pb  = paidMap[b.invoiceNumber] || 0;
+    const ta  = parseFloat(a.totalAmount) || 0;
+    const tb  = parseFloat(b.totalAmount) || 0;
+    const stA = pa <= 0 ? 'pending' : pa >= ta ? 'paid' : 'partial';
+    const stB = pb <= 0 ? 'pending' : pb >= tb ? 'paid' : 'partial';
+    let cmp = 0;
+    switch (_sortCol) {
+      case 'num':    cmp = a.invoiceNumber.localeCompare(b.invoiceNumber, 'th'); break;
+      case 'date':   cmp = new Date(a.createdAt) - new Date(b.createdAt); break;
+      case 'cust':   cmp = (ca?.name||'').localeCompare(cb?.name||'', 'th'); break;
+      case 'total':  cmp = ta - tb; break;
+      case 'paid':   cmp = pa - pb; break;
+      case 'rem':    cmp = (ta - pa) - (tb - pb); break;
+      case 'status': cmp = stA.localeCompare(stB); break;
+      default:       cmp = new Date(a.createdAt) - new Date(b.createdAt);
+    }
+    return cmp * _sortDir;
+  });
+
+  const tbody = document.getElementById('paymentTable');
+  if (!list.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">ไม่พบรายการ</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = list.map(inv => {
+    const cust  = custMap[inv.customerId];
+    const total = parseFloat(inv.totalAmount) || 0;
+    const paid  = paidMap[inv.invoiceNumber] || 0;
+    const rem   = total - paid;
+    const status    = paid <= 0 ? 'pending' : paid >= total ? 'paid' : 'partial';
+    const statusLbl = { pending:'ค้างชำระ', partial:'บางส่วน', paid:'ชำระแล้ว' };
+    const statusCls = { pending:'badge-pending', partial:'badge-partial', paid:'badge-paid' };
+    return `<tr>
+      <td class="fw-semibold">${inv.invoiceNumber}</td>
+      <td>${Utils.formatDateTH(inv.createdAt)}</td>
+      <td>${cust ? cust.name : '-'}</td>
+      <td class="text-end d-none d-md-table-cell">฿${Utils.formatNumber(total)}</td>
+      <td class="text-end text-success d-none d-md-table-cell">฿${Utils.formatNumber(paid)}</td>
+      <td class="text-end ${rem>0?'text-danger fw-semibold':'text-muted'}">฿${Utils.formatNumber(rem)}</td>
+      <td class="text-center"><span class="badge ${statusCls[status]}">${statusLbl[status]}</span></td>
+      <td class="text-center">
+        <div class="d-flex gap-1 justify-content-center">
+          <button class="btn btn-sm btn-success"
+                  onclick="openPayModal('${inv.invoiceNumber}','${inv.customerId}')" title="บันทึกชำระเงิน">
+            <i class="bi bi-cash-coin"></i>
+          </button>
+          <button class="btn btn-sm btn-outline-info"
+                  onclick="showOutstandingPreview('${inv.customerId}')" title="รายการค้างชำระทั้งหมดของลูกค้า">
+            <i class="bi bi-list-check"></i>
+          </button>
+          <button class="btn btn-sm btn-outline-secondary"
+                  onclick="printPaymentSummary('${inv.invoiceNumber}')" title="พิมพ์ใบสรุปชำระเงิน">
+            <i class="bi bi-printer"></i>
+          </button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Open modal ────────────────────────────────────────────────────────────────
+function openPayModal(invNum, custId) {
+  document.getElementById('payInvNum').textContent     = invNum;
+  document.getElementById('payInvNumHidden').value     = invNum;
+  document.getElementById('payCustIdHidden').value     = custId;
+  document.getElementById('modalAlert').innerHTML      = '';
+  document.getElementById('payNote').value             = '';
+  (function(){ const n=new Date();
+    if (_fpTransferDate) _fpTransferDate.setDate(n); else document.getElementById('payTransferDateBE').value = Utils.todayBE();
+    document.getElementById('payTransferTime').value = `${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`;
+  })();
+  document.getElementById('payAccountName').value      = '';
+  document.getElementById('paySourceBank').value       = '';
+  document.getElementById('payDestBank').value         = '';
+  document.getElementById('payChequeNo').value          = '';
+  document.getElementById('payChequeBank').value        = '';
+  if (_fpCheqDate) _fpCheqDate.clear(); else document.getElementById('payChequeDate').value = '';
+  document.getElementById('payAmount').value            = '';
+  if (_fpPayDate) _fpPayDate.setDate(new Date()); else document.getElementById('payDate').value = Utils.todayBE();
+  document.getElementById('payDateAlert').style.display = 'none';
+  _pendingPayments = [];
+  document.getElementById('pendingPaymentsList').style.display    = 'none';
+  document.getElementById('pendingPaymentsContainer').innerHTML   = '';
+  payImages = { transfer: '', cheque: '', signed: '' };
+  ['transferImagePreview','chequeImagePreview','signedImagePreview'].forEach(id =>
+    document.getElementById(id).innerHTML = '');
+  ['payTransferImage','payChequeImage','paySignedImage'].forEach(id =>
+    document.getElementById(id).value = '');
+
+  buildMethodSelect();
+  buildCashCollectorSelect();
+  buildTransferAccountSelect();
+  onMethodChange();
+
+  const inv   = DB.getInvoices().find(i => i.invoiceNumber === invNum);
+  const total = parseFloat(inv?.totalAmount) || 0;
+  const paid  = DB.getInvoicePaidAmount(invNum);
+  const rem   = total - paid;
+  document.getElementById('invSummary').innerHTML =
+    `ยอดรวม: <strong>฿${Utils.formatNumber(total)}</strong> &nbsp;|&nbsp;
+     ชำระแล้ว: <strong class="text-success">฿${Utils.formatNumber(paid)}</strong> &nbsp;|&nbsp;
+     ค้างชำระ: <strong class="text-danger">฿${Utils.formatNumber(rem)}</strong>`;
+  if (rem > 0) document.getElementById('payAmount').value = rem.toFixed(2);
+
+  window._currentInvDate = inv?.createdAt ? inv.createdAt.slice(0,10) : '';
+  checkPayDate();
+
+  renderExistingPayments(invNum);
+  payModal.show();
+}
+
+// ── Date check ────────────────────────────────────────────────────────────────
+function checkPayDate() {
+  const payDateISO = Utils.parseBEToISO(document.getElementById('payDate').value);
+  const invDate    = window._currentInvDate || '';
+  const alertEl    = document.getElementById('payDateAlert');
+  const msgEl      = document.getElementById('payDateAlertMsg');
+  if (payDateISO && invDate && payDateISO < invDate) {
+    msgEl.textContent =
+      `วันที่ชำระ (${Utils.formatDateTH(payDateISO)}) อยู่ก่อนวันที่ออกใบกำกับ (${Utils.formatDateTH(invDate)}) — กรุณาตรวจสอบ`;
+    alertEl.style.display = '';
+  } else {
+    alertEl.style.display = 'none';
+  }
+}
+
+// ── Method select ─────────────────────────────────────────────────────────────
+function buildMethodSelect(selected) {
+  const methods = DB.getPayMethods();
+  const sel = document.getElementById('payMethod');
+  sel.innerHTML = '<option value="">— เลือกวิธีชำระ —</option>' +
+    methods.map(m => `<option value="${m}" ${m===selected?'selected':''}>${m}</option>`).join('');
+}
+
+// ── Cash collector — always the currently logged-in user (read-only) ──────────
+function buildCashCollectorSelect() {
+  document.getElementById('payCashCollector').value = session ? session.username : '';
+}
+
+// ── Transfer account manager ───────────────────────────────────────────────────
+function _accountOptions(accounts) {
+  return '<option value="">— เลือกบัญชี —</option>' +
+    accounts.map((a, i) =>
+      `<option value="${i}">${a.name}${a.bank ? ' · ' + a.bank : ''}${a.accountNo ? ' · ' + a.accountNo : ''}</option>`
+    ).join('');
+}
+
+function buildTransferAccountSelect() {
+  const accounts = DB.getTransferAccounts();
+  const opts = _accountOptions(accounts);
+  document.getElementById('payTransferAccountSelect').innerHTML = opts;
+  document.getElementById('payChequeAccountSelect').innerHTML   = opts;
+}
+
+function _fillAccountFields(idx) {
+  const accounts = DB.getTransferAccounts();
+  const i = parseInt(idx);
+  const a = (!isNaN(i) && accounts[i]) ? accounts[i] : null;
+  document.getElementById('payDestBank').value    = a ? (a.bank  || '') : '';
+  document.getElementById('payAccountName').value = a ? (a.name  || '') : '';
+}
+
+function onTransferAccountChange() {
+  _fillAccountFields(document.getElementById('payTransferAccountSelect').value);
+}
+
+function onChequeAccountChange() {
+  _fillAccountFields(document.getElementById('payChequeAccountSelect').value);
+}
+
+function openTransferAccountManager() {
+  renderTransferAccountList();
+  ['newAcctName','newAcctBank','newAcctNo'].forEach(id => document.getElementById(id).value = '');
+  transferAccountModal.show();
+}
+
+function renderTransferAccountList() {
+  const accounts = DB.getTransferAccounts();
+  document.getElementById('transferAccountList').innerHTML = accounts.length
+    ? accounts.map((a, i) => `
+        <li class="list-group-item d-flex justify-content-between align-items-center py-1 px-2">
+          <div>
+            <div class="fw-semibold">${a.name}</div>
+            <div class="text-muted small">${a.bank}${a.accountNo ? ' · ' + a.accountNo : ''}</div>
+          </div>
+          <div class="d-flex gap-1">
+            <button class="btn btn-sm btn-outline-primary py-0 px-1"
+                    onclick="editTransferAccount(${i})"><i class="bi bi-pencil"></i></button>
+            <button class="btn btn-sm btn-outline-danger py-0 px-1"
+                    onclick="deleteTransferAccount(${i})"><i class="bi bi-trash"></i></button>
+          </div>
+        </li>`).join('')
+    : '<li class="list-group-item text-muted small text-center py-2">ยังไม่มีบัญชี</li>';
+}
+
+function editTransferAccount(idx) {
+  const accounts = DB.getTransferAccounts();
+  const a = accounts[idx];
+  if (!a) return;
+  document.getElementById('editAcctIdx').value  = idx;
+  document.getElementById('editAcctName').value = a.name      || '';
+  document.getElementById('editAcctBank').value = a.bank      || '';
+  document.getElementById('editAcctNo').value   = a.accountNo || '';
+  document.getElementById('editAcctWrap').style.display = '';
+}
+
+function cancelEditAccount() {
+  document.getElementById('editAcctWrap').style.display = 'none';
+}
+
+function saveEditTransferAccount() {
+  const idx     = parseInt(document.getElementById('editAcctIdx').value);
+  const newName = document.getElementById('editAcctName').value.trim();
+  const newBank = document.getElementById('editAcctBank').value.trim();
+  const newNo   = document.getElementById('editAcctNo').value.trim();
+  if (!newName || !newBank) { Utils.showAlert('กรุณากรอกชื่อบัญชีและธนาคาร', 'warning', 'alertBox'); return; }
+
+  const accounts = DB.getTransferAccounts();
+  if (isNaN(idx) || !accounts[idx]) return;
+
+  const oldName = accounts[idx].name;
+  const oldBank = accounts[idx].bank;
+
+  // Update the account record
+  accounts[idx] = { name: newName, bank: newBank, accountNo: newNo };
+  DB.saveTransferAccounts(accounts);
+
+  // Backfill all previous payments that matched the old name+bank
+  const payments = DB.getPayments();
+  let changed = 0;
+  payments.forEach(p => {
+    if (p.accountName === oldName && p.destBank === oldBank) {
+      p.accountName = newName;
+      p.destBank    = newBank;
+      changed++;
+    }
+  });
+  if (changed > 0) DB.savePayments(payments);
+
+  cancelEditAccount();
+  renderTransferAccountList();
+  buildTransferAccountSelect();
+  if (changed > 0) Utils.showAlert(`อัพเดตบัญชีและแก้ไขรายการชำระเงินก่อนหน้า ${changed} รายการ`, 'success', 'alertBox');
+  else Utils.showAlert('อัพเดตบัญชีเรียบร้อย', 'success', 'alertBox');
+}
+
+function confirmAddTransferAccount() {
+  const name = document.getElementById('newAcctName').value.trim();
+  const bank = document.getElementById('newAcctBank').value.trim();
+  const no   = document.getElementById('newAcctNo').value.trim();
+  if (!name || !bank) { Utils.showAlert('กรุณากรอกชื่อบัญชีและธนาคาร', 'warning', 'alertBox'); return; }
+  const accounts = DB.getTransferAccounts();
+  accounts.push({ name, bank, accountNo: no });
+  DB.saveTransferAccounts(accounts);
+  ['newAcctName','newAcctBank','newAcctNo'].forEach(id => document.getElementById(id).value = '');
+  renderTransferAccountList();
+  buildTransferAccountSelect();
+}
+
+function deleteTransferAccount(idx) {
+  const accounts = DB.getTransferAccounts();
+  accounts.splice(idx, 1);
+  DB.saveTransferAccounts(accounts);
+  renderTransferAccountList();
+  buildTransferAccountSelect();
+}
+
+// ── Method visibility ─────────────────────────────────────────────────────────
+function onMethodChange() {
+  const method     = document.getElementById('payMethod').value;
+  const isCash     = method === 'เงินสด';
+  const isTransfer = method === 'โอน';
+  const isCheque   = method === 'เช็ค';
+  document.querySelectorAll('.pay-cash').forEach(el     => el.style.display = isCash     ? '' : 'none');
+  document.querySelectorAll('.pay-transfer').forEach(el => el.style.display = isTransfer ? '' : 'none');
+  document.querySelectorAll('.pay-cheque').forEach(el   => el.style.display = isCheque   ? '' : 'none');
+  if (isCash) buildCashCollectorSelect();
+  if (isTransfer || isCheque) buildTransferAccountSelect();
+  // Reset account-linked hidden fields when switching methods
+  if (!isTransfer && !isCheque) {
+    document.getElementById('payDestBank').value    = '';
+    document.getElementById('payAccountName').value = '';
+  }
+}
+
+// ── Image loading ─────────────────────────────────────────────────────────────
+function loadPayImage(input, previewId) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const MAX = 1200;
+      const scale = Math.min(1, MAX / img.width, MAX / img.height);
+      canvas.width  = Math.round(img.width  * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      const b64 = canvas.toDataURL('image/jpeg', 0.55);
+      if (previewId === 'transferImagePreview') payImages.transfer = b64;
+      else if (previewId === 'chequeImagePreview')  payImages.cheque  = b64;
+      else if (previewId === 'signedImagePreview')  payImages.signed  = b64;
+      document.getElementById(previewId).innerHTML =
+        `<img src="${b64}" class="img-thumb" onclick="openLightboxSrc('${previewId}')">
+         <button class="btn btn-sm btn-outline-danger align-self-start"
+                 onclick="clearPayImage('${previewId}','${input.id}')"><i class="bi bi-x-lg"></i></button>`;
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearPayImage(previewId, inputId) {
+  document.getElementById(previewId).innerHTML = '';
+  document.getElementById(inputId).value = '';
+  if (previewId === 'transferImagePreview') payImages.transfer = '';
+  else if (previewId === 'chequeImagePreview')  payImages.cheque  = '';
+  else if (previewId === 'signedImagePreview')  payImages.signed  = '';
+}
+
+function openLightbox(previewId) {
+  const img = document.querySelector(`#${previewId} img`);
+  if (!img) return;
+  document.getElementById('lightboxImg').src = img.src;
+  document.getElementById('lightbox').style.display = 'flex';
+}
+
+function openLightboxSrc(src) {
+  const lbImg = document.getElementById('lightboxImg');
+  const lb    = document.getElementById('lightbox');
+  if (_isDrv(src)) {
+    lbImg.src = '';
+    lb.style.display = 'flex';
+    const [, driveId, uploadedAt] = src.split('|');
+    DriveStore.getFileURL(driveId, uploadedAt)
+      .then(url => { lbImg.src = url; })
+      .catch(() => {});
+  } else {
+    const el = document.getElementById(src);
+    lbImg.src = el ? (el.querySelector('img')?.src || '') : src;
+    lb.style.display = 'flex';
+  }
+}
+
+// ── Existing payments render ──────────────────────────────────────────────────
+function renderExistingPayments(invNum) {
+  const payments = DB.getPaymentsByInvoice(invNum);
+  const el = document.getElementById('existingPayments');
+  if (!payments.length) { el.innerHTML = ''; return; }
+
+  const isAdmin = Auth.isAdmin();
+  el.innerHTML = `<h6 class="fw-semibold">ประวัติการชำระ</h6>` +
+    payments.map((p, pi) => {
+      const isCancelled = !!p.cancelled;
+      const imgs = [
+        p.transferImage ? _imgTagHtml(p.transferImage, 'pay-hist-img', 'สลิปโอน')    : '',
+        p.chequeImage   ? _imgTagHtml(p.chequeImage,   'pay-hist-img', 'รูปเช็ค')    : '',
+        p.signedImage   ? _imgTagHtml(p.signedImage,   'pay-hist-img', 'ใบกำกับเซ็น') : '',
+      ].filter(Boolean).join('');
+
+      // Image timeline (admin only)
+      const history = p.imageHistory || [];
+      const timelineHtml = isAdmin && history.length ? `
+        <div class="collapse mt-2" id="imgtl_${p.id}">
+          <div class="card card-body p-2 border-0 bg-light">
+            <div class="fw-semibold small mb-2">
+              <i class="bi bi-clock-history me-1 text-primary"></i>Timeline รูปภาพ
+            </div>
+            <div class="img-timeline">
+              ${history.map(h => `
+                <div class="img-timeline-item">
+                  <div class="small fw-semibold">${h.typeLabel}
+                    <span class="text-muted fw-normal ms-1">${Utils.formatDateTimeTH(h.at)}</span>
+                    <span class="text-muted fw-normal ms-1">โดย ${h.by}</span>
+                  </div>
+                  ${h.reason ? `<div class="small text-muted mb-1"><i class="bi bi-chat-left-text me-1"></i>${h.reason}</div>` : ''}
+                  ${h.image  ? _imgTagHtml(h.image, 'img-tl-img', '') : ''}
+                </div>`).join('')}
+            </div>
+          </div>
+        </div>` : '';
+
+      return `
+      <div class="border rounded p-2 mb-2 ${isCancelled ? 'opacity-75 border-danger' : ''}">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-1">
+          <div>
+            ${isCancelled ? `<span class="badge bg-danger me-1"><i class="bi bi-x-circle me-1"></i>ยกเลิกแล้ว</span>` : ''}
+            <span class="badge bg-primary me-1">${p.method}</span>
+            <strong class="${isCancelled ? 'text-decoration-line-through text-muted' : ''}">
+              ฿${Utils.formatNumber(p.amount)}
+            </strong>
+            <span class="text-muted small ms-2">${Utils.formatDateTimeTH(p.createdAt)}</span>
+            ${p.cashCollector ? `<span class="text-muted small">(${p.cashCollector})</span>` : ''}
+            ${p.sourceBank    ? `<span class="text-muted small"> ${Utils.getBankName(p.sourceBank)} → ${Utils.getBankName(p.destBank)}</span>` : ''}
+            ${p.chequeNo  ? `<span class="text-muted small"> เช็ค#${p.chequeNo}${p.chequeDate ? ' วันที่เช็ค ' + Utils.formatDateTH(p.chequeDate) : ''}</span>` : ''}
+            ${p.notes         ? `<span class="text-muted small"> | ${p.notes}</span>` : ''}
+            ${isCancelled && p.cancelNote
+              ? `<div class="text-danger small mt-1"><i class="bi bi-chat-left-text me-1"></i>เหตุผลยกเลิก: ${p.cancelNote}</div>` : ''}
+            ${isCancelled
+              ? `<div class="text-muted small">ยกเลิกโดย: ${p.cancelledBy || '-'} เมื่อ ${Utils.formatDateTimeTH(p.cancelledAt)}</div>` : ''}
+          </div>
+          <div class="d-flex gap-1 align-items-center flex-wrap">
+            ${!isCancelled ? `
+              <button class="btn btn-sm btn-outline-primary"
+                      onclick="openImageUpdateModal('${p.id}','${invNum}')" title="เพิ่ม/เปลี่ยนรูป">
+                <i class="bi bi-image me-1"></i>เพิ่มรูป
+              </button>` : ''}
+            ${isAdmin && history.length ? `
+              <button class="btn btn-sm btn-outline-info" data-bs-toggle="collapse"
+                      data-bs-target="#imgtl_${p.id}" title="ดู Timeline รูปภาพ">
+                <i class="bi bi-clock-history me-1"></i>${history.length}
+              </button>` : ''}
+            ${!isCancelled ? `
+              <button class="btn btn-sm btn-outline-warning"
+                      onclick="cancelPayment('${p.id}','${invNum}')" title="ยกเลิกรายการ">
+                <i class="bi bi-x-circle"></i>
+              </button>` : ''}
+            <button class="btn btn-sm btn-outline-danger"
+                    onclick="deletePayment('${p.id}','${invNum}')" title="ลบออกจากระบบ">
+              <i class="bi bi-trash"></i>
+            </button>
+          </div>
+        </div>
+        ${imgs ? `<div class="d-flex gap-2 mt-1 flex-wrap">${imgs}</div>` : ''}
+        ${timelineHtml}
+      </div>`;
+    }).join('');
+  _loadDrvImages();
+}
+
+// ── Image Update Modal ────────────────────────────────────────────────────────
+function openImageUpdateModal(payId, invNum) {
+  document.getElementById('imgUpdatePayId').value  = payId;
+  document.getElementById('imgUpdateInvNum').value = invNum;
+  document.getElementById('imgUpdateFile').value   = '';
+  document.getElementById('imgUpdatePreview').innerHTML = '';
+  document.getElementById('imgUpdateReason').value = '';
+  document.getElementById('imgUpdateAlert').innerHTML  = '';
+  _imgUpdateB64 = '';
+  imgUpdateModal.show();
+}
+
+function previewImgUpdate(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const MAX = 1200;
+      const scale = Math.min(1, MAX / img.width, MAX / img.height);
+      canvas.width  = Math.round(img.width  * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      _imgUpdateB64 = canvas.toDataURL('image/jpeg', 0.55);
+      document.getElementById('imgUpdatePreview').innerHTML =
+        `<img src="${_imgUpdateB64}" class="img-thumb">`;
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+async function confirmImageUpdate() {
+  const payId  = document.getElementById('imgUpdatePayId').value;
+  const invNum = document.getElementById('imgUpdateInvNum').value;
+  const type   = document.getElementById('imgUpdateType').value;
+  const reason = document.getElementById('imgUpdateReason').value.trim();
+  const alertEl = document.getElementById('imgUpdateAlert');
+
+  if (!_imgUpdateB64) {
+    alertEl.innerHTML = '<div class="alert alert-warning py-2">กรุณาเลือกรูป</div>';
+    return;
+  }
+  if (!reason) {
+    alertEl.innerHTML = '<div class="alert alert-warning py-2">กรุณากรอกเหตุผล</div>';
+    document.getElementById('imgUpdateReason').focus();
+    return;
+  }
+
+  const typeLabels = { transfer: 'สลิปโอนเงิน', cheque: 'รูปเช็ค', signed: 'ใบกำกับที่เซ็นแล้ว' };
+  const typeLabel  = typeLabels[type] || type;
+  const fieldMap   = { transfer: 'transferImage', cheque: 'chequeImage', signed: 'signedImage' };
+
+  const p = DB.getPayments().find(x => x.id === payId);
+  if (!p) { alertEl.innerHTML = '<div class="alert alert-danger py-2">ไม่พบรายการชำระ</div>'; return; }
+
+  const imgSrc = await _drvUpload(_imgUpdateB64, `img_${type}_${payId}_${Date.now()}.jpg`);
+
+  const histEntry = {
+    id:        Utils.uuid(),
+    type,
+    typeLabel,
+    image:     imgSrc,
+    reason,
+    at:        new Date().toISOString(),
+    by:        session.name,
+    byUser:    session.username,
+  };
+
+  const imageHistory = [...(p.imageHistory || []), histEntry];
+  const update = { [fieldMap[type]]: imgSrc, imageHistory };
+  DB.updatePayment(payId, update);
+  DB.logActivity(session.userId, session.username, 'อัปเดตรูปการชำระเงิน',
+    { invoiceNumber: invNum, type: typeLabel, reason });
+
+  imgUpdateModal.hide();
+  renderExistingPayments(invNum);
+  Utils.showAlert(`<i class="bi bi-image me-1 text-primary"></i>บันทึกรูป<strong>${typeLabel}</strong>เรียบร้อย`, 'success', 'modalAlert');
+}
+
+// ── Cancel Payment ────────────────────────────────────────────────────────────
+function cancelPayment(payId, invNum) {
+  const p = DB.getPayments().find(x => x.id === payId);
+  if (!p) return;
+  document.getElementById('cancelPayId').value     = payId;
+  document.getElementById('cancelPayInvNum').value = invNum;
+  document.getElementById('cancelPayNote').value   = '';
+  document.getElementById('cancelPaySummary').innerHTML =
+    `<strong>ใบกำกับ:</strong> ${invNum}<br>
+     <strong>วิธีชำระ:</strong> ${p.method} &nbsp;|&nbsp;
+     <strong>จำนวน:</strong> ฿${Utils.formatNumber(p.amount)}<br>
+     <strong>วันที่:</strong> ${Utils.formatDateTimeTH(p.createdAt)}`;
+  cancelPayModal.show();
+}
+
+function confirmCancelPayment() {
+  const payId  = document.getElementById('cancelPayId').value;
+  const invNum = document.getElementById('cancelPayInvNum').value;
+  const note   = document.getElementById('cancelPayNote').value.trim();
+  if (!note) {
+    document.getElementById('cancelPayNote').classList.add('is-invalid');
+    document.getElementById('cancelPayNote').focus();
+    return;
+  }
+  document.getElementById('cancelPayNote').classList.remove('is-invalid');
+  DB.updatePayment(payId, {
+    cancelled:   true,
+    cancelNote:  note,
+    cancelledAt: new Date().toISOString(),
+    cancelledBy: session.name
+  });
+  DB.logActivity(session.userId, session.username, 'ยกเลิกรายการชำระ', { invoiceNumber: invNum, payId, note });
+  cancelPayModal.hide();
+  refreshSummary(invNum);
+  render();
+}
+
+function deletePayment(payId, invNum) {
+  if (!confirm('ลบรายการชำระนี้ใช่หรือไม่?')) return;
+  DB.deletePayment(payId);
+  DB.logActivity(session.userId, session.username, 'ลบรายการชำระ', { invoiceNumber: invNum });
+  refreshSummary(invNum);
+  render();
+}
+
+function refreshSummary(invNum) {
+  renderExistingPayments(invNum);
+  const inv   = DB.getInvoices().find(i => i.invoiceNumber === invNum);
+  const total = parseFloat(inv?.totalAmount) || 0;
+  const paid  = DB.getInvoicePaidAmount(invNum);
+  document.getElementById('invSummary').innerHTML =
+    `ยอดรวม: <strong>฿${Utils.formatNumber(total)}</strong> &nbsp;|&nbsp;
+     ชำระแล้ว: <strong class="text-success">฿${Utils.formatNumber(paid)}</strong> &nbsp;|&nbsp;
+     ค้างชำระ: <strong class="text-danger">฿${Utils.formatNumber(total-paid)}</strong>`;
+}
+
+// ── Save payment (with date confirmation) ─────────────────────────────────────
+function collectPaymentData() {
+  const invNum = document.getElementById('payInvNumHidden').value;
+  const custId = document.getElementById('payCustIdHidden').value;
+  const method = document.getElementById('payMethod').value;
+  const amount = parseFloat(document.getElementById('payAmount').value);
+  if (!method) { Utils.showAlert('กรุณาเลือกวิธีชำระ', 'warning', 'modalAlert'); return null; }
+  if (!amount || amount <= 0) { Utils.showAlert('กรุณากรอกจำนวนเงิน', 'warning', 'modalAlert'); return null; }
+
+  // Build initial imageHistory entries for any images provided now
+  const now = new Date().toISOString();
+  const imageHistory = [];
+  if (payImages.transfer) imageHistory.push({
+    id: Utils.uuid(), type: 'transfer', typeLabel: 'สลิปโอนเงิน',
+    image: payImages.transfer, reason: 'บันทึกครั้งแรก', at: now, by: session.name, byUser: session.username
+  });
+  if (payImages.cheque) imageHistory.push({
+    id: Utils.uuid(), type: 'cheque', typeLabel: 'รูปเช็ค',
+    image: payImages.cheque, reason: 'บันทึกครั้งแรก', at: now, by: session.name, byUser: session.username
+  });
+  if (payImages.signed) imageHistory.push({
+    id: Utils.uuid(), type: 'signed', typeLabel: 'ใบกำกับที่เซ็นแล้ว',
+    image: payImages.signed, reason: 'บันทึกครั้งแรก', at: now, by: session.name, byUser: session.username
+  });
+
+  return {
+    id:            Utils.uuid(),
+    invoiceNumber: invNum,
+    customerId:    custId,
+    method, amount,
+    cashCollector:  document.getElementById('payCashCollector').value || '',
+    sourceBank:     document.getElementById('paySourceBank').value    || '',
+    destBank:       document.getElementById('payDestBank').value      || '',
+    accountName:    document.getElementById('payAccountName').value   || '',
+    transferDate:   (function(){ const iso=Utils.parseBEToISO(document.getElementById('payTransferDateBE').value); const t=document.getElementById('payTransferTime').value; return iso?(iso+'T'+(t||'00:00')):''; })(),
+    chequeNo:       document.getElementById('payChequeNo').value      || '',
+    chequeBank:     document.getElementById('payChequeBank').value    || '',
+    chequeDate:     Utils.parseBEToISO(document.getElementById('payChequeDate').value) || '',
+    transferImage:  payImages.transfer,
+    chequeImage:    payImages.cheque,
+    signedImage:    payImages.signed,
+    imageHistory,
+    notes:          document.getElementById('payNote').value          || '',
+    payDate:        Utils.parseBEToISO(document.getElementById('payDate').value) || Utils.todayInputValue(),
+    createdAt:      now,
+    createdBy:      session.name,
+    createdByUser:  session.username,
+  };
+}
+
+// ── Multi-payment staging ─────────────────────────────────────────────────────
+function renderPendingPayments() {
+  const listDiv   = document.getElementById('pendingPaymentsList');
+  const container = document.getElementById('pendingPaymentsContainer');
+  const countEl   = document.getElementById('pendingCount');
+  if (!_pendingPayments.length) { listDiv.style.display = 'none'; return; }
+  listDiv.style.display = '';
+  countEl.textContent = _pendingPayments.length;
+
+  container.innerHTML = _pendingPayments.map((p, i) => {
+    const chequeInfo = [
+      p.chequeNo   ? 'เช็ค#' + p.chequeNo : '',
+      p.chequeDate ? 'วันที่เช็ค ' + Utils.formatDateTH(p.chequeDate) : '',
+    ].filter(Boolean).join(' ');
+    return '<div class="d-flex justify-content-between align-items-center border rounded p-2 mb-1 bg-light">' +
+      '<div>' +
+        '<span class="badge bg-primary me-1">' + p.method + '</span>' +
+        '<strong>฿' + Utils.formatNumber(p.amount) + '</strong>' +
+        '<span class="text-muted small ms-2">' + Utils.formatDateTH(p.payDate) + '</span>' +
+        (chequeInfo ? '<span class="text-muted small ms-1">' + chequeInfo + '</span>' : '') +
+        (p.notes ? '<span class="text-muted small ms-1">| ' + p.notes + '</span>' : '') +
+      '</div>' +
+      '<button class="btn btn-sm btn-outline-danger" onclick="removePendingPayment(' + i + ')">' +
+        '<i class="bi bi-x-lg"></i>' +
+      '</button>' +
+    '</div>';
+  }).join('');
+
+  // Update summary to reflect pending totals
+  const invNum = document.getElementById('payInvNumHidden').value;
+  const inv    = DB.getInvoices().find(i => i.invoiceNumber === invNum);
+  const total  = parseFloat(inv?.totalAmount) || 0;
+  const alreadyPaid  = DB.getInvoicePaidAmount(invNum);
+  const pendingTotal = _pendingPayments.reduce((s, p) => s + p.amount, 0);
+  const rem    = total - alreadyPaid - pendingTotal;
+  document.getElementById('invSummary').innerHTML =
+    'ยอดรวม: <strong>฿' + Utils.formatNumber(total) + '</strong> &nbsp;|&nbsp;' +
+    'ชำระแล้ว: <strong class="text-success">฿' + Utils.formatNumber(alreadyPaid) + '</strong> &nbsp;|&nbsp;' +
+    'รอบันทึก: <strong class="text-primary">฿' + Utils.formatNumber(pendingTotal) + '</strong> &nbsp;|&nbsp;' +
+    'ค้าง: <strong class="' + (rem > 0 ? 'text-danger' : 'text-success') + '">฿' + Utils.formatNumber(Math.max(0, rem)) + '</strong>';
+  if (rem > 0.005) document.getElementById('payAmount').value = rem.toFixed(2);
+  else             document.getElementById('payAmount').value = '';
+}
+
+function removePendingPayment(index) {
+  _pendingPayments.splice(index, 1);
+  if (_pendingPayments.length) {
+    renderPendingPayments();
+  } else {
+    document.getElementById('pendingPaymentsList').style.display = 'none';
+    // Restore original summary
+    const invNum = document.getElementById('payInvNumHidden').value;
+    const inv    = DB.getInvoices().find(i => i.invoiceNumber === invNum);
+    const total  = parseFloat(inv?.totalAmount) || 0;
+    const paid   = DB.getInvoicePaidAmount(invNum);
+    const rem    = total - paid;
+    document.getElementById('invSummary').innerHTML =
+      'ยอดรวม: <strong>฿' + Utils.formatNumber(total) + '</strong> &nbsp;|&nbsp;' +
+      'ชำระแล้ว: <strong class="text-success">฿' + Utils.formatNumber(paid) + '</strong> &nbsp;|&nbsp;' +
+      'ค้างชำระ: <strong class="text-danger">฿' + Utils.formatNumber(rem) + '</strong>';
+    if (rem > 0) document.getElementById('payAmount').value = rem.toFixed(2);
+  }
+}
+
+function addPaymentEntry() {
+  const data = collectPaymentData();
+  if (!data) return;
+  _pendingPayments.push(data);
+
+  // Clear form for next entry
+  document.getElementById('payMethod').value                = '';
+  document.getElementById('payAmount').value                = '';
+  document.getElementById('payNote').value                  = '';
+  document.getElementById('payCashCollector').value         = '';
+  document.getElementById('payTransferAccountSelect').value = '';
+  document.getElementById('payChequeAccountSelect').value   = '';
+  document.getElementById('paySourceBank').value            = '';
+  document.getElementById('payDestBank').value              = '';
+  document.getElementById('payAccountName').value           = '';
+  (function(){ const n=new Date();
+    if (_fpTransferDate) _fpTransferDate.setDate(n); else document.getElementById('payTransferDateBE').value = Utils.todayBE();
+    document.getElementById('payTransferTime').value = `${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`;
+  })();
+  document.getElementById('payChequeNo').value       = '';
+  document.getElementById('payChequeBank').value     = '';
+  if (_fpCheqDate) _fpCheqDate.clear(); else document.getElementById('payChequeDate').value = '';
+  payImages = { transfer: '', cheque: '', signed: '' };
+  ['transferImagePreview','chequeImagePreview','signedImagePreview'].forEach(id =>
+    document.getElementById(id).innerHTML = '');
+  ['payTransferImage','payChequeImage','paySignedImage'].forEach(id =>
+    document.getElementById(id).value = '');
+  onMethodChange();
+  renderPendingPayments();
+}
+
+// ── Save payment (with date confirmation) ─────────────────────────────────────
+function savePayment() {
+  const method = document.getElementById('payMethod').value;
+  const amount = parseFloat(document.getElementById('payAmount').value);
+  const hasCurrentForm = !!(method && amount > 0);
+
+  let allPayments = [..._pendingPayments];
+  if (hasCurrentForm) {
+    const data = collectPaymentData();
+    if (!data) return;
+    allPayments.push(data);
+  }
+  if (!allPayments.length) {
+    Utils.showAlert('กรุณากรอกข้อมูลการชำระอย่างน้อย 1 รายการ', 'warning', 'modalAlert');
+    return;
+  }
+
+  // Check date issues for any entry
+  const invDate = window._currentInvDate || '';
+  const badDated = invDate ? allPayments.filter(p => p.payDate && p.payDate < invDate) : [];
+  if (badDated.length) {
+    _pendingPaymentData = allPayments;
+    const p = badDated[0];
+    document.getElementById('dateConfirmMsg').textContent =
+      'วันที่ชำระ (' + Utils.formatDateTH(p.payDate) + ') อยู่ก่อนวันที่ออกใบกำกับ (' + Utils.formatDateTH(invDate) + ')' +
+      ' — หากวันที่ถูกต้องกรุณากด "ยืนยัน"';
+    dateConfirmModal.show();
+    return;
+  }
+
+  doSaveAllPayments(allPayments);
+}
+
+function confirmSavePayment() {
+  dateConfirmModal.hide();
+  if (_pendingPaymentData) {
+    const payments = Array.isArray(_pendingPaymentData) ? _pendingPaymentData : [_pendingPaymentData];
+    doSaveAllPayments(payments);
+  }
+  _pendingPaymentData = null;
+}
+
+async function doSaveAllPayments(payments) {
+  if (!payments.length) return;
+  const invNum      = payments[0].invoiceNumber;
+  const inv         = DB.getInvoices().find(i => i.invoiceNumber === invNum);
+  const total       = parseFloat(inv?.totalAmount) || 0;
+  const alreadyPaid = DB.getInvoicePaidAmount(invNum);
+
+  let newPaid = alreadyPaid;
+  for (const data of payments) {
+    await _uploadPaymentImages(data);
+    DB.addPayment(data);
+    DB.logActivity(session.userId, session.username, 'บันทึกชำระเงิน',
+      { invoiceNumber: data.invoiceNumber, method: data.method, amount: data.amount });
+    newPaid += data.amount;
+  }
+  _pendingPayments = [];
+  payModal.hide();
+
+  const diff   = newPaid - total;
+  if (Math.abs(diff) > 0.01) {
+    const custId = payments[0].customerId;
+    const lastMethod = payments[payments.length - 1]?.method || 'โอน';
+    pendingOverpayData = { custId, invNum, diff, method: lastMethod };
+    const isOver = diff > 0;
+
+    // ── Outstanding interlock (overpayment only) ──────────────────────────────
+    let interlockHtml = '';
+    if (isOver) {
+      const allInvs = DB.getInvoices().filter(i => i.customerId === custId);
+      const nums    = [...new Set(allInvs.map(i => i.invoiceNumber))].filter(n => n !== invNum);
+      const outstanding = nums.map(num => {
+        const pg1 = allInvs.find(i => i.invoiceNumber === num && i.page === 1)
+                 || allInvs.find(i => i.invoiceNumber === num);
+        if (!pg1) return null;
+        const t   = parseFloat(pg1.totalAmount) || 0;
+        const rem = t - DB.getInvoicePaidAmount(num);
+        if (rem <= 0.005) return null;
+        return { num, date: pg1.createdAt, rem };
+      }).filter(Boolean).sort((a, b) => new Date(a.date) - new Date(b.date));
+
+      if (outstanding.length) {
+        interlockHtml = `
+          <hr class="my-2">
+          <p class="fw-semibold mb-2"><i class="bi bi-arrow-right-circle text-info me-1"></i>นำยอดเกิน <strong class="text-danger">฿${Utils.formatNumber(diff)}</strong> ตัดยอดค้างชำระ:</p>
+          <div class="list-group list-group-flush border rounded mb-2">
+            ${outstanding.map(o => {
+              const apply = Utils.formatNumber(Math.min(diff, o.rem));
+              return `<div class="list-group-item d-flex justify-content-between align-items-center py-2 px-2">
+                <div>
+                  <div class="fw-semibold small">${o.num}</div>
+                  <div class="text-muted" style="font-size:11px">${Utils.formatDateTH(o.date)} · ค้าง ฿${Utils.formatNumber(o.rem)}</div>
+                </div>
+                <button class="btn btn-sm btn-outline-info" onclick="applyOverpayToOutstanding('${o.num}',${o.rem})">
+                  <i class="bi bi-arrow-right me-1"></i>ตัด ฿${apply}
+                </button>
+              </div>`;
+            }).join('')}
+          </div>`;
+      }
+    }
+
+    document.getElementById('overpayBody').innerHTML =
+      '<p>ยอดชำระ <strong>฿' + Utils.formatNumber(newPaid) + '</strong> ' +
+      (isOver ? '<span class="text-danger">เกินกว่า</span>' : '<span class="text-warning">ขาดจาก</span>') +
+      ' ยอดใบกำกับ <strong>฿' + Utils.formatNumber(total) + '</strong></p>' +
+      '<p>ส่วนต่าง: <strong class="' + (isOver ? 'text-danger' : 'text-warning') + '">฿' + Utils.formatNumber(Math.abs(diff)) + '</strong></p>' +
+      interlockHtml +
+      '<p class="mb-0 text-muted small">หรือต้องการสร้างใบกำกับใหม่สำหรับส่วนต่างนี้?</p>';
+    overpayModal.show();
+  } else {
+    Utils.showAlert('บันทึกชำระเงิน ' + payments.length + ' รายการสำเร็จ', 'success');
+    render();
+  }
+}
+
+function applyOverpayToOutstanding(targetInvNum, targetRem) {
+  if (!pendingOverpayData) return;
+  const { custId, invNum: sourceInvNum, diff, method } = pendingOverpayData;
+  const applyAmount = Math.min(diff, targetRem);
+  DB.addPayment({
+    id:            Utils.uuid(),
+    invoiceNumber: targetInvNum,
+    customerId:    custId,
+    method:        method || 'โอน',
+    amount:        applyAmount,
+    notes:         `ตัดยอดเกินจากใบ ${sourceInvNum}`,
+    payDate:       Utils.todayInputValue(),
+    createdAt:     new Date().toISOString(),
+    createdBy:     session.name,
+    createdByUser: session.username,
+    imageHistory:  [],
+  });
+  DB.logActivity(session.userId, session.username, 'ตัดยอดเกินชำระ',
+    { sourceInvNum, targetInvNum, amount: applyAmount });
+  overpayModal.hide();
+  Utils.showAlert(
+    `<i class="bi bi-check-circle me-1 text-success"></i>` +
+    `นำยอดเกิน <strong>฿${Utils.formatNumber(applyAmount)}</strong> ` +
+    `ตัดยอดใบ <strong>${targetInvNum}</strong> สำเร็จ`,
+    'success'
+  );
+  render();
+}
+
+function closeOverpay(createNew) {
+  overpayModal.hide();
+  if (createNew && pendingOverpayData) {
+    const { custId, invNum, diff } = pendingOverpayData;
+    const label = diff > 0 ? `ชำระเกินจากใบ ${invNum}` : `ค้างจากใบ ${invNum}`;
+    sessionStorage.setItem('pendingAdjust', JSON.stringify({ custId, label, amount: diff }));
+    location.href = `invoice-create.html?cust=${custId}&adjust=1`;
+  } else {
+    Utils.showAlert('บันทึกชำระเงินสำเร็จ', 'success');
+    render();
+  }
+}
+
+// ── Outstanding Preview ───────────────────────────────────────────────────────
+let _outstandingModal;
+
+function showOutstandingPreview(custId) {
+  const cust = DB.getCustomerById(custId);
+  if (!cust) return;
+
+  const allInvoices = DB.getInvoices().filter(i => i.customerId === custId);
+  const invNums = [...new Set(allInvoices.map(i => i.invoiceNumber))];
+
+  const unpaid = invNums.map(num => {
+    const page1 = allInvoices.find(i => i.invoiceNumber === num && i.page === 1)
+                || allInvoices.find(i => i.invoiceNumber === num);
+    if (!page1) return null;
+    const total = parseFloat(page1.totalAmount) || 0;
+    const paid  = DB.getInvoicePaidAmount(num);
+    const rem   = total - paid;
+    if (rem <= 0.005) return null;
+    return { num, date: page1.createdAt, total, paid, rem };
+  }).filter(Boolean).sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  if (!unpaid.length) {
+    Utils.showAlert(`${cust.name} ไม่มียอดค้างชำระ`, 'info');
+    return;
+  }
+
+  const grandRem = unpaid.reduce((s, r) => s + r.rem, 0);
+  const today = Utils.formatDateLongTH(new Date().toISOString());
+
+  const rows = unpaid.map((r, i) => `
+    <tr style="font-size:13px">
+      <td style="padding:5px 8px;text-align:center;color:#555">${i + 1}</td>
+      <td style="padding:5px 8px">${r.num}</td>
+      <td style="padding:5px 8px;text-align:center">${Utils.formatDateTH(r.date)}</td>
+      <td style="padding:5px 8px;text-align:right">${Utils.formatNumber(r.total)}</td>
+      <td style="padding:5px 8px;text-align:right;color:#198754">${Utils.formatNumber(r.paid)}</td>
+      <td style="padding:5px 8px;text-align:right;color:#dc3545;font-weight:600">${Utils.formatNumber(r.rem)}</td>
+    </tr>`).join('');
+
+  document.getElementById('outstandingCustName').textContent = cust.name;
+  document.getElementById('outstandingCapture').innerHTML = `
+    <div style="font-family:'Sarabun','TH Sarabun New',sans-serif;background:#fff;padding:12px;border-radius:6px">
+      <div style="text-align:center;margin-bottom:10px">
+        <div style="font-size:15px;font-weight:700">รายการค้างชำระ</div>
+        <div style="font-size:13px;color:#555">${cust.name}</div>
+        <div style="font-size:11px;color:#888">ณ วันที่ ${today}</div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;border:1px solid #dee2e6">
+        <thead>
+          <tr style="background:#f0f0f0">
+            <th style="padding:6px 8px;font-size:12px;text-align:center;border:1px solid #dee2e6">#</th>
+            <th style="padding:6px 8px;font-size:12px;border:1px solid #dee2e6">เลขที่ใบกำกับ</th>
+            <th style="padding:6px 8px;font-size:12px;text-align:center;border:1px solid #dee2e6">วันที่</th>
+            <th style="padding:6px 8px;font-size:12px;text-align:right;border:1px solid #dee2e6">ยอดรวม</th>
+            <th style="padding:6px 8px;font-size:12px;text-align:right;border:1px solid #dee2e6">ชำระแล้ว</th>
+            <th style="padding:6px 8px;font-size:12px;text-align:right;border:1px solid #dee2e6">ค้างชำระ</th>
+          </tr>
+        </thead>
+        <tbody style="border:1px solid #dee2e6">${rows}</tbody>
+        <tfoot>
+          <tr style="background:#fff3cd">
+            <td colspan="5" style="padding:6px 8px;font-size:13px;font-weight:700;border:1px solid #dee2e6">รวมค้างชำระทั้งสิ้น (${unpaid.length} ใบ)</td>
+            <td style="padding:6px 8px;font-size:14px;font-weight:700;text-align:right;color:#dc3545;border:1px solid #dee2e6">${Utils.formatNumber(grandRem)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>`;
+
+  if (!_outstandingModal) _outstandingModal = new bootstrap.Modal(document.getElementById('outstandingModal'));
+  _outstandingModal.show();
+}
+
+async function _captureOutstanding() {
+  const el = document.getElementById('outstandingCapture');
+  return await html2canvas(el, { scale: 3, useCORS: true, backgroundColor: '#ffffff', logging: false });
+}
+
+async function saveOutstandingImage() {
+  const custName = document.getElementById('outstandingCustName').textContent || 'outstanding';
+  const filename = `ค้างชำระ_${custName}_${new Date().toISOString().slice(0,10)}.png`;
+  try {
+    const canvas = await _captureOutstanding();
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+    try {
+      const fh = await window.showSaveFilePicker({ suggestedName: filename, types: [{ description: 'PNG', accept: { 'image/png': ['.png'] } }] });
+      const w = await fh.createWritable();
+      await w.write(blob); await w.close();
+      Utils.showAlert('<i class="bi bi-check-circle me-1 text-success"></i>บันทึกรูปสำเร็จ');
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 3000);
+    }
+  } catch (e) { Utils.showAlert('เกิดข้อผิดพลาด: ' + e.message, 'danger'); }
+}
+
+// ── Print payment summary (A5) ────────────────────────────────────────────────
+function _printDateFmt(dateStr) {
+  if (!dateStr) return '-';
+  const d = new Date(dateStr);
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yy = String(d.getFullYear() + 543).slice(-2);
+  return `${dd}/${mm}/${yy}`;
+}
+function _bankCode(val) {
+  if (!val) return '';
+  const byCode = Utils.BANKS.find(x => x.code === val);
+  if (byCode) return byCode.code;
+  const byName = Utils.BANKS.find(x => x.name === val);
+  return byName ? byName.code : val;
+}
+const _methodEn = { 'เงินสด': 'Cash', 'โอน': 'Transfer', 'เช็ค': 'Cheque' };
+
+function printPaymentSummary(invNum) {
+  const inv = DB.getInvoices().find(i => i.invoiceNumber === invNum);
+  if (!inv) return;
+  const cust      = DB.getCustomerById(inv.customerId);
+  const payments  = DB.getPaymentsByInvoice(invNum).filter(p => !p.cancelled);
+  const total     = parseFloat(inv.totalAmount) || 0;
+  const paid      = payments.reduce((s, p) => s + p.amount, 0);
+  const remaining = total - paid;
+  const printedBy = session ? session.name : '';
+
+  const methodDetail = p => {
+    if (p.method === 'โอน') {
+      const bank  = _bankCode(p.destBank);
+      const acct  = p.accountName || '';
+      return [bank, acct].filter(Boolean).join(' · ');
+    }
+    if (p.method === 'เช็ค') {
+      const bank = _bankCode(p.chequeBank);
+      const num  = p.chequeNo ? '#' + p.chequeNo : '';
+      return [bank, num].filter(Boolean).join(' · ');
+    }
+    if (p.method === 'เงินสด') return p.cashCollector || '';
+    return p.notes || '';
+  };
+
+  const rows = payments.map((p, i) => {
+    const detail  = [methodDetail(p), p.notes].filter(Boolean).join(' | ');
+    const methodEn = _methodEn[p.method] || p.method;
+    return `<tr>
+      <td style="padding:3px 5px;border:1px solid #ccc;text-align:center">${i+1}</td>
+      <td style="padding:3px 5px;border:1px solid #ccc;text-align:center">${_printDateFmt(p.payDate || p.createdAt)}</td>
+      <td style="padding:3px 5px;border:1px solid #ccc;text-align:center">${methodEn}</td>
+      <td style="padding:3px 5px;border:1px solid #ccc">${detail}</td>
+      <td style="padding:3px 5px;border:1px solid #ccc;text-align:right">${Utils.formatNumber(p.amount)}</td>
+    </tr>`;
+  }).join('');
+
+  const isOverpaid    = remaining < -0.005;
+  const isOutstanding = remaining > 0.005;
+  const summaryBg     = (isOverpaid || isOutstanding) ? '#fdecea' : '#e8f4ec';
+  const summaryColor  = (isOverpaid || isOutstanding) ? '#c0392b' : '#1a7a4a';
+  const summaryLabel  = isOverpaid ? 'ชำระเกิน' : 'ยอดค้างชำระ';
+  const summaryValue  = isOverpaid ? Utils.formatNumber(Math.abs(remaining))
+                      : Utils.formatNumber(Math.max(0, remaining));
+  const statusColor   = summaryColor;
+  const statusText    = isOverpaid    ? `⚠ ชำระเกิน ฿${Utils.formatNumber(Math.abs(remaining))}`
+                      : isOutstanding ? `✗ ค้างชำระ ฿${Utils.formatNumber(remaining)}`
+                      : '✓ ชำระครบแล้ว';
+
+  document.getElementById('payPrintArea').innerHTML = `
+    <div style="font-family:'Sarabun','TH Sarabun New',sans-serif;font-size:9.5pt;color:#111;line-height:1.5;padding:8mm;box-sizing:border-box">
+      <div style="text-align:center;margin-bottom:5mm;border-bottom:1.5px solid #333;padding-bottom:3mm">
+        <div style="font-size:12pt;font-weight:700">ใบสรุปการชำระเงิน</div>
+      </div>
+
+      <table style="width:100%;font-size:8.5pt;margin-bottom:4mm;border-collapse:collapse">
+        <tr>
+          <td style="width:50%;vertical-align:top">
+            <div><span style="color:#555">เลขที่ใบกำกับ:</span> <strong>${invNum}</strong></div>
+            <div><span style="color:#555">วันที่ออกใบกำกับ:</span> ${_printDateFmt(inv.createdAt)}</div>
+            <div><span style="color:#555">วันที่พิมพ์:</span> ${_printDateFmt(new Date().toISOString())}</div>
+          </td>
+          <td style="width:50%;vertical-align:top;text-align:right">
+            <div><span style="color:#555">ลูกค้า:</span> <strong>${cust ? cust.name : '-'}</strong></div>
+          </td>
+        </tr>
+      </table>
+
+      <table style="width:100%;border-collapse:collapse;font-size:8.5pt;margin-bottom:4mm">
+        <thead>
+          <tr style="background:#eee">
+            <th style="padding:3px 5px;border:1px solid #bbb;text-align:center;width:6%">#</th>
+            <th style="padding:3px 5px;border:1px solid #bbb;text-align:center;width:20%">วันที่ชำระ</th>
+            <th style="padding:3px 5px;border:1px solid #bbb;text-align:center;width:15%">วิธีชำระ</th>
+            <th style="padding:3px 5px;border:1px solid #bbb;text-align:left">รายละเอียด</th>
+            <th style="padding:3px 5px;border:1px solid #bbb;text-align:right;width:18%">จำนวน (฿)</th>
+          </tr>
+        </thead>
+        <tbody>${rows || '<tr><td colspan="5" style="padding:5px;text-align:center;color:#888">ยังไม่มีรายการชำระ</td></tr>'}</tbody>
+      </table>
+
+      <table style="width:100%;border-collapse:collapse;font-size:8.5pt;margin-bottom:4mm">
+        <tr>
+          <td style="width:55%"></td>
+          <td style="width:45%;border:1px solid #bbb;padding:0">
+            <table style="width:100%;border-collapse:collapse">
+              <tr style="background:#f5f5f5">
+                <td style="padding:3px 6px;border-bottom:1px solid #ccc">ยอดรวมใบกำกับ</td>
+                <td style="padding:3px 6px;border-bottom:1px solid #ccc;text-align:right">${Utils.formatNumber(total)}</td>
+              </tr>
+              <tr>
+                <td style="padding:3px 6px;border-bottom:1px solid #ccc;color:#1a7a4a">ชำระแล้วทั้งสิ้น</td>
+                <td style="padding:3px 6px;border-bottom:1px solid #ccc;text-align:right;color:#1a7a4a;font-weight:700">${Utils.formatNumber(paid)}</td>
+              </tr>
+              <tr style="background:${summaryBg}">
+                <td style="padding:3px 6px;font-weight:700;color:${summaryColor}">${summaryLabel}</td>
+                <td style="padding:3px 6px;text-align:right;font-weight:700;color:${summaryColor}">${summaryValue}</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+
+      <div style="border:1px dashed #aaa;border-radius:3px;padding:3mm;font-size:8pt;color:#444">
+        <strong>สถานะ:</strong> <span style="color:${statusColor};font-weight:700">${statusText}</span> &nbsp;|&nbsp;
+        <strong>จำนวนรายการ:</strong> ${payments.length} รายการ &nbsp;|&nbsp;
+        <strong>พิมพ์โดย:</strong> ${printedBy}
+      </div>
+    </div>`;
+
+  window.print();
+}
+
+async function copyOutstandingImage() {
+  try {
+    const canvas = await _captureOutstanding();
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    Utils.showAlert('<i class="bi bi-check-circle me-1 text-success"></i>คัดลอกรูปลง Clipboard แล้ว');
+  } catch (e) { Utils.showAlert('คัดลอกไม่สำเร็จ: ' + e.message, 'danger'); }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>Generate PWA Icons</title>
+<style>
+body { font-family: sans-serif; padding: 2rem; background: #f8f9fa; }
+h2 { color: #0d6efd; }
+.icons { display: flex; gap: 2rem; flex-wrap: wrap; margin: 2rem 0; }
+.icon-wrap { text-align: center; }
+canvas { border-radius: 18%; box-shadow: 0 4px 16px rgba(0,0,0,.15); display: block; }
+.btn { background: #0d6efd; color: white; border: none; padding: .6rem 1.4rem;
+       border-radius: 8px; cursor: pointer; font-size: 14px; margin-top: .5rem; }
+.btn:hover { background: #0a58ca; }
+p.note { background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 1rem; }
+</style>
+</head>
+<body>
+<h2>🎨 สร้างไอคอน PWA</h2>
+<p>เปิดหน้านี้ใน browser แล้วกดดาวน์โหลด — จะได้ไฟล์ icon-192.png และ icon-512.png</p>
+<p class="note">
+  📁 บันทึกไฟล์ไว้ในโฟลเดอร์ <strong>icons/</strong> ของ app<br>
+  (icon-192.png และ icon-512.png ต้องอยู่ใน icons/ เพื่อให้ manifest.json ทำงานถูกต้อง)
+</p>
+
+<div class="icons">
+  <div class="icon-wrap">
+    <canvas id="c192" width="192" height="192"></canvas>
+    <div class="small" style="margin:.4rem 0">192×192 px</div>
+    <button class="btn" onclick="downloadIcon('c192','icon-192.png')">⬇ icon-192.png</button>
+  </div>
+  <div class="icon-wrap">
+    <canvas id="c512" width="512" height="512"></canvas>
+    <div class="small" style="margin:.4rem 0">512×512 px</div>
+    <button class="btn" onclick="downloadIcon('c512','icon-512.png')">⬇ icon-512.png</button>
+  </div>
+</div>
+
+<script>
+function drawIcon(canvas) {
+  const size = canvas.width;
+  const ctx  = canvas.getContext('2d');
+  const r    = size * 0.175;  // corner radius
+
+  // Rounded background
+  ctx.beginPath();
+  ctx.moveTo(r, 0);
+  ctx.lineTo(size - r, 0);
+  ctx.quadraticCurveTo(size, 0, size, r);
+  ctx.lineTo(size, size - r);
+  ctx.quadraticCurveTo(size, size, size - r, size);
+  ctx.lineTo(r, size);
+  ctx.quadraticCurveTo(0, size, 0, size - r);
+  ctx.lineTo(0, r);
+  ctx.quadraticCurveTo(0, 0, r, 0);
+  ctx.closePath();
+  ctx.fillStyle = '#0d6efd';
+  ctx.fill();
+
+  // Droplet path
+  const cx = size / 2;
+  const top = size * 0.17;
+  const bot = size * 0.91;
+  const w   = size * 0.50;
+
+  ctx.beginPath();
+  ctx.moveTo(cx, top);
+  ctx.bezierCurveTo(cx - w * 0.2, size * 0.4, cx - w / 2, size * 0.55, cx - w / 2, size * 0.66);
+  ctx.bezierCurveTo(cx - w / 2, bot, cx + w / 2, bot, cx + w / 2, size * 0.66);
+  ctx.bezierCurveTo(cx + w / 2, size * 0.55, cx + w * 0.2, size * 0.4, cx, top);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(255,255,255,0.95)';
+  ctx.fill();
+
+  // Inner tint
+  ctx.beginPath();
+  ctx.moveTo(cx, size * 0.32);
+  ctx.bezierCurveTo(cx - w * 0.18, size * 0.52, cx - w * 0.42, size * 0.60, cx - w * 0.42, size * 0.66);
+  ctx.bezierCurveTo(cx - w * 0.42, bot * 0.98, cx + w * 0.42, bot * 0.98, cx + w * 0.42, size * 0.66);
+  ctx.bezierCurveTo(cx + w * 0.42, size * 0.60, cx + w * 0.18, size * 0.52, cx, size * 0.32);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(13,110,253,0.30)';
+  ctx.fill();
+
+  // Shine
+  ctx.save();
+  ctx.translate(cx - size * 0.08, size * 0.52);
+  ctx.rotate(-0.35);
+  ctx.scale(1, 1.6);
+  ctx.beginPath();
+  ctx.arc(0, 0, size * 0.055, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.45)';
+  ctx.fill();
+  ctx.restore();
+}
+
+function downloadIcon(canvasId, filename) {
+  const canvas = document.getElementById(canvasId);
+  const a = document.createElement('a');
+  a.href     = canvas.toDataURL('image/png');
+  a.download = filename;
+  a.click();
+}
+
+// Draw both icons
+drawIcon(document.getElementById('c192'));
+drawIcon(document.getElementById('c512'));
+</script>
+</body>
+</html>

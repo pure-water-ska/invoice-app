@@ -1,0 +1,655 @@
+﻿<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0d6efd">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ใบกำกับ">
+<title>ตั้งค่าระบบ</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="navContainer"></div>
+<div id="backupDueBanner"></div>
+
+<div class="page-wrap" style="max-width:900px">
+  <h5 class="mb-4 fw-bold"><i class="bi bi-gear me-2 text-primary"></i>ตั้งค่าระบบ</h5>
+  <div id="alertBox" class="mb-3"></div>
+
+  <!-- ── Export JSON (สำหรับ user ที่มีสิทธิ์) ───────────────────────────── -->
+  <div id="exportBackupCard" class="card mb-4" style="display:none">
+    <div class="card-header bg-primary text-white fw-semibold py-2">
+      <i class="bi bi-download me-1"></i>สำรองข้อมูล (Export)
+    </div>
+    <div class="card-body">
+      <div class="d-flex align-items-start gap-3">
+        <i class="bi bi-database-fill-down fs-2 text-primary flex-shrink-0 mt-1"></i>
+        <div class="flex-grow-1">
+          <div class="fw-semibold mb-1">Full Backup</div>
+          <div class="text-muted small mb-3">ข้อมูลทุกอย่าง รวม Log — บันทึกเป็นไฟล์ .json</div>
+          <button class="btn btn-primary btn-sm" onclick="exportFull()">
+            <i class="bi bi-download me-1"></i>Export Full Backup
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Import JSON (สำหรับ user ที่มีสิทธิ์) ───────────────────────────── -->
+  <div id="importBackupCard" class="card mb-4" style="display:none">
+    <div class="card-header bg-warning fw-semibold py-2">
+      <i class="bi bi-upload me-1"></i>นำเข้าข้อมูล (Import)
+    </div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="border rounded p-3 text-center h-100">
+            <i class="bi bi-plus-circle fs-3 text-success d-block mb-2"></i>
+            <div class="fw-semibold mb-1">Merge (เพิ่มข้อมูลใหม่)</div>
+            <div class="text-muted small mb-3">เพิ่มเฉพาะรายการที่ยังไม่มีในระบบ<br>(ไม่ลบข้อมูลเดิม)</div>
+            <input type="file" id="importFileMergeUser" accept=".json" style="display:none" onchange="importData(this,'merge')">
+            <button class="btn btn-success btn-sm" onclick="document.getElementById('importFileMergeUser').click()">
+              <i class="bi bi-upload me-1"></i>เลือกไฟล์ (Merge)
+            </button>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="border rounded p-3 text-center h-100 border-danger">
+            <i class="bi bi-arrow-repeat fs-3 text-danger d-block mb-2"></i>
+            <div class="fw-semibold mb-1 text-danger">Overwrite (เขียนทับ)</div>
+            <div class="text-muted small mb-3">แทนที่ข้อมูลทั้งหมดด้วยไฟล์ที่นำเข้า<br><strong class="text-danger">ข้อมูลเดิมจะหายทั้งหมด!</strong></div>
+            <input type="file" id="importFileOverwriteUser" accept=".json" style="display:none" onchange="importData(this,'overwrite')">
+            <button class="btn btn-outline-danger btn-sm" onclick="document.getElementById('importFileOverwriteUser').click()">
+              <i class="bi bi-upload me-1"></i>เลือกไฟล์ (Overwrite)
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── ZIP Export (สำหรับ user ที่มีสิทธิ์) ────────────────────────────── -->
+  <div id="zipExportCard" class="card mb-4" style="display:none">
+    <div class="card-header bg-success text-white fw-semibold py-2">
+      <i class="bi bi-file-zip me-1"></i>สำรองข้อมูล ZIP (ข้อมูล + PDF)
+    </div>
+    <div class="card-body">
+      <div class="d-flex align-items-start gap-3">
+        <i class="bi bi-file-earmark-zip fs-2 text-success flex-shrink-0 mt-1"></i>
+        <div class="flex-grow-1">
+          <div class="text-muted small mb-2">รวมข้อมูลทั้งหมด + ไฟล์ PDF ทุกไฟล์จาก PDF Folder ไว้ในไฟล์ .zip เดียว</div>
+          <div id="zipPdfFolderInfo" class="small mb-3"></div>
+          <button class="btn btn-success btn-sm" onclick="exportZip()">
+            <i class="bi bi-file-zip me-1"></i>Export ZIP
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── ZIP Import (สำหรับ user ที่มีสิทธิ์) ────────────────────────────── -->
+  <div id="zipImportCard" class="card mb-4" style="display:none">
+    <div class="card-header bg-success text-white fw-semibold py-2">
+      <i class="bi bi-upload me-1"></i>นำเข้าข้อมูล ZIP (ข้อมูล + PDF)
+    </div>
+    <div class="card-body">
+      <div class="d-flex align-items-start gap-3">
+        <i class="bi bi-file-earmark-zip fs-2 text-success flex-shrink-0 mt-1"></i>
+        <div class="flex-grow-1">
+          <div class="text-muted small mb-3">นำเข้าจากไฟล์ .zip ที่ Export ไว้ — จะนำเข้าข้อมูลและคืนไฟล์ PDF ไปยัง PDF Folder</div>
+          <div class="d-flex gap-2 flex-wrap">
+            <input type="file" id="importZipMerge" accept=".zip" style="display:none" onchange="importZip(this,'merge')">
+            <button class="btn btn-success btn-sm" onclick="document.getElementById('importZipMerge').click()">
+              <i class="bi bi-upload me-1"></i>Import ZIP (Merge)
+            </button>
+            <input type="file" id="importZipOverwrite" accept=".zip" style="display:none" onchange="importZip(this,'overwrite')">
+            <button class="btn btn-outline-danger btn-sm" onclick="document.getElementById('importZipOverwrite').click()">
+              <i class="bi bi-upload me-1"></i>Import ZIP (Overwrite)
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Company Info ───────────────────────────────────────────────────── -->
+  <div class="card mb-4 admin-only">
+    <div class="card-header bg-primary text-white fw-semibold py-2">
+      <i class="bi bi-building me-1"></i>ข้อมูลบริษัท/ร้าน (แสดงในใบกำกับสินค้า)
+    </div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-12">
+          <label class="form-label fw-semibold">ชื่อบริษัท/ร้าน</label>
+          <input type="text" id="companyName" class="form-control">
+        </div>
+        <div class="col-12">
+          <label class="form-label fw-semibold">ที่อยู่</label>
+          <textarea id="address" class="form-control" rows="2"></textarea>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">เบอร์โทร</label>
+          <input type="text" id="phone" class="form-control">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">เลขประจำตัวผู้เสียภาษี</label>
+          <input type="text" id="taxId" class="form-control" placeholder="13 หลัก">
+        </div>
+        <div class="col-12">
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="showHeader" role="switch">
+            <label class="form-check-label fw-semibold" for="showHeader">
+              แสดงหัวกระดาษในใบกำกับสินค้า
+              <span class="text-muted fw-normal small ms-1">(ชื่อบริษัท ที่อยู่ เบอร์โทร)</span>
+            </label>
+          </div>
+        </div>
+      </div>
+      <button class="btn btn-primary mt-3" onclick="saveCompanySettings()">
+        <i class="bi bi-save me-1"></i>บันทึกข้อมูลบริษัท
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Invoice Header Preview ─────────────────────────────────────────── -->
+  <div class="card mb-4 admin-only">
+    <div class="card-header bg-light fw-semibold py-2">ตัวอย่างหัวใบกำกับสินค้า</div>
+    <div class="card-body">
+      <div class="border rounded p-3 bg-white" style="font-family:'Sarabun',sans-serif">
+        <div id="prev_header_row" class="row border-bottom pb-2 mb-2">
+          <div class="col-8">
+            <div id="prev_name" class="fw-bold" style="font-size:14px"></div>
+            <div id="prev_address" style="font-size:11px;color:#555"></div>
+            <div id="prev_phone" style="font-size:11px;color:#555"></div>
+          </div>
+          <div class="col-4 text-end" style="font-size:11px;color:#555">
+            <div><i class="bi bi-image text-muted"></i> โลโก้</div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="col-8">
+            <div class="fw-bold" style="font-size:15px">ใบกำกับสินค้า</div>
+          </div>
+          <div class="col-4 text-end">
+            <div style="font-size:12px"><strong>เลขที่</strong> 030569-001</div>
+            <div style="font-size:12px"><strong>วันที่</strong> 03/05/2569</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Folder Settings ──────────────────────────────────────────────── -->
+  <div class="card mb-4 admin-only">
+    <div class="card-header bg-dark text-white fw-semibold py-2">
+      <i class="bi bi-folder2-open me-1"></i>ตั้งค่า Folder จัดเก็บไฟล์
+    </div>
+    <div class="card-body">
+      <div id="fsApiAlert" class="alert alert-warning d-none mb-3 py-2" role="alert">
+        <i class="bi bi-exclamation-triangle me-1"></i>
+        เบราว์เซอร์นี้ไม่รองรับ File System Access API — กรุณาใช้ <strong>Chrome</strong> หรือ <strong>Edge</strong> เวอร์ชัน 86+
+      </div>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="fw-semibold mb-1 d-block">
+            <i class="bi bi-file-earmark-pdf text-danger me-1"></i>Folder จัดเก็บ PDF ใบกำกับ
+          </label>
+          <div class="input-group input-group-sm">
+            <span class="input-group-text bg-light"><i class="bi bi-folder2"></i></span>
+            <input type="text" id="pdfFolderName" class="form-control" readonly placeholder="ยังไม่ได้เลือก Folder" style="background:#f8f9fa">
+            <button class="btn btn-outline-secondary" id="btnPickPdf" onclick="pickFolder('pdf')">
+              <i class="bi bi-folder2-open me-1"></i>เลือก
+            </button>
+            <button class="btn btn-outline-danger" onclick="clearFolder('pdf')" title="ล้าง">
+              <i class="bi bi-x-lg"></i>
+            </button>
+          </div>
+          <div class="form-text">PDF บันทึกอัตโนมัติเมื่อบันทึก/พิมพ์ใบกำกับ</div>
+        </div>
+        <div class="col-md-6">
+          <label class="fw-semibold mb-1 d-block">
+            <i class="bi bi-folder2 text-warning me-1"></i>Folder จัดเก็บ Backup
+          </label>
+          <div class="input-group input-group-sm">
+            <span class="input-group-text bg-light"><i class="bi bi-folder2"></i></span>
+            <input type="text" id="backupFolderName" class="form-control" readonly placeholder="ยังไม่ได้เลือก Folder" style="background:#f8f9fa">
+            <button class="btn btn-outline-secondary" id="btnPickBackup" onclick="pickFolder('backup')">
+              <i class="bi bi-folder2-open me-1"></i>เลือก
+            </button>
+            <button class="btn btn-outline-danger" onclick="clearFolder('backup')" title="ล้าง">
+              <i class="bi bi-x-lg"></i>
+            </button>
+          </div>
+          <div class="form-text">ไฟล์ Backup บันทึกอัตโนมัติเมื่อกด Export</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Auto Backup Settings ──────────────────────────────────────────── -->
+  <div class="card mb-4 admin-only">
+    <div class="card-header bg-success text-white fw-semibold py-2">
+      <i class="bi bi-cloud-arrow-up-fill me-1"></i>ตั้งค่า Auto Backup
+    </div>
+    <div class="card-body">
+      <div class="row g-3 align-items-start">
+        <div class="col-md-4">
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="abEnabled" onchange="updateAbUi()">
+            <label class="form-check-label fw-semibold" for="abEnabled">เปิดใช้งาน Auto Backup</label>
+          </div>
+          <div class="text-muted small mt-1">แจ้งเตือนเมื่อถึงรอบสำรองข้อมูล</div>
+        </div>
+        <div class="col-md-3" id="abIntervalWrap">
+          <label class="form-label fw-semibold mb-1">ความถี่</label>
+          <select id="abInterval" class="form-select form-select-sm">
+            <option value="daily">ทุกวัน</option>
+            <option value="weekly">ทุกสัปดาห์</option>
+            <option value="monthly">ทุกเดือน</option>
+          </select>
+        </div>
+        <div class="col-md-5" id="abAutoDownloadWrap">
+          <label class="form-label fw-semibold mb-1">ตัวเลือกเพิ่มเติม</label>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="abAutoDownload">
+            <label class="form-check-label" for="abAutoDownload">ดาวน์โหลดอัตโนมัติเมื่อถึงเวลา (เปิดหน้า Settings)</label>
+          </div>
+        </div>
+      </div>
+      <div id="abStatus" class="mt-3 small"></div>
+      <button class="btn btn-success btn-sm mt-3" onclick="saveAutoBackupConfig()">
+        <i class="bi bi-save me-1"></i>บันทึกการตั้งค่า Auto Backup
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Manual Backup ─────────────────────────────────────────────────── -->
+  <div class="card mb-4 admin-only">
+    <div class="card-header bg-primary text-white fw-semibold py-2">
+      <i class="bi bi-download me-1"></i>สำรองข้อมูล (Manual Backup)
+    </div>
+    <div class="card-body">
+      <div id="storageBar" class="mb-3"></div>
+      <div class="row g-3">
+        <div class="col-6 col-md-3">
+          <div class="border rounded p-3 text-center h-100 d-flex flex-column">
+            <i class="bi bi-database-fill-down fs-3 text-primary d-block mb-2"></i>
+            <div class="fw-semibold mb-1">Full Backup</div>
+            <div class="text-muted small mb-auto">ข้อมูลทุกอย่าง รวม Log</div>
+            <button class="btn btn-primary btn-sm mt-2 w-100" onclick="exportFull()">
+              <i class="bi bi-download me-1"></i>Export
+            </button>
+          </div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="border rounded p-3 text-center h-100 d-flex flex-column">
+            <i class="bi bi-file-earmark-zip fs-3 text-info d-block mb-2"></i>
+            <div class="fw-semibold mb-1">ข้อมูลเท่านั้น</div>
+            <div class="text-muted small mb-auto">ไม่รวม Activity/Login Log</div>
+            <button class="btn btn-info btn-sm mt-2 w-100 text-white" onclick="exportDataOnly()">
+              <i class="bi bi-download me-1"></i>Export
+            </button>
+          </div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="border rounded p-3 text-center h-100 d-flex flex-column">
+            <i class="bi bi-file-earmark-text fs-3 text-secondary d-block mb-2"></i>
+            <div class="fw-semibold mb-1">Logs เท่านั้น</div>
+            <div class="text-muted small mb-auto">Activity Log + Login Log</div>
+            <button class="btn btn-secondary btn-sm mt-2 w-100" onclick="exportLogsOnly()">
+              <i class="bi bi-download me-1"></i>Export
+            </button>
+          </div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="border rounded p-3 text-center h-100 d-flex flex-column">
+            <i class="bi bi-gear-fill fs-3 text-warning d-block mb-2"></i>
+            <div class="fw-semibold mb-1">Config เท่านั้น</div>
+            <div class="text-muted small mb-auto">ตั้งค่า + ราคาสินค้า + วิธีชำระ</div>
+            <button class="btn btn-warning btn-sm mt-2 w-100" onclick="exportConfigOnly()">
+              <i class="bi bi-download me-1"></i>Export
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── Archive Old Invoices ─────────────────────────────────────────── -->
+  <div class="card mb-4 admin-only">
+    <div class="card-header bg-warning text-dark fw-semibold py-2">
+      <i class="bi bi-archive me-1"></i>จัดเก็บใบกำกับเก่า (Archive)
+    </div>
+    <div class="card-body">
+      <p class="text-muted small mb-3">
+        ย้ายใบกำกับที่ <strong>ชำระครบหรือเกิน</strong> และมีอายุมากกว่า <strong>3 เดือน</strong>
+        ออกจาก localStorage → อัปโหลดไป Google Drive แล้วลบออกจากเครื่อง
+        เพื่อเพิ่มพื้นที่ว่าง
+      </p>
+      <div id="archivePreview" class="alert alert-info d-none small py-2 mb-3"></div>
+      <div class="d-flex gap-2 flex-wrap mb-4">
+        <button class="btn btn-outline-secondary btn-sm" onclick="previewArchive()">
+          <i class="bi bi-search me-1"></i>ดูตัวอย่างก่อน Archive
+        </button>
+        <button class="btn btn-warning btn-sm" id="btnRunArchive" disabled onclick="runArchive()">
+          <i class="bi bi-archive me-1"></i>Archive ตอนนี้
+        </button>
+      </div>
+
+      <hr class="my-3">
+      <p class="fw-semibold mb-1"><i class="bi bi-images me-1"></i>ย้ายรูปภาพเก่าไป Google Drive</p>
+      <p class="text-muted small mb-3">
+        สแกนรายการชำระเงินทั้งหมด — รูปภาพที่ยังเป็น base64 (เก่า) จะถูก
+        อัปโหลดไป Drive แล้วแทนที่ด้วย link เพื่อเพิ่มพื้นที่ว่างทันที
+        ต้องเชื่อมต่อ Google Drive ก่อน
+      </p>
+      <div id="imgMigrateStatus" class="alert d-none small py-2 mb-3"></div>
+      <button class="btn btn-outline-primary btn-sm" id="btnMigrateImgs" onclick="migratePaymentImages()">
+        <i class="bi bi-cloud-upload me-1"></i>ย้ายรูปภาพไป Drive
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Export Logs ───────────────────────────────────────────────────── -->
+  <div class="card mb-4 admin-only">
+    <div class="card-header bg-secondary text-white fw-semibold py-2">
+      <i class="bi bi-file-earmark-spreadsheet me-1"></i>Export Log ไฟล์
+    </div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="border rounded p-3 h-100">
+            <div class="fw-semibold mb-1">
+              <i class="bi bi-clock-history me-1 text-primary"></i>Activity Log
+            </div>
+            <div id="activityLogCount" class="text-muted small mb-3">กำลังโหลด...</div>
+            <div class="d-flex gap-2 flex-wrap">
+              <button class="btn btn-outline-primary btn-sm" onclick="exportActivityLog('json')">
+                <i class="bi bi-filetype-json me-1"></i>JSON
+              </button>
+              <button class="btn btn-outline-success btn-sm" onclick="exportActivityLog('csv')">
+                <i class="bi bi-filetype-csv me-1"></i>CSV (Excel)
+              </button>
+              <button class="btn btn-outline-warning btn-sm" onclick="archiveLogs()">
+                <i class="bi bi-archive me-1"></i>Archive &gt;6 เดือน
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="border rounded p-3 h-100">
+            <div class="fw-semibold mb-1">
+              <i class="bi bi-shield-check me-1 text-success"></i>Login Log
+            </div>
+            <div id="loginLogCount" class="text-muted small mb-3">กำลังโหลด...</div>
+            <div class="d-flex gap-2 flex-wrap">
+              <button class="btn btn-outline-primary btn-sm" onclick="exportLoginLog('json')">
+                <i class="bi bi-filetype-json me-1"></i>JSON
+              </button>
+              <button class="btn btn-outline-success btn-sm" onclick="exportLoginLog('csv')">
+                <i class="bi bi-filetype-csv me-1"></i>CSV (Excel)
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Import / Restore ──────────────────────────────────────────────── -->
+  <div class="card mb-4 admin-only">
+    <div class="card-header bg-warning fw-semibold py-2">
+      <i class="bi bi-upload me-1"></i>นำเข้าข้อมูล / Restore
+    </div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="border rounded p-3 text-center">
+            <i class="bi bi-plus-circle fs-3 text-success d-block mb-2"></i>
+            <div class="fw-semibold mb-1">Merge (เพิ่มข้อมูลใหม่)</div>
+            <div class="text-muted small mb-3">เพิ่มเฉพาะรายการที่ยังไม่มีในระบบ<br>(ไม่ลบข้อมูลเดิม)</div>
+            <input type="file" id="importFileMerge" accept=".json" style="display:none" onchange="importData(this,'merge')">
+            <button class="btn btn-success btn-sm" onclick="document.getElementById('importFileMerge').click()">
+              <i class="bi bi-upload me-1"></i>เลือกไฟล์ (Merge)
+            </button>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="border rounded p-3 text-center border-danger">
+            <i class="bi bi-arrow-repeat fs-3 text-danger d-block mb-2"></i>
+            <div class="fw-semibold mb-1 text-danger">Overwrite (เขียนทับ)</div>
+            <div class="text-muted small mb-3">แทนที่ข้อมูลทั้งหมดด้วยไฟล์ที่นำเข้า<br><strong class="text-danger">ข้อมูลเดิมจะหายทั้งหมด!</strong></div>
+            <input type="file" id="importFileOverwrite" accept=".json" style="display:none" onchange="importData(this,'overwrite')">
+            <button class="btn btn-outline-danger btn-sm" onclick="document.getElementById('importFileOverwrite').click()">
+              <i class="bi bi-upload me-1"></i>เลือกไฟล์ (Overwrite)
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── Danger Zone ───────────────────────────────────────────────────── -->
+  <div class="card mb-4 admin-only">
+    <div class="card-header bg-danger text-white fw-semibold py-2">
+      <i class="bi bi-exclamation-triangle me-1"></i>Danger Zone
+    </div>
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-center">
+        <div>
+          <div class="fw-semibold text-danger">ล้างข้อมูลทั้งหมด</div>
+          <div class="text-muted small">ลบข้อมูลทุกอย่างออกจากระบบ (ไม่สามารถกู้คืนได้)</div>
+        </div>
+        <button class="btn btn-outline-danger btn-sm" onclick="clearAllData()">
+          <i class="bi bi-trash me-1"></i>ล้างทั้งหมด
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Stats ─────────────────────────────────────────────────────────── -->
+  <div class="card mb-4 admin-only">
+    <div class="card-header bg-light fw-semibold py-2">
+      <i class="bi bi-bar-chart me-1"></i>สถิติข้อมูลในระบบ
+    </div>
+    <div class="card-body">
+      <div class="row g-3 text-center" id="statsRow"></div>
+    </div>
+  </div>
+
+  <!-- ── Error Log ────────────────────────────────────────────────────── -->
+  <div class="card mb-4 admin-only">
+    <div class="card-header bg-danger text-white fw-semibold py-2 d-flex justify-content-between align-items-center">
+      <span><i class="bi bi-bug me-1"></i>Error Log <span id="errorLogBadge" class="badge bg-white text-danger ms-1"></span></span>
+      <div class="d-flex gap-2">
+        <button class="btn btn-sm btn-light" onclick="renderErrorLog()"><i class="bi bi-arrow-clockwise me-1"></i>รีเฟรช</button>
+        <button class="btn btn-sm btn-outline-light" onclick="exportErrorLog()"><i class="bi bi-download me-1"></i>Export</button>
+        <button class="btn btn-sm btn-outline-light" onclick="clearErrorLog()"><i class="bi bi-trash me-1"></i>ล้าง</button>
+      </div>
+    </div>
+    <div class="card-body p-0" id="errorLogContainer">
+      <div class="text-muted small text-center py-4">กำลังโหลด...</div>
+    </div>
+  </div>
+
+  <!-- ── Health Check ─────────────────────────────────────────────────── -->
+  <div class="card mb-4 admin-only">
+    <div class="card-header bg-dark text-white fw-semibold py-2 d-flex justify-content-between align-items-center">
+      <span><i class="bi bi-heart-pulse me-1"></i>ตรวจสอบสุขภาพข้อมูล (Health Check)</span>
+      <button class="btn btn-sm btn-light" onclick="runHealthCheck()">
+        <i class="bi bi-play-fill me-1"></i>ตรวจสอบ
+      </button>
+    </div>
+    <div class="card-body p-0" id="healthCheckResult">
+      <div class="text-muted small text-center py-4">กด "ตรวจสอบ" เพื่อเริ่มวิเคราะห์ข้อมูล</div>
+    </div>
+  </div>
+
+  <!-- ── App Version ───────────────────────────────────────────────────── -->
+  <div class="card mb-4">
+    <div class="card-header bg-secondary text-white fw-semibold py-2">
+      <i class="bi bi-info-circle me-1"></i>เวอร์ชันโปรแกรม
+    </div>
+    <div class="card-body">
+      <div class="row g-3 align-items-center">
+        <div class="col-md-6">
+          <table class="table table-sm table-borderless mb-0">
+            <tr>
+              <td class="text-muted fw-semibold" style="width:130px">เวอร์ชัน</td>
+              <td><span class="badge bg-primary fs-6" id="versionBadge"></span></td>
+            </tr>
+            <tr>
+              <td class="text-muted fw-semibold">วันที่อัปเดต</td>
+              <td id="versionDate" class="fw-semibold"></td>
+            </tr>
+            <tr>
+              <td class="text-muted fw-semibold">เครื่องนี้</td>
+              <td id="versionDevice" class="small text-muted"></td>
+            </tr>
+          </table>
+        </div>
+        <div class="col-md-6 text-md-end">
+          <div class="text-muted small mb-2">เปรียบเทียบเวอร์ชันกับเครื่องอื่น</div>
+          <div class="input-group input-group-sm" style="max-width:260px;margin-left:auto">
+            <input type="text" id="versionOther" class="form-control" placeholder="พิมพ์เวอร์ชันเครื่องอื่น เช่น 1.0.0">
+            <button class="btn btn-outline-secondary" onclick="compareVersion()">เปรียบเทียบ</button>
+          </div>
+          <div id="versionCompareResult" class="mt-2 small"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Firestore Sync ──────────────────────────────────────────────────── -->
+  <div class="card mb-4 admin-only" id="firestoreCard">
+    <div class="card-header fw-semibold py-2" style="background:#ff6d00;color:#fff">
+      <i class="bi bi-arrow-repeat me-1"></i>Firestore Sync — ซิงค์ข้ามอุปกรณ์
+    </div>
+    <div class="card-body">
+      <div id="fsStatusBar" class="mb-3 small">
+        <span id="fsStatusIcon">⏳</span>
+        <span id="fsStatusText" class="ms-1 text-muted">กำลังตรวจสอบ...</span>
+      </div>
+      <div id="fsSyncMsg" class="alert d-none small py-2 mb-3"></div>
+      <p class="text-muted small mb-3">
+        กด <strong>Push All → Firestore</strong> เพื่ออัปโหลดข้อมูลจากเครื่องนี้ไปยัง Firestore
+        ทำครั้งเดียวหลังตั้งค่าครั้งแรก — หลังจากนั้นซิงค์อัตโนมัติทุกการเขียน
+      </p>
+      <button class="btn btn-warning btn-sm" id="btnFsPush" onclick="fsPushAll()">
+        <i class="bi bi-cloud-upload me-1"></i>Push All → Firestore
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Google Drive ────────────────────────────────────────────────────── -->
+  <div id="driveCard" class="card mb-4" style="display:none">
+    <div class="card-header fw-semibold py-2" style="background:#1a73e8;color:#fff">
+      <i class="bi bi-cloud me-1"></i>Google Drive — จัดเก็บ PDF &amp; รูปภาพ
+    </div>
+    <div class="card-body">
+      <div class="row g-3 align-items-start">
+
+        <!-- สถานะ -->
+        <div class="col-md-4">
+          <div id="driveStatusBox" class="border rounded p-3 text-center">
+            <div id="driveStatusIcon" class="fs-1 mb-1">☁</div>
+            <div id="driveStatusText" class="fw-semibold mb-2">ยังไม่ได้เชื่อมต่อ</div>
+            <button id="driveSignInBtn" class="btn btn-primary btn-sm"
+                    onclick="driveSignIn()">
+              <i class="bi bi-google me-1"></i>เข้าสู่ระบบ Google
+            </button>
+            <button id="driveSignOutBtn" class="btn btn-outline-secondary btn-sm d-none"
+                    onclick="driveSignOut()">
+              <i class="bi bi-box-arrow-right me-1"></i>ออกจากระบบ
+            </button>
+          </div>
+        </div>
+
+        <!-- สถิติ -->
+        <div class="col-md-8">
+          <div id="driveStats" class="d-none">
+            <div class="row g-2 mb-3">
+              <div class="col-4">
+                <div class="border rounded p-2 text-center">
+                  <div class="fs-4 fw-bold text-primary" id="driveFileCount">—</div>
+                  <div class="small text-muted">ไฟล์ทั้งหมด</div>
+                </div>
+              </div>
+              <div class="col-4">
+                <div class="border rounded p-2 text-center">
+                  <div class="fs-4 fw-bold text-success" id="driveCachedCount">—</div>
+                  <div class="small text-muted">cache (&lt;30 วัน)</div>
+                </div>
+              </div>
+              <div class="col-4">
+                <div class="border rounded p-2 text-center">
+                  <div class="fs-4 fw-bold text-warning" id="driveCacheSize">—</div>
+                  <div class="small text-muted">ขนาด cache</div>
+                </div>
+              </div>
+            </div>
+            <div class="alert alert-info py-2 small mb-2">
+              <i class="bi bi-info-circle me-1"></i>
+              ไฟล์ &lt; 30 วัน: เปิดเร็ว (จาก cache ในเครื่อง) |
+              ไฟล์ &gt; 30 วัน: โหลดจาก Google Drive อัตโนมัติ
+            </div>
+            <div id="driveSyncStatus" class="alert d-none small py-2 mb-2"></div>
+            <div class="d-flex flex-wrap gap-2">
+              <button class="btn btn-outline-secondary btn-sm" onclick="refreshDriveStats()">
+                <i class="bi bi-arrow-clockwise me-1"></i>รีเฟรชสถิติ
+              </button>
+              <button class="btn btn-success btn-sm" onclick="drivePushAll()" id="btnDrivePush">
+                <i class="bi bi-cloud-upload me-1"></i>Push All → Drive
+              </button>
+              <button class="btn btn-primary btn-sm" onclick="drivePullAll()" id="btnDrivePull">
+                <i class="bi bi-cloud-download me-1"></i>Pull All ← Drive
+              </button>
+            </div>
+          </div>
+          <div id="driveNoConfig" class="d-none">
+            <div class="alert alert-warning py-2 small mb-0">
+              <i class="bi bi-exclamation-triangle me-1"></i>
+              ยังไม่ได้ตั้งค่า Google Client ID<br>
+              สร้างไฟล์ <code>drive-config.js</code> จาก <code>drive-config.example.js</code>
+              แล้วใส่ Client ID จาก Google Cloud Console
+            </div>
+          </div>
+        </div>
+
+        <!-- รายการไฟล์ล่าสุด -->
+        <div class="col-12" id="driveFileListWrap" style="display:none">
+          <hr class="my-2">
+          <div class="fw-semibold small mb-2">
+            <i class="bi bi-folder me-1"></i>ไฟล์ล่าสุด (30 วัน)
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0" style="font-size:13px">
+              <thead class="table-light">
+                <tr><th>ชื่อไฟล์</th><th>ใบกำกับ</th><th>วันที่</th><th>ขนาด</th><th>cache</th><th></th></tr>
+              </thead>
+              <tbody id="driveFileListBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+</div><!-- /page-wrap -->
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script><script src="idb.js"></script>
+<script src="drive-config.js" onerror="window.GOOGLE_CLIENT_ID=''"></script>
+<script src="drive-store.js"></script>
+<script src="settings.js"></script>
+</body>
+</html>

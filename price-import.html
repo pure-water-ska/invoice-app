@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0d6efd">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ใบกำกับ">
+<title>นำเข้าราคาจาก Excel</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+.drop-zone {
+  border: 3px dashed #0d6efd; border-radius: 12px; padding: 48px 24px;
+  text-align: center; cursor: pointer; transition: background .2s;
+}
+.drop-zone:hover, .drop-zone.dragover { background: #e7f1ff; }
+.drop-zone.disabled { opacity: .45; pointer-events: none; }
+
+/* Preview matrix table */
+#previewWrap { overflow-x: auto; }
+#matrixTable { font-size: 13px; min-width: 600px; }
+#matrixTable th { white-space: nowrap; background: #212529; color: #fff; }
+#matrixTable th.prod-col { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+.cust-match-ok   { background: #f0fff4; }
+.cust-match-warn { background: #fffde7; }
+.cust-match-no   { background: #fff5f5; }
+.price-cell { text-align:right; padding: 4px 8px !important; }
+.price-cell.empty { color: #bbb; }
+.price-cell.changed { background: #fff3cd !important; }
+.ship-badge-รับหน้าโรงงาน  { background: #198754; }
+.ship-badge-จัดส่ง  { background: #0d6efd; }
+.ship-badge-ณัฐวุฒิ { background: #6f42c1; }
+
+/* Step indicator */
+.step-row { display:flex; gap:.5rem; margin-bottom:1.25rem; align-items:center; flex-wrap:wrap; }
+.step-pill { display:flex; align-items:center; gap:.4rem; padding:.35rem .85rem;
+             border-radius:999px; font-size:13px; font-weight:600;
+             background:#e9ecef; color:#6c757d; }
+.step-pill.active  { background:#0d6efd; color:#fff; }
+.step-pill.done    { background:#198754; color:#fff; }
+.step-sep { color:#adb5bd; font-size:18px; }
+</style>
+</head>
+<body>
+<div id="navContainer"></div>
+<div class="page-wrap">
+
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0 fw-bold">
+      <i class="bi bi-file-earmark-excel me-2 text-success"></i>นำเข้าราคาจาก Excel
+    </h5>
+    <button class="btn btn-success d-none" id="saveBtn" onclick="savePrices()">
+      <i class="bi bi-save me-1"></i>บันทึกราคา
+      (<span id="saveCount">0</span> รายการ)
+    </button>
+  </div>
+  <div id="alertBox" class="mb-3"></div>
+
+  <!-- Step indicator -->
+  <div class="step-row">
+    <div class="step-pill active" id="stp1"><span>1</span> เลือกประเภทราคา</div>
+    <div class="step-sep">›</div>
+    <div class="step-pill" id="stp2"><span>2</span> อัปโหลด Excel</div>
+    <div class="step-sep">›</div>
+    <div class="step-pill" id="stp3"><span>3</span> ตรวจสอบ &amp; บันทึก</div>
+  </div>
+
+  <!-- ═══ Step 1: Shipping Type ═══════════════════════════════════════════ -->
+  <div id="step1">
+    <div class="card mb-4">
+      <div class="card-header bg-primary text-white fw-semibold">
+        <i class="bi bi-truck me-1"></i>เลือกประเภทราคาที่ต้องการนำเข้า
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">
+          ราคาที่นำเข้าจะถูกบันทึกใน <strong>ประเภทนี้เท่านั้น</strong>
+          — ราคาประเภทอื่นจะไม่ถูกเปลี่ยนแปลง
+        </p>
+        <div class="d-flex gap-3 flex-wrap">
+          <button class="btn btn-outline-success btn-lg px-4 ship-btn" data-ship="รับหน้าโรงงาน"
+                  onclick="selectShipType(this)">
+            <i class="bi bi-person-walking d-block fs-2 mb-1"></i>
+            รับหน้าโรงงาน
+          </button>
+          <button class="btn btn-outline-primary btn-lg px-4 ship-btn" data-ship="จัดส่ง"
+                  onclick="selectShipType(this)">
+            <i class="bi bi-truck d-block fs-2 mb-1"></i>
+            จัดส่ง
+          </button>
+          <button class="btn btn-outline-purple btn-lg px-4 ship-btn" data-ship="ณัฐวุฒิ"
+                  onclick="selectShipType(this)"
+                  style="border-color:#6f42c1;color:#6f42c1">
+            <i class="bi bi-person-badge d-block fs-2 mb-1"></i>
+            ณัฐวุฒิ
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Step 2: Upload ══════════════════════════════════════════════════ -->
+  <div id="step2" class="d-none">
+    <div class="alert alert-info d-flex align-items-center gap-2 py-2 mb-3">
+      <i class="bi bi-info-circle-fill"></i>
+      <span>ประเภทราคา: <strong id="shipLabel2">-</strong>
+        <button class="btn btn-sm btn-link py-0 ms-2" onclick="backToStep1()">เปลี่ยน</button>
+      </span>
+    </div>
+
+    <div class="card mb-3">
+      <div class="card-header bg-success text-white fw-semibold py-2">
+        <i class="bi bi-question-circle me-1"></i>รูปแบบ Excel ที่รองรับ
+      </div>
+      <div class="card-body py-2">
+        <div class="table-responsive">
+          <table class="table table-sm table-bordered mb-0" style="font-size:13px;max-width:600px">
+            <thead class="table-dark">
+              <tr>
+                <th>(คอลัมน์ A)</th>
+                <th>ขวด PET 350 มล.</th>
+                <th>ขวด PET 600 มล.</th>
+                <th>ขวด PET 1500 มล.</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td class="fw-semibold">หจก.นันทโย</td><td>1.55</td><td>1.65</td><td>3.00</td></tr>
+              <tr><td class="fw-semibold">พอเพียง</td><td>1.15</td><td>1.25</td><td>3.00</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ul class="mt-2 mb-0 small text-muted">
+          <li><strong>แถวแรก</strong>: หัวคอลัมน์ — ชื่อสินค้า (คอลัมน์ A ว่างหรือ "ชื่อลูกค้า")</li>
+          <li><strong>แถวถัดไป</strong>: ชื่อลูกค้า (คอลัมน์ A) + ราคาแต่ละสินค้า</li>
+          <li>เซลล์ว่าง = ไม่นำเข้าราคาสินค้านั้น</li>
+          <li>รองรับ .xlsx / .xls</li>
+        </ul>
+      </div>
+    </div>
+
+    <div id="dropZone" class="drop-zone mb-3"
+         onclick="document.getElementById('xlsxInput').click()"
+         ondrop="handleDrop(event)"
+         ondragover="event.preventDefault();this.classList.add('dragover')"
+         ondragleave="this.classList.remove('dragover')">
+      <i class="bi bi-file-earmark-excel display-4 text-success d-block mb-3"></i>
+      <div class="fw-semibold fs-5 mb-1">วาง Excel ที่นี่ หรือคลิกเพื่อเลือกไฟล์</div>
+      <div class="text-muted small">.xlsx / .xls</div>
+      <input type="file" id="xlsxInput" accept=".xlsx,.xls"
+             style="display:none" onchange="handleFile(this.files[0])">
+    </div>
+
+    <!-- Sheet selector (hidden until file loaded) -->
+    <div id="sheetRow" class="d-none mb-3 d-flex align-items-center gap-2">
+      <label class="fw-semibold mb-0 small">Sheet:</label>
+      <select id="sheetSel" class="form-select form-select-sm" style="width:auto"
+              onchange="parseSheet()"></select>
+      <label class="fw-semibold mb-0 small ms-3">แถว header:</label>
+      <input type="number" id="headerRow" class="form-control form-control-sm"
+             style="width:75px" value="1" min="1" max="10"
+             onchange="parseSheet()">
+      <button class="btn btn-sm btn-outline-secondary" onclick="resetFile()">
+        <i class="bi bi-arrow-counterclockwise me-1"></i>เลือกไฟล์ใหม่
+      </button>
+    </div>
+  </div>
+
+  <!-- ═══ Step 3: Preview ═════════════════════════════════════════════════ -->
+  <div id="step3" class="d-none">
+    <div class="alert alert-secondary d-flex align-items-center gap-2 py-2 mb-3">
+      <i class="bi bi-info-circle"></i>
+      <span>ประเภทราคา: <strong id="shipLabel3">-</strong> &nbsp;|&nbsp;
+        ไฟล์: <strong id="fileLabel">-</strong>
+        <button class="btn btn-sm btn-link py-0 ms-2" onclick="backToStep2()">เปลี่ยนไฟล์</button>
+      </span>
+    </div>
+
+    <!-- Summary badges -->
+    <div class="d-flex gap-2 mb-3 flex-wrap" id="summaryBadges"></div>
+
+    <!-- Legend -->
+    <div class="d-flex gap-3 mb-2 small flex-wrap">
+      <span><span class="badge bg-success">●</span> จับคู่ลูกค้าได้</span>
+      <span><span class="badge bg-warning text-dark">●</span> จับคู่ใกล้เคียง</span>
+      <span><span class="badge bg-danger">●</span> ไม่พบลูกค้าในระบบ</span>
+      <span class="ms-2 text-muted">| เซลล์สีเหลือง = ราคาเปลี่ยนจากเดิม</span>
+    </div>
+
+    <div id="previewWrap">
+      <table class="table table-bordered table-hover align-middle mb-0" id="matrixTable">
+        <thead><tr id="matrixHeader"></tr></thead>
+        <tbody id="matrixBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div><!-- /page-wrap -->
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script>
+<script>
+const session = Auth.require();
+if (!Auth.isAdmin()) location.href = 'dashboard.html';
+DB.init();
+Nav.render('price-import');
+
+// ─── State ─────────────────────────────────────────────────────────────────
+let _shipType   = '';       // รับหน้าโรงงาน / จัดส่ง / ณัฐวุฒิ
+let _wb         = null;
+let _fileName   = '';
+let _parsed     = null;     // { prodNames[], rows[{custRaw, prices[]}] }
+let _matches    = null;     // { products[], customers[], cells[][] }
+
+// ─── Step 1: Select shipping type ─────────────────────────────────────────
+function selectShipType(btn) {
+  _shipType = btn.dataset.ship;
+  document.querySelectorAll('.ship-btn').forEach(b => {
+    b.classList.remove('active','btn-success','btn-primary');
+    b.style.fontWeight = '';
+  });
+  btn.classList.add('active');
+  btn.style.fontWeight = '700';
+
+  setStep(2);
+  document.getElementById('shipLabel2').textContent = _shipType;
+  document.getElementById('shipLabel3').textContent = _shipType;
+}
+
+function backToStep1() {
+  resetFile();
+  setStep(1);
+}
+function backToStep2() {
+  resetFile();
+  setStep(2);
+}
+
+// ─── Step 2: File ──────────────────────────────────────────────────────────
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('dropZone').classList.remove('dragover');
+  const f = e.dataTransfer.files[0];
+  if (f) handleFile(f);
+}
+
+function handleFile(file) {
+  if (!file) return;
+  _fileName = file.name;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      _wb = XLSX.read(e.target.result, { type: 'array' });
+      const sel = document.getElementById('sheetSel');
+      sel.innerHTML = _wb.SheetNames.map(n => `<option>${n}</option>`).join('');
+      document.getElementById('sheetRow').classList.remove('d-none');
+      document.getElementById('dropZone').classList.add('disabled');
+      parseSheet();
+    } catch (err) {
+      showAlert('อ่านไฟล์ไม่สำเร็จ: ' + err.message, 'danger');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function parseSheet() {
+  const sheetName = document.getElementById('sheetSel').value;
+  const hRowIdx   = parseInt(document.getElementById('headerRow').value || 1) - 1;
+  const ws        = _wb.Sheets[sheetName];
+  const raw       = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+  if (raw.length <= hRowIdx) {
+    showAlert('ไม่พบข้อมูลในชีตนี้', 'warning'); return;
+  }
+
+  const headerRow = raw[hRowIdx];
+  // Product names = columns 1 onwards of header row
+  const prodNames = headerRow.slice(1).map(v => String(v).trim()).filter(v => v);
+  if (prodNames.length === 0) {
+    showAlert('ไม่พบชื่อสินค้าในแถว header (คอลัมน์ B เป็นต้นไป)', 'warning'); return;
+  }
+
+  // Data rows
+  const rows = [];
+  for (let i = hRowIdx + 1; i < raw.length; i++) {
+    const row = raw[i];
+    const custRaw = String(row[0] || '').trim();
+    if (!custRaw) continue;
+    const prices = prodNames.map((_, pi) => {
+      const v = row[pi + 1];
+      const n = parseFloat(String(v).replace(/[^\d.]/g, ''));
+      return isNaN(n) ? null : n;
+    });
+    // Skip row if all prices are null
+    if (prices.every(p => p === null)) continue;
+    rows.push({ custRaw, prices });
+  }
+
+  if (rows.length === 0) {
+    showAlert('ไม่พบแถวข้อมูลลูกค้า', 'warning'); return;
+  }
+
+  _parsed = { prodNames, rows };
+  buildMatches();
+  renderPreview();
+  setStep(3);
+  document.getElementById('fileLabel').textContent = _fileName;
+}
+
+// ─── Matching ──────────────────────────────────────────────────────────────
+function buildMatches() {
+  const dbProducts  = DB.getProducts();
+  const dbCustomers = DB.getCustomers();
+  const dbPricing   = DB.getPricing();
+
+  // Match products
+  const products = _parsed.prodNames.map(name => {
+    const exact = dbProducts.find(p => p.name === name);
+    if (exact) return { name, dbProd: exact, matchType: 'exact' };
+    // Partial match
+    const partial = dbProducts.find(p =>
+      p.name.includes(name) || name.includes(p.name)
+    );
+    return { name, dbProd: partial || null, matchType: partial ? 'partial' : 'none' };
+  });
+
+  // Match customers + build cells
+  const customers = _parsed.rows.map(row => {
+    const exact = dbCustomers.find(c => c.name === row.custRaw);
+    if (exact) return { ...row, dbCust: exact, matchType: 'exact' };
+    // Partial
+    let best = null, bestLen = 0;
+    for (const c of dbCustomers) {
+      if (c.name.length > bestLen &&
+          (c.name.includes(row.custRaw) || row.custRaw.includes(c.name))) {
+        best = c; bestLen = c.name.length;
+      }
+    }
+    return { ...row, dbCust: best || null, matchType: best ? 'partial' : 'none' };
+  });
+
+  // Build cells: for each customer row, each product col → {price, oldPrice, include}
+  const cells = customers.map(cust => {
+    return products.map((prod, pi) => {
+      const newPrice = cust.prices[pi];
+      if (newPrice === null) return { newPrice: null, oldPrice: null, include: false };
+
+      let oldPrice = null;
+      if (cust.dbCust && prod.dbProd) {
+        const existing = dbPricing.find(p =>
+          p.productId === prod.dbProd.id &&
+          p.customerId === cust.dbCust.id &&
+          (p.shippingMethod || '') === _shipType
+        );
+        oldPrice = existing ? existing.price : null;
+      }
+      const changed = oldPrice !== null && oldPrice !== newPrice;
+      // Include if customer and product both matched (any level), and price is valid
+      const include = !!(cust.dbCust && prod.dbProd);
+      return { newPrice, oldPrice, include, changed };
+    });
+  });
+
+  _matches = { products, customers, cells };
+}
+
+// ─── Render Preview ────────────────────────────────────────────────────────
+function renderPreview() {
+  const { products, customers, cells } = _matches;
+
+  // Header
+  const shipCls = { 'รับหน้าโรงงาน': 'bg-success', 'จัดส่ง': 'bg-primary', 'ณัฐวุฒิ': 'bg-purple' }[_shipType] || 'bg-secondary';
+  const hRow = document.getElementById('matrixHeader');
+  hRow.innerHTML =
+    `<th>ลูกค้า</th>` +
+    `<th>จับคู่ในระบบ</th>` +
+    products.map((p, pi) => {
+      const cls = p.matchType === 'exact'   ? 'bg-success'
+                : p.matchType === 'partial' ? 'bg-warning text-dark'
+                : 'bg-danger';
+      const title = p.dbProd ? p.dbProd.name : '— ไม่พบ —';
+      return `<th class="prod-col" title="${esc(title)}">
+        <span class="badge ${cls} d-block mb-1" style="font-size:10px">${p.matchType==='exact'?'✓':p.matchType==='partial'?'~':'✗'}</span>
+        <span style="font-size:11px">${esc(p.name)}</span>
+      </th>`;
+    }).join('') +
+    `<th class="text-center" style="width:60px">นำเข้า</th>`;
+
+  // Body
+  const tbody = document.getElementById('matrixBody');
+  tbody.innerHTML = customers.map((cust, ri) => {
+    const rowCls = cust.matchType === 'exact'   ? 'cust-match-ok'
+                 : cust.matchType === 'partial' ? 'cust-match-warn'
+                 : 'cust-match-no';
+    const custMatchHtml = cust.dbCust
+      ? `<span class="badge ${cust.matchType==='exact'?'bg-success':'bg-warning text-dark'}" style="font-size:10px">${esc(cust.dbCust.name)}</span>`
+      : `<span class="badge bg-danger" style="font-size:10px">ไม่พบในระบบ</span>`;
+
+    const priceCells = cells[ri].map((cell, pi) => {
+      if (cell.newPrice === null) return `<td class="price-cell empty">—</td>`;
+      const cls = cell.changed ? 'price-cell changed' : 'price-cell';
+      const oldHtml = cell.oldPrice !== null
+        ? `<small class="text-muted d-block" style="font-size:10px">เดิม: ${cell.oldPrice.toFixed(2)}</small>`
+        : (cell.oldPrice === null && cell.include ? `<small class="text-muted d-block" style="font-size:10px">ใหม่</small>` : '');
+      const notMatched = !cell.include ? ' opacity-50' : '';
+      return `<td class="${cls}${notMatched}">${cell.newPrice.toFixed(2)}${oldHtml}</td>`;
+    }).join('');
+
+    // Count importable prices for this row
+    const importCount = cells[ri].filter(c => c.include && c.newPrice !== null).length;
+    const rowCheckId = `rowchk_${ri}`;
+    const canImport  = importCount > 0;
+
+    return `<tr class="${rowCls}">
+      <td class="fw-semibold small">${esc(cust.custRaw)}</td>
+      <td>${custMatchHtml}</td>
+      ${priceCells}
+      <td class="text-center">
+        ${canImport
+          ? `<input type="checkbox" class="form-check-input row-chk" id="${rowCheckId}"
+               data-ri="${ri}" checked onchange="updateSaveBtn()"
+               title="${importCount} รายการ">`
+          : `<span class="text-muted small">—</span>`}
+      </td>
+    </tr>`;
+  }).join('');
+
+  renderSummary();
+  updateSaveBtn();
+  document.getElementById('alertBox').innerHTML = '';
+}
+
+function renderSummary() {
+  const { products, customers, cells } = _matches;
+  const custOk   = customers.filter(c => c.matchType !== 'none').length;
+  const custNo   = customers.filter(c => c.matchType === 'none').length;
+  const prodOk   = products.filter(p => p.matchType !== 'none').length;
+  const prodNo   = products.filter(p => p.matchType === 'none').length;
+  const totalCells = cells.flat().filter(c => c.include && c.newPrice !== null).length;
+  const changed    = cells.flat().filter(c => c.include && c.changed).length;
+
+  document.getElementById('summaryBadges').innerHTML = `
+    <span class="badge bg-success fs-6">✓ ลูกค้า ${custOk}/${customers.length}</span>
+    <span class="badge bg-success fs-6">✓ สินค้า ${prodOk}/${products.length}</span>
+    <span class="badge bg-primary fs-6">📋 ราคา ${totalCells} รายการ</span>
+    ${changed ? `<span class="badge bg-warning text-dark fs-6">🔄 เปลี่ยนแปลง ${changed} รายการ</span>` : ''}
+    ${custNo  ? `<span class="badge bg-danger fs-6">⚠ ไม่พบลูกค้า ${custNo}</span>` : ''}
+    ${prodNo  ? `<span class="badge bg-danger fs-6">⚠ ไม่พบสินค้า ${prodNo}</span>` : ''}
+  `;
+}
+
+function updateSaveBtn() {
+  const checked = document.querySelectorAll('.row-chk:checked');
+  const total   = [...checked].reduce((sum, cb) => {
+    const ri = parseInt(cb.dataset.ri);
+    return sum + _matches.cells[ri].filter(c => c.include && c.newPrice !== null).length;
+  }, 0);
+  document.getElementById('saveCount').textContent = total;
+  document.getElementById('saveBtn').classList.toggle('d-none', total === 0);
+}
+
+// ─── Save ───────────────────────────────────────────────────────────────────
+function savePrices() {
+  const { products, customers, cells } = _matches;
+  const checked = [...document.querySelectorAll('.row-chk:checked')];
+  let saved = 0, skipped = 0;
+
+  for (const cb of checked) {
+    const ri   = parseInt(cb.dataset.ri);
+    const cust = customers[ri];
+    if (!cust.dbCust) continue;
+
+    cells[ri].forEach((cell, pi) => {
+      if (!cell.include || cell.newPrice === null) return;
+      const prod = products[pi];
+      if (!prod.dbProd) return;
+
+      DB.upsertPrice(prod.dbProd.id, cust.dbCust.id, _shipType, cell.newPrice);
+      DB.addPriceHistory({
+        id:            Utils.uuid(),
+        productId:     prod.dbProd.id,
+        customerId:    cust.dbCust.id,
+        shippingMethod: _shipType,
+        price:         cell.newPrice,
+        changedAt:     new Date().toISOString(),
+        changedBy:     session.name || session.username,
+        changedByUser: session.username,
+      });
+      saved++;
+    });
+  }
+
+  DB.logActivity(session.userId, session.username, 'นำเข้าราคาจาก Excel',
+    { shipType: _shipType, saved, file: _fileName });
+
+  showAlert(`✅ บันทึกราคา <strong>${saved}</strong> รายการสำเร็จ (ประเภท: ${_shipType})`, 'success');
+  document.getElementById('saveBtn').classList.add('d-none');
+
+  // Gray out saved rows
+  document.querySelectorAll('.row-chk:checked').forEach(cb => {
+    cb.disabled = true;
+    const tr = cb.closest('tr');
+    if (tr) tr.style.opacity = '.5';
+  });
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+function setStep(n) {
+  [1, 2, 3].forEach(i => {
+    document.getElementById(`step${i}`).classList.toggle('d-none', i !== n);
+    const pill = document.getElementById(`stp${i}`);
+    pill.classList.remove('active', 'done');
+    if (i < n)  pill.classList.add('done');
+    if (i === n) pill.classList.add('active');
+  });
+}
+
+function resetFile() {
+  _wb = null; _parsed = null; _matches = null; _fileName = '';
+  document.getElementById('xlsxInput').value = '';
+  document.getElementById('dropZone').classList.remove('disabled');
+  document.getElementById('sheetRow').classList.add('d-none');
+  document.getElementById('saveBtn').classList.add('d-none');
+  document.getElementById('alertBox').innerHTML = '';
+  document.getElementById('matrixHeader').innerHTML = '';
+  document.getElementById('matrixBody').innerHTML = '';
+  document.getElementById('summaryBadges').innerHTML = '';
+  document.getElementById('step3').classList.add('d-none');
+  const stp3 = document.getElementById('stp3');
+  stp3.classList.remove('active','done');
+  const stp2 = document.getElementById('stp2');
+  stp2.classList.remove('done');
+  stp2.classList.add('active');
+}
+
+function showAlert(msg, type = 'success') {
+  document.getElementById('alertBox').innerHTML =
+    `<div class="alert alert-${type} alert-dismissible fade show py-2" role="alert">
+      ${msg}
+      <button type="button" class="btn-close py-2" data-bs-dismiss="alert"></button>
+    </div>`;
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+</body>
+</html>

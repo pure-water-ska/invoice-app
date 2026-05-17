@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0d6efd">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ใบกำกับ">
+<title>สินค้า</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="navContainer"></div>
+<div class="page-wrap">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0 fw-bold"><i class="bi bi-box-seam me-2 text-primary"></i>ฐานข้อมูลสินค้า</h5>
+    <button class="btn btn-primary" onclick="openModal()"><i class="bi bi-plus-lg me-1"></i>เพิ่มสินค้า</button>
+  </div>
+  <div id="alertBox" class="mb-2"></div>
+
+  <div class="card">
+    <div class="card-body py-2">
+      <div class="input-group input-group-sm" style="max-width:320px">
+        <span class="input-group-text"><i class="bi bi-search"></i></span>
+        <input type="text" id="searchInput" class="form-control" placeholder="ค้นหาชื่อสินค้า...">
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>ชื่อสินค้า (รายการ)</th>
+            <th class="text-center">หน่วยนับ</th>
+            <th class="text-center">หน่วยละ<br><small class="fw-normal text-muted">(ต่อลัง/กระสอบ)</small></th>
+            <th class="text-center">ราคาเริ่มต้น<br><small class="fw-normal text-muted">(ต่อหน่วย)</small></th>
+            <th class="text-center">จัดการ</th>
+          </tr>
+        </thead>
+        <tbody id="productTable"><tr><td colspan="6" class="text-center text-muted py-4">ยังไม่มีสินค้า</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Product Modal -->
+<div class="modal fade" id="prodModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="modalTitle">เพิ่มสินค้าใหม่</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="modalAlert"></div>
+        <input type="hidden" id="prodId">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">ชื่อสินค้า (รายการ) <span class="text-danger">*</span></label>
+          <input type="text" id="prodName" class="form-control" placeholder="เช่น ขวด PET 830 มล." oninput="updateUnitHint(this.value)">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">หน่วยละ <span class="text-danger">*</span></label>
+          <div class="input-group">
+            <input type="number" id="prodUnitSize" class="form-control" placeholder="เช่น 165" min="1">
+            <input type="text" id="prodUnit" class="form-control" style="max-width:110px" placeholder="หน่วย">
+            <button class="btn btn-outline-secondary" type="button" onclick="resetUnit()" title="คืนค่าจากชื่อสินค้า">
+              <i class="bi bi-arrow-counterclockwise"></i>
+            </button>
+          </div>
+          <div class="form-text">จำนวนหน่วยย่อย ต่อ 1 ลัง — กดลูกศรเพื่อดึงหน่วยอัตโนมัติจากชื่อสินค้า</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">ราคาเริ่มต้นต่อหน่วย (บาท)</label>
+          <div class="input-group">
+            <span class="input-group-text">฿</span>
+            <input type="number" id="prodDefaultPrice" class="form-control" placeholder="0.00" min="0" step="0.01">
+          </div>
+          <div class="form-text">ราคาเริ่มต้น (หากไม่กำหนดราคาเฉพาะลูกค้า)</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+        <button class="btn btn-primary" onclick="saveProduct()"><i class="bi bi-save me-1"></i>บันทึก</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script>
+<script>
+const session = Auth.require();
+DB.init();
+Nav.render('products');
+let modal;
+
+window.addEventListener('DOMContentLoaded', () => {
+  modal = new bootstrap.Modal(document.getElementById('prodModal'));
+  render();
+  document.getElementById('searchInput').addEventListener('input', render);
+});
+
+function render() {
+  const q = document.getElementById('searchInput').value.toLowerCase();
+  const products = DB.getProducts().filter(p => !q || p.name.toLowerCase().includes(q));
+  const tbody = document.getElementById('productTable');
+  if (products.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4"><i class="bi bi-box-seam fs-2 d-block mb-2"></i>ยังไม่มีสินค้า</td></tr>';
+    return;
+  }
+  tbody.innerHTML = products.map((p, i) => {
+    const unit = p.unit || Utils.productUnit(p.name);
+    return `
+    <tr>
+      <td class="text-muted">${i+1}</td>
+      <td class="fw-semibold">${p.name}</td>
+      <td class="text-center">${unit ? `<span class="badge bg-light text-dark border">${unit}</span>` : '<span class="text-muted">-</span>'}</td>
+      <td class="text-center">${Utils.formatNumberInt(p.unitSize)}</td>
+      <td class="text-center">฿${Utils.formatNumber(p.defaultPrice||0)}</td>
+      <td class="text-center">
+        <button class="btn btn-sm btn-outline-primary me-1" onclick="openModal('${p.id}')"><i class="bi bi-pencil"></i></button>
+        <button class="btn btn-sm btn-outline-secondary me-1" onclick="location.href='pricing.html?prod=${p.id}'"><i class="bi bi-tags"></i></button>
+        <button class="btn btn-sm btn-outline-danger" onclick="deleteProduct('${p.id}')"><i class="bi bi-trash"></i></button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function updateUnitHint(name) {
+  const unitEl = document.getElementById('prodUnit');
+  if (!unitEl.value) unitEl.value = Utils.productUnit(name);
+}
+
+function resetUnit() {
+  document.getElementById('prodUnit').value = Utils.productUnit(document.getElementById('prodName').value);
+}
+
+function openModal(id) {
+  document.getElementById('prodId').value = id || '';
+  document.getElementById('modalTitle').textContent = id ? 'แก้ไขสินค้า' : 'เพิ่มสินค้าใหม่';
+  document.getElementById('modalAlert').innerHTML = '';
+  if (id) {
+    const p = DB.getProductById(id);
+    document.getElementById('prodName').value         = p.name || '';
+    document.getElementById('prodUnitSize').value     = p.unitSize || '';
+    document.getElementById('prodDefaultPrice').value = p.defaultPrice || '';
+    updateUnitHint(p.name || '', p.unit || Utils.productUnit(p.name || ''));
+  } else {
+    ['prodName','prodUnitSize','prodDefaultPrice','prodUnit'].forEach(f => document.getElementById(f).value = '');
+    updateUnitHint('', '');
+  }
+  modal.show();
+}
+
+function saveProduct() {
+  const id = document.getElementById('prodId').value;
+  const name = document.getElementById('prodName').value.trim();
+  const unitSize = parseInt(document.getElementById('prodUnitSize').value);
+  const defaultPrice = parseFloat(document.getElementById('prodDefaultPrice').value) || 0;
+  const unit = document.getElementById('prodUnit').value.trim() || Utils.productUnit(name);
+  if (!name) { Utils.showAlert('กรุณากรอกชื่อสินค้า', 'warning', 'modalAlert'); return; }
+  if (!unitSize || unitSize < 1) { Utils.showAlert('กรุณากรอกจำนวนหน่วยละ', 'warning', 'modalAlert'); return; }
+
+  if (id) {
+    DB.updateProduct(id, { name, unitSize, defaultPrice, unit });
+    DB.logActivity(session.userId, session.username, 'แก้ไขสินค้า', { productName: name });
+    Utils.showAlert('บันทึกสำเร็จ');
+  } else {
+    DB.addProduct({ id: Utils.uuid(), name, unitSize, defaultPrice, unit, createdAt: new Date().toISOString() });
+    DB.logActivity(session.userId, session.username, 'เพิ่มสินค้า', { productName: name });
+    Utils.showAlert('เพิ่มสินค้าสำเร็จ');
+  }
+  modal.hide();
+  render();
+}
+
+function deleteProduct(id) {
+  const p = DB.getProductById(id);
+  if (!confirm(`ลบสินค้า "${p.name}" ใช่หรือไม่?`)) return;
+  DB.deleteProduct(id);
+  DB.logActivity(session.userId, session.username, 'ลบสินค้า', { productName: p.name });
+  Utils.showAlert('ลบสินค้าแล้ว', 'info');
+  render();
+}
+</script>
+</body>
+</html>

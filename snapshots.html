@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0d6efd">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ใบกำกับ">
+<title>Snapshots & Rollback</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="navContainer"></div>
+<div class="page-wrap" style="max-width:860px">
+
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h5 class="mb-0 fw-bold"><i class="bi bi-layers me-2 text-primary"></i>Snapshots &amp; Rollback</h5>
+      <div class="text-muted small mt-1">บันทึกสถานะข้อมูลและย้อนกลับได้ (เก็บสูงสุด 3 Snapshots)</div>
+    </div>
+  </div>
+  <div id="alertBox" class="mb-2"></div>
+
+  <!-- Storage warning -->
+  <div id="storageWarn" class="alert alert-warning d-flex align-items-center gap-2 mb-3 d-none">
+    <i class="bi bi-exclamation-triangle-fill flex-shrink-0"></i>
+    <div>Storage ปัจจุบันใช้ไปแล้ว <strong id="storageWarnPct"></strong>% —
+      Snapshot ใช้พื้นที่เพิ่ม แนะนำให้ Export ข้อมูลแทน
+      <a href="settings.html" class="ms-2 btn btn-sm btn-outline-dark py-0">Export JSON</a>
+    </div>
+  </div>
+
+  <!-- ── Create Snapshot ─────────────────────────────────────────────────────── -->
+  <div class="card mb-3">
+    <div class="card-header fw-semibold"><i class="bi bi-camera-fill me-2"></i>สร้าง Snapshot ใหม่</div>
+    <div class="card-body">
+      <p class="text-muted small mb-3">
+        <i class="bi bi-check-circle-fill text-success me-1"></i><strong>รวม:</strong>
+        ลูกค้า, ใบกำกับ, ชำระเงิน, สินค้า, ราคา, คืนสินค้า, สต๊อกฝาขวด, ผู้ใช้, การตั้งค่า<br>
+        <i class="bi bi-x-circle-fill text-danger me-1"></i><strong>ไม่รวม:</strong>
+        Log กิจกรรม, ประวัติ Login, JS Error log (เพื่อประหยัดพื้นที่)
+      </p>
+      <div class="row g-2 align-items-end">
+        <div class="col-md-5">
+          <label class="form-label small mb-1 fw-semibold">ชื่อ / หมายเหตุ (ไม่บังคับ)</label>
+          <input type="text" id="snapLabel" class="form-control"
+            placeholder="เช่น ก่อน import, ก่อนแก้ไขราคา, เดือน พ.ค. 2569...">
+        </div>
+        <div class="col-md-3">
+          <div class="text-muted small mb-1">ข้อมูลปัจจุบัน: <strong id="currentDataSize">กำลังคำนวณ...</strong></div>
+          <button class="btn btn-primary w-100" onclick="createSnapshot()" id="createBtn">
+            <i class="bi bi-camera-fill me-1"></i>สร้าง Snapshot
+          </button>
+        </div>
+        <div class="col-md-4">
+          <div class="text-muted small mb-1">หรือนำเข้าจากไฟล์ที่ Export ไว้:</div>
+          <button class="btn btn-outline-secondary w-100" onclick="document.getElementById('snapImportFile').click()">
+            <i class="bi bi-upload me-1"></i>นำเข้า Snapshot File (.json)
+          </button>
+          <input type="file" id="snapImportFile" accept=".json" class="d-none" onchange="loadSnapFile(this)">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Snapshot List ────────────────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-header fw-semibold d-flex align-items-center justify-content-between">
+      <span><i class="bi bi-archive me-2"></i>Snapshots ที่บันทึกไว้</span>
+      <span id="snapCountBadge" class="badge bg-secondary">0 / 3</span>
+    </div>
+    <div id="snapList">
+      <div class="p-4 text-center text-muted">
+        <i class="bi bi-layers fs-2 d-block mb-2 opacity-50"></i>ยังไม่มี Snapshot
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Rollback Confirm Modal -->
+<div class="modal fade" id="rollbackModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header bg-danger text-white">
+        <h5 class="modal-title"><i class="bi bi-arrow-counterclockwise me-2"></i>ยืนยัน Rollback</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-danger py-2 mb-3">
+          <i class="bi bi-exclamation-triangle-fill me-1"></i>
+          <strong>คำเตือน!</strong> การ Rollback จะ<u>แทนที่ข้อมูลปัจจุบันทั้งหมด</u> ด้วยข้อมูลใน Snapshot<br>
+          ข้อมูลที่เพิ่ม/แก้ไขหลัง Snapshot จะ<strong>สูญหายถาวร</strong>
+        </div>
+        <table class="table table-sm mb-0">
+          <tr><th class="text-muted fw-normal" style="width:100px">Snapshot</th><td><strong id="rbLabel"></strong></td></tr>
+          <tr><th class="text-muted fw-normal">วันที่</th><td id="rbDate"></td></tr>
+          <tr><th class="text-muted fw-normal">ข้อมูล</th><td id="rbStats" class="small text-muted"></td></tr>
+        </table>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+        <button type="button" class="btn btn-danger" onclick="doRollback()">
+          <i class="bi bi-arrow-counterclockwise me-1"></i>Rollback ทันที
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script>
+<script>
+const session = Auth.require();
+if (!Auth.isAdmin()) { location.href = 'dashboard.html'; }
+DB.init();
+Nav.render('snapshots');
+
+let _rbModal;
+let _pendingRbId = null;
+
+window.addEventListener('DOMContentLoaded', () => {
+  _rbModal = new bootstrap.Modal(document.getElementById('rollbackModal'));
+  refreshStorageInfo();
+  renderSnaps();
+});
+
+// ─── Storage info ──────────────────────────────────────────────────────────────
+function refreshStorageInfo() {
+  let used = 0;
+  for (const k in localStorage) {
+    if (Object.prototype.hasOwnProperty.call(localStorage, k))
+      used += ((localStorage.getItem(k) || '').length) * 2;
+  }
+  const pct = Math.min(100, (used / (5 * 1024 * 1024)) * 100);
+  document.getElementById('currentDataSize').textContent = `${(used / 1024).toFixed(0)} KB (${pct.toFixed(1)}%)`;
+  if (pct >= 70) {
+    const el = document.getElementById('storageWarn');
+    el.classList.remove('d-none');
+    document.getElementById('storageWarnPct').textContent = pct.toFixed(1);
+    el.className = el.className.replace(/alert-\w+/, pct >= 90 ? 'alert-danger' : 'alert-warning');
+  }
+}
+
+// ─── Render list ───────────────────────────────────────────────────────────────
+function renderSnaps() {
+  const snaps = DB.getSnapshots();
+  document.getElementById('snapCountBadge').textContent = `${snaps.length} / 3`;
+  document.getElementById('snapCountBadge').className   = `badge ${snaps.length >= 3 ? 'bg-warning text-dark' : 'bg-secondary'}`;
+
+  const el = document.getElementById('snapList');
+  if (!snaps.length) {
+    el.innerHTML = '<div class="p-4 text-center text-muted"><i class="bi bi-layers fs-2 d-block mb-2 opacity-50"></i>ยังไม่มี Snapshot</div>';
+    return;
+  }
+
+  el.innerHTML = '<div class="list-group list-group-flush">' +
+    snaps.map((s, i) => {
+      const sizeKB = Math.round(JSON.stringify(s).length * 2 / 1024);
+      const st = s.stats || {};
+      const isLatest = i === 0;
+      return `
+      <div class="list-group-item py-3">
+        <div class="d-flex justify-content-between align-items-start gap-3">
+          <div class="flex-grow-1 min-width-0">
+            <div class="fw-semibold mb-1">
+              ${isLatest ? '<span class="badge bg-primary me-1">ล่าสุด</span>' : `<span class="badge bg-secondary me-1">#${i+1}</span>`}
+              ${s.label
+                ? `<span>${s.label}</span>`
+                : '<span class="text-muted fst-italic">ไม่มีชื่อ</span>'}
+            </div>
+            <div class="text-muted small mb-2">
+              <i class="bi bi-clock me-1"></i>${Utils.formatDateTimeTH(s.createdAt)}
+              &nbsp;·&nbsp;<i class="bi bi-person me-1"></i>${s.createdBy || '-'}
+              &nbsp;·&nbsp;<i class="bi bi-tag me-1"></i>App ${s.appVersion || '-'}
+              &nbsp;·&nbsp;<i class="bi bi-hdd me-1"></i>${sizeKB} KB
+              ${s.importedAt ? '&nbsp;·&nbsp;<span class="badge bg-info text-dark">นำเข้า</span>' : ''}
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+              <span class="badge bg-light text-dark border"><i class="bi bi-people me-1"></i>${st.customers || 0} ลูกค้า</span>
+              <span class="badge bg-light text-dark border"><i class="bi bi-receipt me-1"></i>${st.invoices || 0} ใบกำกับ</span>
+              <span class="badge bg-light text-dark border"><i class="bi bi-cash me-1"></i>${st.payments || 0} ชำระ</span>
+              <span class="badge bg-light text-dark border"><i class="bi bi-box-seam me-1"></i>${st.products || 0} สินค้า</span>
+              <span class="badge bg-light text-dark border"><i class="bi bi-arrow-return-left me-1"></i>${st.returns || 0} คืน</span>
+            </div>
+          </div>
+          <div class="d-flex flex-column gap-1 flex-shrink-0">
+            <button class="btn btn-sm btn-outline-warning" onclick="confirmRollback('${s.id}')" title="Rollback ไปสู่ Snapshot นี้">
+              <i class="bi bi-arrow-counterclockwise me-1"></i>Rollback
+            </button>
+            <button class="btn btn-sm btn-outline-success" onclick="exportSnap('${s.id}')" title="Export เป็นไฟล์ JSON">
+              <i class="bi bi-download me-1"></i>Export
+            </button>
+            <button class="btn btn-sm btn-outline-danger" onclick="deleteSnap('${s.id}')" title="ลบ Snapshot นี้">
+              <i class="bi bi-trash me-1"></i>ลบ
+            </button>
+          </div>
+        </div>
+      </div>`;
+    }).join('') + '</div>';
+}
+
+// ─── Create ────────────────────────────────────────────────────────────────────
+function createSnapshot() {
+  const btn = document.getElementById('createBtn');
+  const snaps = DB.getSnapshots();
+  if (snaps.length >= 3 && !confirm('มี Snapshot ครบ 3 รายการแล้ว\nระบบจะลบ Snapshot เก่าที่สุดออก ยืนยันหรือไม่?')) return;
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลังสร้าง...';
+  setTimeout(() => {
+    try {
+      const label = document.getElementById('snapLabel').value.trim();
+      const snap  = DB.createSnapshot(label, session.username);
+      DB.logActivity(session.userId, session.username, 'สร้าง Snapshot', { label: label || '(ไม่มีชื่อ)', id: snap.id });
+      document.getElementById('snapLabel').value = '';
+      refreshStorageInfo();
+      renderSnaps();
+      Utils.showAlert(`สร้าง Snapshot สำเร็จ: ${label || '(ไม่มีชื่อ)'}`, 'success');
+    } catch(e) {
+      Utils.showAlert('เกิดข้อผิดพลาด: ' + e.message, 'danger');
+    }
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-camera-fill me-1"></i>สร้าง Snapshot';
+  }, 80);
+}
+
+// ─── Rollback ──────────────────────────────────────────────────────────────────
+function confirmRollback(id) {
+  const snap = DB.getSnapshots().find(s => s.id === id);
+  if (!snap) return;
+  _pendingRbId = id;
+  document.getElementById('rbLabel').textContent = snap.label || '(ไม่มีชื่อ)';
+  document.getElementById('rbDate').textContent   = Utils.formatDateTimeTH(snap.createdAt);
+  const st = snap.stats || {};
+  document.getElementById('rbStats').textContent  =
+    `ลูกค้า ${st.customers||0} | ใบกำกับ ${st.invoices||0} | ชำระ ${st.payments||0} | สินค้า ${st.products||0}`;
+  _rbModal.show();
+}
+
+function doRollback() {
+  if (!_pendingRbId) return;
+  const ok = DB.rollbackToSnapshot(_pendingRbId);
+  _rbModal.hide();
+  if (ok) {
+    DB.logActivity(session.userId, session.username, 'Rollback Snapshot', { id: _pendingRbId });
+    Utils.showAlert('Rollback สำเร็จ! กำลัง reload...', 'success');
+    setTimeout(() => location.reload(), 1200);
+  } else {
+    Utils.showAlert('ไม่พบ Snapshot นี้', 'danger');
+  }
+  _pendingRbId = null;
+}
+
+// ─── Export ────────────────────────────────────────────────────────────────────
+function exportSnap(id) {
+  const snap = DB.getSnapshots().find(s => s.id === id);
+  if (!snap) return;
+  const payload = JSON.stringify({ type: 'wt_snapshot', ...snap }, null, 2);
+  const d     = new Date(snap.createdAt);
+  const stamp = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+  const slug  = (snap.label || 'backup').replace(/[^\w฀-๿]/g, '_').slice(0, 20);
+  const fn    = `snapshot_${stamp}_${slug}.json`;
+  const blob  = new Blob([payload], { type: 'application/json' });
+  const url   = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = fn;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 3000);
+}
+
+// ─── Delete ────────────────────────────────────────────────────────────────────
+function deleteSnap(id) {
+  if (!confirm('ลบ Snapshot นี้?')) return;
+  DB.deleteSnapshot(id);
+  DB.logActivity(session.userId, session.username, 'ลบ Snapshot', { id });
+  refreshStorageInfo();
+  renderSnaps();
+  Utils.showAlert('ลบ Snapshot แล้ว', 'warning');
+}
+
+// ─── Import from file ──────────────────────────────────────────────────────────
+function loadSnapFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const obj = JSON.parse(e.target.result);
+      if (obj.type !== 'wt_snapshot') throw new Error('ไฟล์ไม่ใช่ Snapshot (ต้องการ type: "wt_snapshot")');
+      if (!obj.data || typeof obj.data !== 'object') throw new Error('ไม่มีข้อมูล data ใน Snapshot');
+      const { type, ...snap } = obj;
+      snap.importedAt = new Date().toISOString();
+      const snaps = DB.getSnapshots();
+      snaps.unshift(snap);
+      if (snaps.length > 3) snaps.splice(3);
+      DB.saveSnapshots(snaps);
+      DB.logActivity(session.userId, session.username, 'นำเข้า Snapshot', { label: snap.label || '', id: snap.id });
+      refreshStorageInfo();
+      renderSnaps();
+      Utils.showAlert(`นำเข้า Snapshot สำเร็จ: ${snap.label || '(ไม่มีชื่อ)'}`, 'success');
+    } catch(err) {
+      Utils.showAlert('นำเข้าไม่สำเร็จ: ' + err.message, 'danger');
+    }
+    input.value = '';
+  };
+  reader.readAsText(file, 'utf-8');
+}
+</script>
+</body>
+</html>
