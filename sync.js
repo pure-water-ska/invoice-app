@@ -101,6 +101,7 @@ const Sync = {
     if (typeof FIREBASE_CONFIG === 'undefined' || !FIREBASE_CONFIG.apiKey ||
         FIREBASE_CONFIG.apiKey.startsWith('AIzaSy...')) {
       console.log('[Sync] No valid Firebase config — local-only mode');
+      window.dispatchEvent(new Event('sync:ready'));
       return;
     }
 
@@ -138,6 +139,7 @@ const Sync = {
       // Mark ready BEFORE flushing queue — so _flushQueue() can proceed
       this.ready = true;
       this._showBadge('online', `✓ Ready (org: ${this._orgId}, uid: ${this._uid})`);
+      window.dispatchEvent(new Event('sync:ready'));
 
       // Flush any queued writes from offline / pre-init period
       await this._flushQueue();
@@ -148,6 +150,7 @@ const Sync = {
       // Show error detail in badge tooltip
       const badge = document.getElementById('syncStatusBadge');
       if (badge) badge.title = 'Sync error: ' + (e.message || e) + '\n(คลิกเพื่อลองใหม่)';
+      window.dispatchEvent(new Event('sync:ready')); // Unblock login page even on error
     }
 
     // Online / offline
@@ -401,4 +404,123 @@ const Sync = {
     const el = document.getElementById('syncStatusBadge');
     if (!el) return;
     const MAP = {
-      online:  { text: '☁ Syn
+      online:  { text: '☁ Sync',  cls: 'bg-success' },
+      offline: { text: '📴 Offline', cls: 'bg-secondary' },
+      pending: { text: '⏳ Syncing…', cls: 'bg-warning text-dark' },
+      error:   { text: '⚠ Sync ✗',  cls: 'bg-danger' },
+    };
+    const s = MAP[status] || MAP.online;
+    el.textContent = s.text;
+    el.className   = `badge ${s.cls} ms-2 py-1 px-2`;
+    el.style.fontSize = '10px';
+  },
+
+  _notifyUpdate(lsKey) {
+    const label = {
+      wt_invoices:  'ใบกำกับ',
+      wt_payments:  'ชำระเงิน',
+      wt_customers: 'ลูกค้า',
+      wt_products:  'สินค้า',
+      wt_pricing:   'ราคา',
+      wt_returns:   'คืนสินค้า',
+    }[lsKey];
+
+    // Show toast
+    if (label) {
+      let toast = document.getElementById('syncToast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'syncToast';
+        toast.setAttribute('style',
+          'position:fixed;bottom:70px;right:16px;z-index:9990;min-width:200px;' +
+          'background:#198754;color:#fff;border-radius:10px;padding:9px 16px;' +
+          'font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.25);' +
+          'transition:opacity .4s;pointer-events:none');
+        document.body.appendChild(toast);
+      }
+      toast.textContent = `🔄 ${label} อัปเดตจากผู้ใช้อื่น`;
+      toast.style.opacity = '1';
+      clearTimeout(toast._t);
+      toast._t = setTimeout(() => { toast.style.opacity = '0'; }, 3500);
+    }
+
+    // Re-render current page (works for pages with global render() function)
+    this._triggerRerender();
+  },
+
+  _triggerRerender() {
+    if (typeof window.render === 'function') {
+      try { window.render(); } catch {}
+    }
+  },
+
+  // ── Manual pull (user-triggered refresh from Firestore) ───────────────────
+  async pull() {
+    if (!this.ready) return;
+    this._badge('pending');
+    try {
+      await this._pullAll();
+      this._badge('online');
+    } catch (e) {
+      console.error('[Sync] manual pull failed:', e);
+      this._badge('error');
+    }
+  },
+
+  // ── Push ALL local data to Firestore (force full upload) ──────────────────
+  async pushAll() {
+    if (!this.ready) { console.warn('[Sync] pushAll called before ready'); return; }
+    this._badge('pending');
+    console.log('[Sync] pushAll: uploading all local data to Firestore...');
+    try {
+      const allKeys = [
+        ...Object.keys(this.COLLECTIONS),
+        ...Object.keys(this.DOCUMENTS),
+      ];
+      const total = allKeys.length;
+      for (let i = 0; i < total; i++) {
+        const key = allKeys[i];
+        const label = this.COLLECTIONS[key] || this.DOCUMENTS[key] || key;
+        if (typeof Utils !== 'undefined') Utils.showProgress(`อัปโหลด Cloud: ${label} (${i + 1}/${total})`, Math.round(((i + 1) / total) * 100));
+        try {
+          const raw = localStorage.getItem(key);
+          if (!raw) continue;
+          const val = JSON.parse(raw);
+          await this._writeKey(key, val);
+          console.log('[Sync] pushAll:', key, '✓');
+        } catch (e) {
+          console.warn('[Sync] pushAll error for', key, ':', e.message);
+        }
+      }
+      if (typeof Utils !== 'undefined') Utils.hideProgress();
+      this._badge('online');
+      localStorage.setItem(this._lastSyncKey, new Date().toISOString());
+      console.log('[Sync] pushAll complete ✓');
+    } catch (e) {
+      if (typeof Utils !== 'undefined') Utils.hideProgress();
+      console.error('[Sync] pushAll failed:', e);
+      this._badge('error');
+    }
+  },
+
+  // ── Status info for troubleshoot / settings ────────────────────────────────
+  getStatus() {
+    const pending = this._getQueue().length;
+    const lastAt  = localStorage.getItem(this._lastSyncKey);
+    return {
+      ready:   this.ready,
+      online:  this._online,
+      pending,
+      orgId:   this._orgId,
+      uid:     this._uid,
+      lastAt,
+    };
+  },
+};
+
+// Expose globally — `const Sync` above is a lexical binding, NOT a window property,
+// so `window.Sync` would otherwise be undefined (breaks nav.js badge + connection modal).
+window.Sync = Sync;
+
+// ── Auto-initialize ───────────────────────────────────────────────────────────
+Sync.init().catch(e => console.error('[Sync]', e));

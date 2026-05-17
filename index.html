@@ -46,9 +46,12 @@
               </button>
             </div>
           </div>
-          <button type="submit" class="btn btn-primary w-100 btn-lg fw-semibold">
-            <i class="bi bi-box-arrow-in-right me-1"></i>เข้าสู่ระบบ
+          <button type="submit" id="loginBtn" class="btn btn-primary w-100 btn-lg fw-semibold" disabled>
+            <span id="loginBtnText"><i class="bi bi-box-arrow-in-right me-1"></i>เข้าสู่ระบบ</span>
           </button>
+          <div id="syncStatus" class="text-center text-muted small mt-2">
+            <span class="spinner-border spinner-border-sm me-1" role="status"></span>กำลังเชื่อมต่อ...
+          </div>
         </form>
       </div>
     </div>
@@ -80,6 +83,57 @@
     if (pw.type === 'password') { pw.type = 'text'; eye.className = 'bi bi-eye-slash'; }
     else { pw.type = 'password'; eye.className = 'bi bi-eye'; }
   });
+
+  // ── Bootstrap Firebase sync so users are in localStorage before login ────────
+  (function loadSyncForLogin() {
+    const loginBtn  = document.getElementById('loginBtn');
+    const syncStatus = document.getElementById('syncStatus');
+    let syncDone = false;
+
+    function onSyncReady() {
+      if (syncDone) return;
+      syncDone = true;
+      loginBtn.disabled = false;
+      syncStatus.style.display = 'none';
+    }
+
+    // Fallback: enable login after 6 seconds regardless
+    const fallback = setTimeout(onSyncReady, 6000);
+
+    window.addEventListener('sync:ready', () => {
+      clearTimeout(fallback);
+      onSyncReady();
+    }, { once: true });
+
+    function loadScript(src, cb, errCb) {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload  = cb  || function(){};
+      s.onerror = errCb || function(){};
+      document.head.appendChild(s);
+    }
+
+    const FB_VER  = '10.7.1';
+    const FB_BASE = `https://www.gstatic.com/firebasejs/${FB_VER}`;
+
+    loadScript('./firebase-config.js', function() {
+      if (typeof FIREBASE_CONFIG === 'undefined' || !FIREBASE_CONFIG.apiKey ||
+          FIREBASE_CONFIG.apiKey.startsWith('AIzaSy...')) {
+        onSyncReady(); // no Firebase — enable immediately
+        return;
+      }
+      loadScript('./firebase-credentials.js', startSDK, startSDK);
+      function startSDK() {
+        loadScript(`${FB_BASE}/firebase-app-compat.js`, function() {
+          loadScript(`${FB_BASE}/firebase-auth-compat.js`, function() {
+            loadScript(`${FB_BASE}/firebase-firestore-compat.js`, function() {
+              loadScript('./sync.js', null, onSyncReady);
+            }, onSyncReady);
+          }, onSyncReady);
+        }, onSyncReady);
+      }
+    }, onSyncReady); // firebase-config.js not found → local-only, enable immediately
+  })();
 
   document.getElementById('loginForm').addEventListener('submit', async e => {
     e.preventDefault();
