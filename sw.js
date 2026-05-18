@@ -3,7 +3,7 @@
 // ⚠️  เมื่อ deploy version ใหม่ ให้อัปเดต CACHE_VERSION ให้ตรงกับ APP_VERSION ใน utils.js
 //     เพื่อให้ browser ล้าง cache เก่าและดาวน์โหลดไฟล์ใหม่ทั้งหมด
 
-const CACHE_VERSION  = 'v1.2.9';
+const CACHE_VERSION  = 'v1.3.0';
 const STATIC_CACHE   = `wt-static-${CACHE_VERSION}`;
 const RUNTIME_CACHE  = `wt-runtime-${CACHE_VERSION}`;
 
@@ -14,8 +14,8 @@ const RUNTIME_CACHE  = `wt-runtime-${CACHE_VERSION}`;
 //     HTML จะถูก cache โดยอัตโนมัติครั้งแรกที่โหลดผ่าน Network-First fetch handler
 const APP_SHELL = [
   // Scripts & styles (safe to pre-cache — small, never served from old SW cache)
-  // ⚠️  nav.js and sync.js are intentionally excluded — served Network-Only (see fetch handler)
-  //     so badge/sync fixes are ALWAYS picked up immediately without a SW update cycle.
+  // ⚠️  nav.js, sync.js, and settings.js are intentionally excluded — served Network-Only
+  //     so badge/sync/settings fixes are ALWAYS picked up immediately without a SW update cycle.
   './utils.js',
   './db.js',
   './auth.js',
@@ -23,7 +23,6 @@ const APP_SHELL = [
   './idb.js',
   './drive-store.js',
   './drive-db-sync.js',
-  './settings.js',
   './style.css',
   './manifest.json',
   // Vendor assets (self-hosted — avoids Edge Tracking Prevention blocking jsdelivr.net)
@@ -92,11 +91,12 @@ self.addEventListener('fetch', (event) => {
     const isHTML = request.destination === 'document' ||
                    url.pathname.endsWith('.html');
 
-    // nav.js and sync.js are always fetched from network so badge/sync fixes
-    // take effect immediately without requiring users to go through an SW update cycle.
+    // nav.js, sync.js, and settings.js are always fetched from network so badge/sync/settings
+    // fixes take effect immediately without requiring users to go through an SW update cycle.
     const isNetworkOnly = isHTML ||
                           url.pathname.endsWith('/nav.js') ||
-                          url.pathname.endsWith('/sync.js');
+                          url.pathname.endsWith('/sync.js') ||
+                          url.pathname.endsWith('/settings.js');
 
     if (isNetworkOnly) {
       // ── HTML / nav.js / sync.js: Network-Only, no caching ────────────────────
@@ -146,8 +146,4 @@ self.addEventListener('fetch', (event) => {
 });
 
 // ── MESSAGE: triggered by clients ─────────────────────────────────────────────
-self.addEventListener('message', (event) => {
-  if (event.data === 'SKIP_WAITING') {
-    self.skipWaiting();
-  }
-});
+self.addEventListener('message', (event) =>
