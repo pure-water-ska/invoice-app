@@ -130,38 +130,61 @@ const Sync = {
 
       // Sign in with shared team account so Firestore WebChannel has a valid
       // ID token (API-key-only connections are blocked at the transport level).
-      // Note: The "Cross-Origin-Opener-Policy would block window.closed" console
-      // warning from Firebase Auth SDK is cosmetic — it comes from the popup/redirect
-      // handler checking window.opener on page load, and does NOT affect
-      // signInWithEmailAndPassword which is a direct HTTPS REST call.
-      console.log('[Sync] Step 3: signIn');
-      const email = FIREBASE_CONFIG.teamEmail;
-      const pass  = FIREBASE_CONFIG.teamPassword;
-      if (email && pass) {
-        await firebase.auth().signInWithEmailAndPassword(email, pass);
-      } else {
-        await firebase.auth().signInAnonymously();
+      // Firebase Auth persists credentials in IndexedDB across page loads.
+      // We wait for the cached state to restore first — if already signed in,
+      // no network request is needed, avoiding auth/network-request-failed errors
+      // on flaky connections.
+      console.log('[Sync] Step 3: restoreAuthState');
+      const restoredUser = await new Promise(resolve => {
+        const unsub = firebase.auth().onAuthStateChanged(u => { unsub(); resolve(u); });
+      });
+      console.log('[Sync] Step 4: auth state =', restoredUser ? 'cached' : 'none');
+
+      if (!restoredUser) {
+        // No cached session — need a real network sign-in
+        console.log('[Sync] Step 4b: signIn (network)');
+        const email = FIREBASE_CONFIG.teamEmail;
+        const pass  = FIREBASE_CONFIG.teamPassword;
+        let authRetry = 0;
+        while (true) {
+          try {
+            if (email && pass) {
+              await firebase.auth().signInWithEmailAndPassword(email, pass);
+            } else {
+              await firebase.auth().signInAnonymously();
+            }
+            break;
+          } catch (authErr) {
+            if (authErr.code === 'auth/network-request-failed' && authRetry < 2) {
+              authRetry++;
+              console.warn(`[Sync] Auth network error, retry ${authRetry}/2 in ${authRetry * 2}s…`);
+              await new Promise(r => setTimeout(r, authRetry * 2000));
+            } else {
+              throw authErr;
+            }
+          }
+        }
       }
       this._uid = firebase.auth().currentUser?.uid || 'anon';
-      console.log('[Sync] Step 4: signIn OK, uid=', this._uid);
+      console.log('[Sync] Step 5a: signIn OK, uid=', this._uid);
 
       // Flush pending queue BEFORE pulling from Firestore so that any records
       // saved on the previous page (and enqueued via beforeunload) are already
       // in Firestore when _pullAll() reads it — preventing them being treated
       // as "missing" and then overwritten.
-      console.log('[Sync] Step 5: pre-flush queue');
+      console.log('[Sync] Step 6: pre-flush queue');
       await this._flushQueueNow();   // does NOT require this.ready = true
-      console.log('[Sync] Step 6: pre-flush done');
+      console.log('[Sync] Step 7: pre-flush done');
 
       // Pull latest from Firestore → localStorage
-      console.log('[Sync] Step 7: pullAll');
+      console.log('[Sync] Step 8: pullAll');
       await this._pullAll();
-      console.log('[Sync] Step 8: pullAll done');
+      console.log('[Sync] Step 9: pullAll done');
 
       // Real-time listeners
-      console.log('[Sync] Step 9: setupListeners');
+      console.log('[Sync] Step 10: setupListeners');
       this._setupListeners();
-      console.log('[Sync] Step 10: listeners ready');
+      console.log('[Sync] Step 11: listeners ready');
 
       // Mark ready BEFORE flushing queue — so _flushQueue() can proceed
       this.ready = true;
