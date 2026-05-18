@@ -610,8 +610,11 @@ async function _uploadPaymentImages(p) {
   return p;
 }
 
-window.addEventListener('sync:ready', () => { render(); });
+// Only re-render after sync if page loaded with no local data (fresh browser)
+let _hadInvoicesAtLoad = false;
+window.addEventListener('sync:ready', () => { if (!_hadInvoicesAtLoad) render(); });
 window.addEventListener('DOMContentLoaded', () => {
+  _hadInvoicesAtLoad = DB.getInvoices().length > 0;
   payModal              = new bootstrap.Modal(document.getElementById('payModal'));
   overpayModal          = new bootstrap.Modal(document.getElementById('overpayModal'));
   // backdrop:false lets this sub-modal open on top of payModal without conflict

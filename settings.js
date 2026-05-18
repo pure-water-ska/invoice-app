@@ -1388,9 +1388,10 @@ function loadStats() {
     </div>`).join('');
 }
 
-// Re-render stat cards and counts after Firestore sync completes
+// Re-render stat cards only if page loaded with no local data (fresh browser)
+// Avoids overwriting displayed data when Firestore is out of sync with localStorage
+let _hadDataAtLoad = false;
+window.addEventListener('DOMContentLoaded', () => { _hadDataAtLoad = DB.getInvoices().length > 0; }, { once: true });
 window.addEventListener('sync:ready', () => {
-  loadStats();
-  renderStorageBar();
-  renderLogCounts();
+  if (!_hadDataAtLoad) { loadStats(); renderStorageBar(); renderLogCounts(); }
 });
