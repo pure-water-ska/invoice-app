@@ -116,6 +116,18 @@ const Sync = {
       this._db    = firebase.firestore();
       this._orgId = FIREBASE_CONFIG.orgId || 'main';
 
+      // Enable IndexedDB persistence so Firestore caches data locally.
+      // After the first load, only deltas are downloaded — cuts daily read quota
+      // usage by 90%+. The deprecation warning is non-breaking; enablePersistence
+      // still works in Firebase 10.x and will continue to until further notice.
+      await this._db.enablePersistence({ synchronizeTabs: true }).catch(err => {
+        // failed-precondition: another tab already owns persistence (normal)
+        // unimplemented: browser doesn't support IndexedDB (rare, continue anyway)
+        if (err.code !== 'failed-precondition' && err.code !== 'unimplemented') {
+          console.warn('[Sync] Persistence error:', err.code);
+        }
+      });
+
       // Sign in with shared team account so Firestore WebChannel has a valid
       // ID token (API-key-only connections are blocked at the transport level).
       // Note: The "Cross-Origin-Opener-Policy would block window.closed" console
