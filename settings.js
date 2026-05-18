@@ -569,18 +569,26 @@ function renderFsStatus() {
   if (!icon || !text) return;
 
   // ── No config ────────────────────────────────────────────────────────────
+  // firebase-config.js is loaded asynchronously by nav.js; FIREBASE_CONFIG may
+  // not be defined yet at DOMContentLoaded. Retry until it appears (max ~5 s).
   const hasConfig = typeof FIREBASE_CONFIG !== 'undefined' &&
                     FIREBASE_CONFIG.apiKey &&
                     !FIREBASE_CONFIG.apiKey.startsWith('AIzaSy...');
   if (!hasConfig) {
+    if (typeof FIREBASE_CONFIG === 'undefined') {
+      // Still loading — wait 400 ms and try again
+      setTimeout(renderFsStatus, 400);
+      return;
+    }
+    // Config IS defined but has placeholder key → genuinely not configured
     icon.textContent = '❌';
     text.textContent = 'ไม่ได้ตั้งค่า Firebase';
     if (msg) {
       msg.className = 'alert alert-danger small py-2 mb-3';
       msg.classList.remove('d-none');
       msg.innerHTML = `<strong>Firebase ไม่ได้ตั้งค่า</strong><br>
-        ตั้ง environment variables ใน Netlify แล้ว redeploy:<br>
-        <code>FIREBASE_API_KEY, FIREBASE_TEAM_EMAIL, FIREBASE_TEAM_PASSWORD</code> เป็นต้น`;
+        ตั้ง environment variables ใน GitHub Secrets แล้ว redeploy:<br>
+        <code>FIREBASE_TEAM_PASSWORD, GOOGLE_CLIENT_ID</code>`;
     }
     return;
   }
@@ -1371,6 +1379,15 @@ function loadStats() {
     { label: 'Login Log',    count: DB.getLogins().length,     icon: 'shield-check',  color: 'success' },
   ];
   document.getElementById('statsRow').innerHTML = items.map(item => `
+    <div class="col-6 col-md-3">
+      <div class="border rounded p-2 text-center">
+        <i class="bi bi-${item.icon} text-${item.color} d-block fs-4 mb-1"></i>
+        <div class="fw-bold fs-5">${item.count.toLocaleString('th-TH')}</div>
+        <div class="text-muted" style="font-size:11px">${item.label}</div>
+      </div>
+    </div>`).join('');
+}
+tem => `
     <div class="col-6 col-md-3">
       <div class="border rounded p-2 text-center">
         <i class="bi bi-${item.icon} text-${item.color} d-block fs-4 mb-1"></i>
