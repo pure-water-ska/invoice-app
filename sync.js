@@ -4,7 +4,7 @@
 // ถ้าไม่มี FIREBASE_CONFIG → ทำงานเป็น no-op, ไม่กระทบ localStorage เดิมเลย
 // ─────────────────────────────────────────────────────────────────────────────
 
-const Sync = {
+var Sync = {
   ready:          false,
   _db:            null,
   _orgId:         null,
