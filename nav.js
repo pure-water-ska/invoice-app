@@ -199,14 +199,16 @@
       setSyncBadge('⚠ Sync ✗', 'bg-danger');
     }
 
-    // Note: firebase-auth-compat.js is intentionally NOT loaded.
-    // It initialises a cross-origin iframe (firebaseapp.com/__/auth/iframe) that
-    // GitHub Pages COOP headers block, causing auth to silently fail.
-    // We connect to Firestore directly (no auth) — Firestore rules allow access
-    // via API key + orgId path restriction (see Firebase Console → Firestore rules).
+    // firebase-auth-compat.js IS loaded so Firestore's internal auth-provider is
+    // registered (required for Firestore SDK to connect). However, sync.js never
+    // calls firebase.auth(), so the cross-origin iframe that causes the GitHub
+    // Pages COOP warning is never initialised. Access is controlled by Firestore
+    // security rules (open by org path — see Firebase Console → Firestore rules).
     loadScript(`${FB_BASE}/firebase-app-compat.js`, function() {
-      loadScript(`${FB_BASE}/firebase-firestore-compat.js`, function() {
-        loadScript('./sync.js', null, onSDKError);
+      loadScript(`${FB_BASE}/firebase-auth-compat.js`, function() {
+        loadScript(`${FB_BASE}/firebase-firestore-compat.js`, function() {
+          loadScript('./sync.js', null, onSDKError);
+        }, onSDKError);
       }, onSDKError);
     }, onSDKError);
     } // end startFirebaseSDK
