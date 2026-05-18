@@ -145,22 +145,30 @@ const Sync = {
       this._uid = firebase.auth().currentUser?.uid || 'anon';
       console.log('[Sync] Step 4: signIn OK, uid=', this._uid);
 
+      // Flush pending queue BEFORE pulling from Firestore so that any records
+      // saved on the previous page (and enqueued via beforeunload) are already
+      // in Firestore when _pullAll() reads it — preventing them being treated
+      // as "missing" and then overwritten.
+      console.log('[Sync] Step 5: pre-flush queue');
+      await this._flushQueueNow();   // does NOT require this.ready = true
+      console.log('[Sync] Step 6: pre-flush done');
+
       // Pull latest from Firestore → localStorage
-      console.log('[Sync] Step 5: pullAll');
+      console.log('[Sync] Step 7: pullAll');
       await this._pullAll();
-      console.log('[Sync] Step 6: pullAll done');
+      console.log('[Sync] Step 8: pullAll done');
 
       // Real-time listeners
-      console.log('[Sync] Step 7: setupListeners');
+      console.log('[Sync] Step 9: setupListeners');
       this._setupListeners();
-      console.log('[Sync] Step 8: listeners ready');
+      console.log('[Sync] Step 10: listeners ready');
 
       // Mark ready BEFORE flushing queue — so _flushQueue() can proceed
       this.ready = true;
       this._showBadge('online', `✓ Ready (org: ${this._orgId}, uid: ${this._uid})`);
       window.dispatchEvent(new Event('sync:ready'));
 
-      // Flush any queued writes from offline / pre-init period
+      // Flush any remaining queued writes (belt + suspenders)
       await this._flushQueue();
 
     } catch (e) {
@@ -184,6 +192,23 @@ const Sync = {
     window.addEventListener('offline', () => {
       this._online = false;
       this._showBadge('offline');
+    });
+
+    // Save any pending debounced writes to the queue before page unloads.
+    // Without this, navigating away within 600 ms of addInvoice() cancels the
+    // debounce timeout and the record never reaches Firestore.  The queue is
+    // flushed by _flushQueueNow() on the NEXT page before _pullAll() runs.
+    window.addEventListener('beforeunload', () => {
+      for (const [key, timerId] of Object.entries(this._pushDebounce)) {
+        if (timerId != null) {
+          clearTimeout(timerId);
+          delete this._pushDebounce[key];
+          const val = (window.DB && DB._cache[key] !== undefined) ? DB._cache[key] : null;
+          if (val !== null && val !== undefined) {
+            this._enqueue(key, val);
+          }
+        }
+      }
     });
   },
 
@@ -518,6 +543,24 @@ const Sync = {
 
   _getQueue() {
     try { return JSON.parse(localStorage.getItem(this._pendingLsKey)) || []; } catch { return []; }
+  },
+
+  // Flush queue without requiring this.ready — used during init before ready is set
+  async _flushQueueNow() {
+    if (!this._online) return;
+    const q = this._getQueue();
+    if (!q.length) return;
+    console.log(`[Sync] Pre-flush: ${q.length} queued writes`);
+    for (const { key, val } of q) {
+      try {
+        await this._writeKey(key, val);
+      } catch (e) {
+        console.warn('[Sync] pre-flush error:', key, e.message);
+        return; // stop on error, queue stays intact for _flushQueue()
+      }
+    }
+    localStorage.removeItem(this._pendingLsKey);
+    console.log('[Sync] Pre-flush done ✓');
   },
 
   async _flushQueue() {
