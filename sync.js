@@ -116,6 +116,9 @@ const Sync = {
       this._db    = firebase.firestore();
       this._orgId = FIREBASE_CONFIG.orgId || 'main';
 
+      // Use SESSION persistence — avoids cross-origin iframe that COOP headers block on GitHub Pages
+      await firebase.auth().setPersistence(firebase.auth.Auth.Persistence.SESSION).catch(() => {});
+
       // Sign in with shared team account
       console.log('[Sync] Step 3: signIn');
       const email = FIREBASE_CONFIG.teamEmail;
