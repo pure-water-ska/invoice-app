@@ -1387,12 +1387,10 @@ function loadStats() {
       </div>
     </div>`).join('');
 }
-tem => `
-    <div class="col-6 col-md-3">
-      <div class="border rounded p-2 text-center">
-        <i class="bi bi-${item.icon} text-${item.color} d-block fs-4 mb-1"></i>
-        <div class="fw-bold fs-5">${item.count.toLocaleString('th-TH')}</div>
-        <div class="text-muted" style="font-size:11px">${item.label}</div>
-      </div>
-    </div>`).join('');
-}
+
+// Re-render stat cards and counts after Firestore sync completes
+window.addEventListener('sync:ready', () => {
+  loadStats();
+  renderStorageBar();
+  renderLogCounts();
+});
