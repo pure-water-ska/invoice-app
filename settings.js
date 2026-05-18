@@ -16,7 +16,12 @@ window.addEventListener('DOMContentLoaded', () => {
   if (Auth.isAdmin()) renderErrorLog();
   renderFsStatus();
   window.addEventListener('sync:error', renderFsStatus);
-  window.addEventListener('sync:ready', renderFsStatus);
+  window.addEventListener('sync:ready', () => {
+    renderFsStatus();
+    loadCompanySettings();   // reload form fields after Firestore data arrives
+    loadAutoBackup();        // reload auto-backup toggle
+    loadStats();             // reload invoice/payment counts
+  });
   ['companyName','address','phone'].forEach(id =>
     document.getElementById(id).addEventListener('input', updatePreview)
   );
