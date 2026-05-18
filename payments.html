@@ -81,11 +81,6 @@
         <div class="col-6 col-md-2">
           <input type="text" id="filterTo" class="form-control form-control-sm" placeholder="DD/MM/YYYY">
         </div>
-        <div class="col-12 col-md-auto">
-          <button class="btn btn-outline-secondary btn-sm w-100" onclick="clearFilters()">
-            <i class="bi bi-x-lg me-1"></i>ล้าง
-          </button>
-        </div>
         <!-- Row 2: payment-level filters -->
         <div class="col-md-4">
           <select id="filterDestAcct" class="form-select form-select-sm">
@@ -101,6 +96,11 @@
           <select id="filterSourceBank" class="form-select form-select-sm">
             <option value="">— ธนาคารต้นทางทั้งหมด —</option>
           </select>
+        </div>
+        <div class="col-12 col-md-auto">
+          <button class="btn btn-outline-secondary btn-sm w-100" onclick="clearFilters()">
+            <i class="bi bi-x-lg me-1"></i>ล้าง
+          </button>
         </div>
       </div>
     </div>
@@ -610,6 +610,7 @@ async function _uploadPaymentImages(p) {
   return p;
 }
 
+window.addEventListener('sync:ready', () => { render(); });
 window.addEventListener('DOMContentLoaded', () => {
   payModal              = new bootstrap.Modal(document.getElementById('payModal'));
   overpayModal          = new bootstrap.Modal(document.getElementById('overpayModal'));
