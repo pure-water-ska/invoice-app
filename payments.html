@@ -86,6 +86,22 @@
             <i class="bi bi-x-lg me-1"></i>ล้าง
           </button>
         </div>
+        <!-- Row 2: payment-level filters -->
+        <div class="col-md-4">
+          <select id="filterDestAcct" class="form-select form-select-sm">
+            <option value="">— บัญชีผู้รับทั้งหมด —</option>
+          </select>
+        </div>
+        <div class="col-md-4">
+          <select id="filterDestBank" class="form-select form-select-sm">
+            <option value="">— ธนาคารปลายทางทั้งหมด —</option>
+          </select>
+        </div>
+        <div class="col-md-4">
+          <select id="filterSourceBank" class="form-select form-select-sm">
+            <option value="">— ธนาคารต้นทางทั้งหมด —</option>
+          </select>
+        </div>
       </div>
     </div>
   </div>
@@ -485,13 +501,46 @@ let payModal, overpayModal, transferAccountModal, cancelPayModal, dateConfirmMod
 let _sortCol = 'date', _sortDir = -1;
 
 function clearFilters() {
-  ['searchInv','filterCustomer','filterStatus'].forEach(id => document.getElementById(id).value = '');
+  ['searchInv','filterCustomer','filterStatus','filterDestAcct','filterDestBank','filterSourceBank']
+    .forEach(id => document.getElementById(id).value = '');
   ['filterFrom','filterTo'].forEach(id => {
     const el = document.getElementById(id);
     el.value = '';
     if (el._flatpickr) el._flatpickr.clear();
   });
   render();
+}
+
+function populatePaymentFilters() {
+  const payments = DB.getPayments().filter(p => !p.cancelled);
+
+  // Receiver accounts: "ชื่อบัญชี · เลขบัญชี" keyed by accountName
+  const acctSeen = new Map();
+  for (const p of payments) {
+    if (p.accountName && !acctSeen.has(p.accountName)) {
+      const label = p.accountName + (p.destBank ? ' · ' + Utils.getBankName(p.destBank) : '');
+      acctSeen.set(p.accountName, label);
+    }
+  }
+  const acctEl = document.getElementById('filterDestAcct');
+  const acctVal = acctEl.value;
+  acctEl.innerHTML = '<option value="">— บัญชีผู้รับทั้งหมด —</option>' +
+    [...acctSeen.entries()].sort((a,b) => a[1].localeCompare(b[1], 'th'))
+      .map(([v, l]) => `<option value="${esc(v)}"${v===acctVal?' selected':''}>${esc(l)}</option>`).join('');
+
+  // Destination bank
+  const destBanks = [...new Set(payments.map(p => p.destBank).filter(Boolean))].sort((a,b) => Utils.getBankName(a).localeCompare(Utils.getBankName(b), 'th'));
+  const destEl = document.getElementById('filterDestBank');
+  const destVal = destEl.value;
+  destEl.innerHTML = '<option value="">— ธนาคารปลายทางทั้งหมด —</option>' +
+    destBanks.map(v => `<option value="${esc(v)}"${v===destVal?' selected':''}>${esc(Utils.getBankName(v))}</option>`).join('');
+
+  // Source bank
+  const srcBanks = [...new Set(payments.map(p => p.sourceBank).filter(Boolean))].sort((a,b) => Utils.getBankName(a).localeCompare(Utils.getBankName(b), 'th'));
+  const srcEl = document.getElementById('filterSourceBank');
+  const srcVal = srcEl.value;
+  srcEl.innerHTML = '<option value="">— ธนาคารต้นทางทั้งหมด —</option>' +
+    srcBanks.map(v => `<option value="${esc(v)}"${v===srcVal?' selected':''}>${esc(Utils.getBankName(v))}</option>`).join('');
 }
 
 function setSort(col) {
@@ -586,6 +635,8 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   document.getElementById('filterStatus').addEventListener('input', render);
+  ['filterDestAcct','filterDestBank','filterSourceBank'].forEach(id =>
+    document.getElementById(id).addEventListener('change', render));
   ['searchInv','filterCustomer'].forEach(id =>
     document.getElementById(id).addEventListener('input', Utils.debounce(render, 200)));
   BEDate.byId('filterFrom', { onChange: render });
@@ -600,17 +651,28 @@ let _fpPayDate, _fpCheqDate, _fpTransferDate;
 
 // ── Render invoice list ───────────────────────────────────────────────────────
 function render() {
-  const q    = document.getElementById('searchInv').value.toLowerCase();
-  const fc   = document.getElementById('filterCustomer').value.toLowerCase().trim();
-  const fs   = document.getElementById('filterStatus').value;
-  const from = Utils.parseBEToISO(document.getElementById('filterFrom').value);
-  const to   = Utils.parseBEToISO(document.getElementById('filterTo').value);
+  populatePaymentFilters();
+  const q         = document.getElementById('searchInv').value.toLowerCase();
+  const fc        = document.getElementById('filterCustomer').value.toLowerCase().trim();
+  const fs        = document.getElementById('filterStatus').value;
+  const from      = Utils.parseBEToISO(document.getElementById('filterFrom').value);
+  const to        = Utils.parseBEToISO(document.getElementById('filterTo').value);
+  const fDestAcct = document.getElementById('filterDestAcct').value;
+  const fDestBank = document.getElementById('filterDestBank').value;
+  const fSrcBank  = document.getElementById('filterSourceBank').value;
 
   // Build lookup maps once — avoids O(n²) per-row DB reads
   const custMap = Object.fromEntries(DB.getCustomers().map(c => [c.id, c]));
+  const allPayments = DB.getPayments();
   const paidMap = {};
-  for (const p of DB.getPayments()) {
-    if (!p.cancelled) paidMap[p.invoiceNumber] = (paidMap[p.invoiceNumber] || 0) + (parseFloat(p.amount) || 0);
+  // Payment lookup by invoice number (for new filters)
+  const paysByInv = {};
+  for (const p of allPayments) {
+    if (!p.cancelled) {
+      paidMap[p.invoiceNumber] = (paidMap[p.invoiceNumber] || 0) + (parseFloat(p.amount) || 0);
+      if (!paysByInv[p.invoiceNumber]) paysByInv[p.invoiceNumber] = [];
+      paysByInv[p.invoiceNumber].push(p);
+    }
   }
 
   const seen = new Map();
@@ -630,6 +692,16 @@ function render() {
     if (fs && status !== fs) return false;
     if (from && d < new Date(from)) return false;
     if (to   && d > new Date(to+'T23:59:59')) return false;
+    // Payment-level filters — invoice passes only if ≥1 payment matches all active filters
+    if (fDestAcct || fDestBank || fSrcBank) {
+      const invPays = paysByInv[inv.invoiceNumber] || [];
+      const match = invPays.some(p =>
+        (!fDestAcct || p.accountName === fDestAcct) &&
+        (!fDestBank || p.destBank    === fDestBank)  &&
+        (!fSrcBank  || p.sourceBank  === fSrcBank)
+      );
+      if (!match) return false;
+    }
     return true;
   });
   // Update sort indicators
