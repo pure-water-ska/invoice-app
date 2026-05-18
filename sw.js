@@ -114,7 +114,7 @@ self.addEventListener('fetch', (event) => {
               caches.open(STATIC_CACHE).then(c => c.put(request, cloned));
             }
             return response;
-          }).catch(() => null);
+          }).catch(() => new Response('', { status: 503, statusText: 'Offline' }));
         })
       );
     }
@@ -140,7 +140,7 @@ self.addEventListener('fetch', (event) => {
 
   } else {
     // ── Other external: Network-First ─────────────────────────────────────────
-    event.respondWith(fetch(request).catch(() => caches.match(request)));
+    event.respondWith(fetch(request).catch(() => caches.match(request).then(c => c || new Response('', { status: 503, statusText: 'Offline' }))));
   }
 });
 

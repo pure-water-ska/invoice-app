@@ -150,24 +150,10 @@ const Sync = {
         console.log('[Sync] Step 4b: signIn (network)');
         const email = FIREBASE_CONFIG.teamEmail;
         const pass  = FIREBASE_CONFIG.teamPassword;
-        let authRetry = 0;
-        while (true) {
-          try {
-            if (email && pass) {
-              await firebase.auth().signInWithEmailAndPassword(email, pass);
-            } else {
-              await firebase.auth().signInAnonymously();
-            }
-            break;
-          } catch (authErr) {
-            if (authErr.code === 'auth/network-request-failed' && authRetry < 2) {
-              authRetry++;
-              console.warn(`[Sync] Auth network error, retry ${authRetry}/2 in ${authRetry * 2}s…`);
-              await new Promise(r => setTimeout(r, authRetry * 2000));
-            } else {
-              throw authErr;
-            }
-          }
+        if (email && pass) {
+          await firebase.auth().signInWithEmailAndPassword(email, pass);
+        } else {
+          await firebase.auth().signInAnonymously();
         }
       }
       this._uid = firebase.auth().currentUser?.uid || 'anon';
@@ -200,14 +186,25 @@ const Sync = {
       await this._flushQueue();
 
     } catch (e) {
-      const msg = e.message || String(e);
-      console.error('[Sync] Init failed:', msg);
-      this._showBadge('error');
-      const badge = document.getElementById('syncStatusBadge');
-      if (badge) badge.title = 'Sync error: ' + msg + '\n(คลิกเพื่อลองใหม่)';
-      // Store last error so Settings page can display it
-      try { localStorage.setItem('wt_sync_last_error', JSON.stringify({ msg, ts: new Date().toISOString() })); } catch {}
-      window.dispatchEvent(new CustomEvent('sync:error', { detail: msg }));
+      const msg  = e.message || String(e);
+      const code = e.code    || '';
+      // Network errors (offline / Firebase unreachable) are not bugs — degrade silently.
+      const isNetwork = code === 'auth/network-request-failed' ||
+                        code === 'auth/timeout'                ||
+                        msg.toLowerCase().includes('network')  ||
+                        msg.toLowerCase().includes('timeout')  ||
+                        msg.toLowerCase().includes('unreachable');
+      if (isNetwork) {
+        console.warn('[Sync] Network unavailable — local-only mode:', msg);
+        this._showBadge('offline');
+      } else {
+        console.error('[Sync] Init failed:', msg);
+        this._showBadge('error');
+        const badge = document.getElementById('syncStatusBadge');
+        if (badge) badge.title = 'Sync error: ' + msg + '\n(คลิกเพื่อลองใหม่)';
+        try { localStorage.setItem('wt_sync_last_error', JSON.stringify({ msg, ts: new Date().toISOString() })); } catch {}
+        window.dispatchEvent(new CustomEvent('sync:error', { detail: msg }));
+      }
       window.dispatchEvent(new Event('sync:ready')); // Unblock login page even on error
     }
 
