@@ -233,6 +233,9 @@ function executeBulkDelete() {
   render();
 }
 
+// Re-render after sync so newly-imported invoices appear
+// even if their Firestore push was in-flight when the page first loaded.
+window.addEventListener('sync:ready', () => { _invPage = 1; render(); });
 window.addEventListener('DOMContentLoaded', () => {
   // Show select-mode button for users with delete permission
   if (Auth.can('invoice_delete')) {
