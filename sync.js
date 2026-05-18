@@ -377,8 +377,30 @@ var Sync = {
       try {
         const doc = await base.collection('data').doc(docName).get();
         if (doc.exists && doc.data().d !== undefined) {
+          const fsVal = doc.data().d;
+          // For array documents (users, customers, products, etc.) merge with local data
+          // so records created locally before sync was working are never lost on pull.
+          if (Array.isArray(fsVal)) {
+            try {
+              const raw = this._localRead(lsKey);
+              const localArr = JSON.parse(raw || '[]');
+              if (Array.isArray(localArr) && localArr.length > 0) {
+                const fsIds = new Set(fsVal.filter(r => r.id).map(r => r.id));
+                const localOnly = localArr.filter(r => r.id && !fsIds.has(r.id));
+                if (localOnly.length > 0) {
+                  console.log(`[Sync] Doc merge: keeping ${localOnly.length} local-only ${docName} records`);
+                  // Push local-only records into the Firestore doc immediately
+                  const merged = [...fsVal, ...localOnly];
+                  await this._writeKey(lsKey, merged);
+                  localStorage.setItem(lsKey, JSON.stringify(merged));
+                  if (window.DB) DB.invalidate(lsKey);
+                  return; // skip plain fsVal write below
+                }
+              }
+            } catch {}
+          }
           // Write plain JSON — _lzRead first-char guard handles this on next read
-          localStorage.setItem(lsKey, JSON.stringify(doc.data().d));
+          localStorage.setItem(lsKey, JSON.stringify(fsVal));
           if (window.DB) DB.invalidate(lsKey);
         } else {
           // Firestore doc missing → bootstrap: push local data up
