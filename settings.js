@@ -598,6 +598,17 @@ function renderFsStatus() {
   let lastErr = null;
   try { lastErr = errRaw ? JSON.parse(errRaw) : null; } catch {}
 
+  // Network/offline errors are not config bugs — clear them and show offline status
+  const isNetworkErr = lastErr && (
+    (lastErr.msg || '').toLowerCase().includes('network') ||
+    (lastErr.msg || '').toLowerCase().includes('timeout') ||
+    (lastErr.msg || '').includes('auth/network-request-failed')
+  );
+  if (isNetworkErr) {
+    localStorage.removeItem('wt_sync_last_error');
+    lastErr = null;
+  }
+
   if (!window.Sync?.ready && lastErr) {
     icon.textContent = '❌';
     text.textContent = 'เชื่อมต่อล้มเหลว';

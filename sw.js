@@ -26,12 +26,13 @@ const APP_SHELL = [
   './settings.js',
   './style.css',
   './manifest.json',
-  // CDN — Bootstrap
-  'https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css',
-  'https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js',
-  'https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css',
-  // html2canvas
-  'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js',
+  // Vendor assets (self-hosted — avoids Edge Tracking Prevention blocking jsdelivr.net)
+  './vendor/bootstrap.min.css',
+  './vendor/bootstrap.bundle.min.js',
+  './vendor/bootstrap-icons.min.css',
+  './vendor/fonts/bootstrap-icons.woff2',
+  './vendor/fonts/bootstrap-icons.woff',
+  './vendor/html2canvas.min.js',
   // flatpickr (B.E. date picker)
   'https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css',
   'https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js',
