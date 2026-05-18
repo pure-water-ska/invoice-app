@@ -196,6 +196,9 @@ const Sync = {
                         msg.toLowerCase().includes('unreachable');
       if (isNetwork) {
         console.warn('[Sync] Network unavailable — local-only mode:', msg);
+        // Clear any stale error stored from a previous failed attempt — network
+        // issues are not bugs so we don't want the settings page to show failure.
+        try { localStorage.removeItem('wt_sync_last_error'); } catch {}
         this._showBadge('offline');
       } else {
         console.error('[Sync] Init failed:', msg);

@@ -618,6 +618,8 @@ function renderFsStatus() {
           <i class="bi bi-arrow-clockwise me-1"></i>ลองเชื่อมต่อใหม่
         </button>`;
     }
+    // Keep polling — sync may still connect and we need to update the card
+    setTimeout(renderFsStatus, 3000);
     return;
   }
 
