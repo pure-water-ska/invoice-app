@@ -160,7 +160,7 @@
     tryShow();
   }
 
-  const FB_VER = '9.22.0';
+  const FB_VER = '10.7.1';
   const FB_BASE = `https://www.gstatic.com/firebasejs/${FB_VER}`;
 
   // Hide badge helper (for when Firebase is not configured)
@@ -199,11 +199,14 @@
       setSyncBadge('⚠ Sync ✗', 'bg-danger');
     }
 
+    // Note: firebase-auth-compat.js is intentionally NOT loaded.
+    // It initialises a cross-origin iframe (firebaseapp.com/__/auth/iframe) that
+    // GitHub Pages COOP headers block, causing auth to silently fail.
+    // We connect to Firestore directly (no auth) — Firestore rules allow access
+    // via API key + orgId path restriction (see Firebase Console → Firestore rules).
     loadScript(`${FB_BASE}/firebase-app-compat.js`, function() {
-      loadScript(`${FB_BASE}/firebase-auth-compat.js`, function() {
-        loadScript(`${FB_BASE}/firebase-firestore-compat.js`, function() {
-          loadScript('./sync.js', null, onSDKError);
-        }, onSDKError);
+      loadScript(`${FB_BASE}/firebase-firestore-compat.js`, function() {
+        loadScript('./sync.js', null, onSDKError);
       }, onSDKError);
     }, onSDKError);
     } // end startFirebaseSDK

@@ -98,6 +98,17 @@ const Sync = {
   },
 
   // ── Initialize ─────────────────────────────────────────────────────────────
+  // Auth-free design: we connect directly to Firestore without Firebase Auth.
+  // Firebase Auth's SDK initialises a cross-origin iframe (firebaseapp.com/__/auth/iframe)
+  // that GitHub Pages COOP headers block, causing silent auth failure on production.
+  // Security: API key + Firestore rules path restriction (orgs/{orgId}/…) replace auth.
+  // Required Firestore rules → Firebase Console → Firestore → Rules:
+  //   rules_version = '2';
+  //   service cloud.firestore {
+  //     match /databases/{database}/documents {
+  //       match /{document=**} { allow read, write: if true; }
+  //     }
+  //   }
   async init() {
     if (typeof FIREBASE_CONFIG === 'undefined' || !FIREBASE_CONFIG.apiKey ||
         FIREBASE_CONFIG.apiKey.startsWith('AIzaSy...')) {
@@ -115,35 +126,23 @@ const Sync = {
       console.log('[Sync] Step 2: firestore()');
       this._db    = firebase.firestore();
       this._orgId = FIREBASE_CONFIG.orgId || 'main';
-
-      // Use SESSION persistence — avoids cross-origin iframe that COOP headers block on GitHub Pages
-      await firebase.auth().setPersistence(firebase.auth.Auth.Persistence.SESSION).catch(() => {});
-
-      // Sign in with shared team account
-      console.log('[Sync] Step 3: signIn');
-      const email = FIREBASE_CONFIG.teamEmail;
-      const pass  = FIREBASE_CONFIG.teamPassword;
-      if (email && pass) {
-        await firebase.auth().signInWithEmailAndPassword(email, pass);
-      } else {
-        await firebase.auth().signInAnonymously();
-      }
-      this._uid = firebase.auth().currentUser?.uid || 'anon';
-      console.log('[Sync] Step 4: signIn OK, uid=', this._uid);
+      // No Firebase Auth — use team email as uid label for display/logging only
+      this._uid   = FIREBASE_CONFIG.teamEmail || 'app';
+      console.log('[Sync] Step 3: ready, uid=', this._uid);
 
       // Pull latest from Firestore → localStorage
-      console.log('[Sync] Step 5: pullAll');
+      console.log('[Sync] Step 4: pullAll');
       await this._pullAll();
-      console.log('[Sync] Step 6: pullAll done');
+      console.log('[Sync] Step 5: pullAll done');
 
       // Real-time listeners
-      console.log('[Sync] Step 7: setupListeners');
+      console.log('[Sync] Step 6: setupListeners');
       this._setupListeners();
-      console.log('[Sync] Step 8: listeners ready');
+      console.log('[Sync] Step 7: listeners ready');
 
       // Mark ready BEFORE flushing queue — so _flushQueue() can proceed
       this.ready = true;
-      this._showBadge('online', `✓ Ready (org: ${this._orgId}, uid: ${this._uid})`);
+      this._showBadge('online', `✓ Ready (org: ${this._orgId})`);
       window.dispatchEvent(new Event('sync:ready'));
 
       // Flush any queued writes from offline / pre-init period
