@@ -351,11 +351,37 @@ const Sync = {
           // Cache server IDs — used by _writeKey() to tombstone deletions synchronously
           this._serverIds[colName] = new Set(snap.docs.map(d => d.id));
           // Apply tombstones so recently-deleted records aren't restored on page reload
-          const arr = this._applyTombstones(colName, snap.docs).map(d => {
+          const fsArr = this._applyTombstones(colName, snap.docs).map(d => {
             const { _by, _ts, ...rec } = d.data();
             return rec;
           });
-          localStorage.setItem(lsKey, JSON.stringify(arr));
+          // MERGE: keep any local records not yet in Firestore (e.g. just-imported, race condition).
+          // This prevents a navigating-away-too-quickly race from wiping locally-added records.
+          try {
+            const raw = this._localRead(lsKey);
+            const localArr = JSON.parse(raw || '[]');
+            if (Array.isArray(localArr) && localArr.length > 0) {
+              const fsIds = new Set(snap.docs.map(d => d.id));
+              const stones = this._getTombstones(colName);
+              const now = Date.now();
+              const localOnly = localArr.filter(r =>
+                r.id && !fsIds.has(r.id) &&
+                (!stones[r.id] || now - stones[r.id] > this._tombstoneTTL)
+              );
+              if (localOnly.length > 0) {
+                console.log(`[Sync] Merge: keeping ${localOnly.length} local-only ${colName} records`);
+                // Push local-only records to Firestore so they survive next pull
+                for (const rec of localOnly) {
+                  try { await base.collection(colName).doc(rec.id).set({ ...rec, _by: 'merge', _ts: Date.now() }); } catch {}
+                }
+                const merged = [...fsArr, ...localOnly];
+                localStorage.setItem(lsKey, JSON.stringify(merged));
+                if (window.DB) DB.invalidate(lsKey);
+                return; // skip the plain fsArr write below
+              }
+            }
+          } catch {}
+          localStorage.setItem(lsKey, JSON.stringify(fsArr));
           if (window.DB) DB.invalidate(lsKey);
         } else {
           // Firestore empty → bootstrap: push local data up to Firestore
