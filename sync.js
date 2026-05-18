@@ -460,15 +460,40 @@ const Sync = {
     // Listen to collection keys
     for (const [lsKey, colName] of Object.entries(this.COLLECTIONS)) {
       const unsub = base.collection(colName)
-        .onSnapshot({ includeMetadataChanges: true }, (snap) => {
+        .onSnapshot({ includeMetadataChanges: true }, async (snap) => {
           if (shouldSkip(snap.metadata)) return;
           // Apply tombstones — prevents pre-purge snapshots from restoring
           // records that were deleted locally but not yet purged from Firestore
-          const arr = this._applyTombstones(colName, snap.docs).map(d => {
+          const fsArr = this._applyTombstones(colName, snap.docs).map(d => {
             const { _by, _ts, ...rec } = d.data();
             return rec;
           });
-          localStorage.setItem(lsKey, JSON.stringify(arr));
+          // MERGE: keep any local-only records not yet confirmed by Firestore.
+          // The listener fires ~3s after page load; a just-imported invoice may
+          // be in localStorage but not yet in this snapshot (push race condition).
+          let finalArr = fsArr;
+          try {
+            const raw = this._localRead(lsKey);
+            const localArr = JSON.parse(raw || '[]');
+            if (Array.isArray(localArr) && localArr.length > 0) {
+              const fsIds = new Set(snap.docs.map(d => d.id));
+              const stones = this._getTombstones(colName);
+              const now = Date.now();
+              const localOnly = localArr.filter(r =>
+                r.id && !fsIds.has(r.id) &&
+                (!stones[r.id] || now - stones[r.id] > this._tombstoneTTL)
+              );
+              if (localOnly.length > 0) {
+                console.log(`[Sync] Listener merge: keeping ${localOnly.length} local-only ${colName} records`);
+                // Push local-only records to Firestore so the next snapshot includes them
+                for (const rec of localOnly) {
+                  try { await base.collection(colName).doc(rec.id).set({ ...rec, _by: 'merge', _ts: Date.now() }); } catch {}
+                }
+                finalArr = [...fsArr, ...localOnly];
+              }
+            }
+          } catch {}
+          localStorage.setItem(lsKey, JSON.stringify(finalArr));
           if (window.DB) DB.invalidate(lsKey);
           // Only notify when at least one changed doc came from another user
           const fromOther = snap.docChanges().some(c => {
