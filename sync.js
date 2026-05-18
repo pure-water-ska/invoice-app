@@ -116,6 +116,15 @@ const Sync = {
       this._db    = firebase.firestore();
       this._orgId = FIREBASE_CONFIG.orgId || 'main';
 
+      // Enable local IndexedDB persistence so reads are served from cache
+      // immediately — prevents the 10-second watch-stream timeout from blocking
+      // the initial data load. synchronizeTabs shares the cache across tabs.
+      await this._db.enablePersistence({ synchronizeTabs: true }).catch(err => {
+        // failed-precondition = another tab already owns persistence (OK)
+        // unimplemented = browser/environment doesn't support IndexedDB (OK)
+        console.warn('[Sync] Persistence unavailable:', err.code);
+      });
+
       // Sign in with shared team account so Firestore WebChannel has a valid
       // ID token (API-key-only connections are blocked at the transport level).
       // Note: The "Cross-Origin-Opener-Policy would block window.closed" console
