@@ -135,10 +135,15 @@ const Sync = {
       // no network request is needed, avoiding auth/network-request-failed errors
       // on flaky connections.
       console.log('[Sync] Step 3: restoreAuthState');
-      const restoredUser = await new Promise(resolve => {
-        const unsub = firebase.auth().onAuthStateChanged(u => { unsub(); resolve(u); });
-      });
-      console.log('[Sync] Step 4: auth state =', restoredUser ? 'cached' : 'none');
+      // Race against a 3-second timeout so a slow/broken IndexedDB auth cache
+      // doesn't hang the entire init (and leave the login button disabled forever).
+      const restoredUser = await Promise.race([
+        new Promise(resolve => {
+          const unsub = firebase.auth().onAuthStateChanged(u => { unsub(); resolve(u); });
+        }),
+        new Promise(resolve => setTimeout(() => resolve(null), 3000)),
+      ]);
+      console.log('[Sync] Step 4: auth state =', restoredUser ? 'cached' : 'none (timed out or fresh)');
 
       if (!restoredUser) {
         // No cached session — need a real network sign-in
