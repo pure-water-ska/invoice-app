@@ -650,8 +650,9 @@ function renderFsStatus() {
   localStorage.removeItem('wt_sync_last_error'); // clear old errors on success
   const last = localStorage.getItem('wt_sync_lastAt');
   const lastStr = last ? new Date(last).toLocaleString('th-TH') : 'ยังไม่เคย';
+  const snapCount = parseInt(localStorage.getItem('wt_sync_snap_count') || '0');
   icon.textContent = '✅';
-  text.textContent = `เชื่อมต่อแล้ว (org: ${FIREBASE_CONFIG.orgId}) · ซิงค์ล่าสุด: ${lastStr}`;
+  text.textContent = `เชื่อมต่อแล้ว (org: ${FIREBASE_CONFIG.orgId}) · ซิงค์ล่าสุด: ${lastStr} · อัปเดตสด: ${snapCount} ครั้ง`;
   if (msg) { msg.className = 'alert d-none small py-2 mb-3'; }
 }
 

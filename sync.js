@@ -125,17 +125,9 @@ var Sync = {
       this._db    = firebase.firestore();
       this._orgId = FIREBASE_CONFIG.orgId || 'main';
 
-      // Enable IndexedDB persistence so Firestore caches data locally.
-      // After the first load, only deltas are downloaded — cuts daily read quota
-      // usage by 90%+. The deprecation warning is non-breaking; enablePersistence
-      // still works in Firebase 10.x and will continue to until further notice.
-      await this._db.enablePersistence({ synchronizeTabs: true }).catch(err => {
-        // failed-precondition: another tab already owns persistence (normal)
-        // unimplemented: browser doesn't support IndexedDB (rare, continue anyway)
-        if (err.code !== 'failed-precondition' && err.code !== 'unimplemented') {
-          console.warn('[Sync] Persistence error:', err.code);
-        }
-      });
+      // NOTE: enablePersistence disabled — it caused all onSnapshot events on
+      // secondary tabs (synchronizeTabs:true) to arrive with fromCache:true,
+      // silently blocking real-time listener updates on those tabs.
 
       // Sign in with shared team account so Firestore WebChannel has a valid
       // ID token (API-key-only connections are blocked at the transport level).
@@ -693,8 +685,10 @@ var Sync = {
       toast._hide = setTimeout(() => toast.remove(), 3000);
     }
 
-    // Update last-sync timestamp so the settings card shows real-time activity
+    // Update last-sync timestamp + snapshot counter for the settings card
     localStorage.setItem(this._lastSyncKey, new Date().toISOString());
+    const cnt = (parseInt(localStorage.getItem('wt_sync_snap_count') || '0') + 1);
+    localStorage.setItem('wt_sync_snap_count', String(cnt));
 
     // Notify any page that is listening for real-time remote changes
     window.dispatchEvent(new CustomEvent('sync:updated', { detail: { key: lsKey } }));
