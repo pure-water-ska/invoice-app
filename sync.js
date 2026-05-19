@@ -28,6 +28,7 @@ var Sync = {
   _tombstoneTTL:  5 * 60 * 1000,         // 5 minutes — auto-expire if purge never ran
   _serverIds:     {},                    // { [colName]: Set<id> } cached from last _pullAll
   _pushDebounce:  {},                    // { [lsKey]: timeoutId } — debounce rapid collection writes
+  _initialDone:   {},                    // { [lsKey]: bool } — true after first server-confirmed snapshot received
 
   // ── Large collections → one Firestore doc per record ──────────────────────
   // (avoids 1 MB Firestore document limit for busy businesses)
@@ -541,9 +542,10 @@ var Sync = {
           if (!doc.exists || doc.data()?.d === undefined) return;
           localStorage.setItem(lsKey, JSON.stringify(doc.data().d));
           if (window.DB) DB.invalidate(lsKey);
-          // Only notify when the write came from another user (not us)
-          const writtenBy = doc.data().by;
-          if (writtenBy && writtenBy !== this._deviceId) this._notifyUpdate(lsKey);
+          // Skip the very first server-confirmed snapshot on page load (already handled by _pullAll)
+          if (!this._initialDone[lsKey]) { this._initialDone[lsKey] = true; return; }
+          // Any subsequent snapshot = real remote change → notify page to re-render
+          this._notifyUpdate(lsKey);
         });
       this._unsubscribers.push(unsub);
     }
@@ -586,12 +588,10 @@ var Sync = {
           } catch {}
           localStorage.setItem(lsKey, JSON.stringify(finalArr));
           if (window.DB) DB.invalidate(lsKey);
-          // Only notify when at least one changed doc came from another user
-          const fromOther = snap.docChanges().some(c => {
-            const by = c.doc.data()?._by;
-            return by && by !== this._deviceId;
-          });
-          if (fromOther) this._notifyUpdate(lsKey);
+          // Skip the very first server-confirmed snapshot on page load (already handled by _pullAll)
+          if (!this._initialDone[lsKey]) { this._initialDone[lsKey] = true; return; }
+          // Any subsequent snapshot with data changes = real remote change → notify page to re-render
+          if (snap.docChanges().length > 0) this._notifyUpdate(lsKey);
         });
       this._unsubscribers.push(unsub);
     }
