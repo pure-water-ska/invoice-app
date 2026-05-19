@@ -531,20 +531,24 @@ var Sync = {
     // Listen to document keys
     for (const [lsKey, docName] of Object.entries(this.DOCUMENTS)) {
       const unsub = base.collection('data').doc(docName)
-        .onSnapshot((doc) => {
-          if (shouldSkip(lsKey)) return;
-          if (!doc.exists || doc.data()?.d === undefined) return;
-          localStorage.setItem(lsKey, JSON.stringify(doc.data().d));
-          if (window.DB) DB.invalidate(lsKey);
-          this._notifyUpdate(lsKey);
-        });
+        .onSnapshot(
+          (doc) => {
+            if (shouldSkip(lsKey)) return;
+            if (!doc.exists || doc.data()?.d === undefined) return;
+            localStorage.setItem(lsKey, JSON.stringify(doc.data().d));
+            if (window.DB) DB.invalidate(lsKey);
+            this._notifyUpdate(lsKey);
+          },
+          (err) => console.error('[Sync] Doc listener error:', docName, err.code, err.message)
+        );
       this._unsubscribers.push(unsub);
     }
 
     // Listen to collection keys
     for (const [lsKey, colName] of Object.entries(this.COLLECTIONS)) {
       const unsub = base.collection(colName)
-        .onSnapshot(async (snap) => {
+        .onSnapshot(
+          async (snap) => {
           if (shouldSkip(lsKey)) return;
           // Apply tombstones — prevents pre-purge snapshots from restoring
           // records that were deleted locally but not yet purged from Firestore
@@ -580,7 +584,9 @@ var Sync = {
           localStorage.setItem(lsKey, JSON.stringify(finalArr));
           if (window.DB) DB.invalidate(lsKey);
           if (snap.docChanges().length > 0) this._notifyUpdate(lsKey);
-        });
+        },
+          (err) => console.error('[Sync] Col listener error:', colName, err.code, err.message)
+        );
       this._unsubscribers.push(unsub);
     }
   },
@@ -686,6 +692,9 @@ var Sync = {
       clearTimeout(toast._hide);
       toast._hide = setTimeout(() => toast.remove(), 3000);
     }
+
+    // Update last-sync timestamp so the settings card shows real-time activity
+    localStorage.setItem(this._lastSyncKey, new Date().toISOString());
 
     // Notify any page that is listening for real-time remote changes
     window.dispatchEvent(new CustomEvent('sync:updated', { detail: { key: lsKey } }));
