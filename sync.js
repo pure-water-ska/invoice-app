@@ -125,14 +125,15 @@ var Sync = {
       this._db    = firebase.firestore();
       this._orgId = FIREBASE_CONFIG.orgId || 'main';
 
-      // Re-enable offline persistence. Previously disabled because our shouldSkip()
-      // was filtering fromCache:true events (blocking secondary-tab updates). That
-      // filter has been removed, so persistence is safe to use again.
-      await this._db.enablePersistence({ synchronizeTabs: true }).catch(err => {
-        if (err.code !== 'failed-precondition' && err.code !== 'unimplemented') {
-          console.warn('[Sync] Persistence error:', err.code);
-        }
-      });
+      // NOTE: enablePersistence() is intentionally disabled.
+      // synchronizeTabs:true uses an IndexedDB primary-tab ownership model that is
+      // designed for multiple tabs within ONE browser, not for separate devices.
+      // When two different devices both try to claim the primary-tab lock they can
+      // block each other — one device connects, the other cannot.  Disabling
+      // persistence means both devices connect directly to Firestore over the
+      // network (no IndexedDB cache race), which is what we actually want for a
+      // multi-device real-time sync scenario.  Offline data is already handled by
+      // localStorage + the queue, so we don't need Firestore's offline cache.
 
       // Sign in with shared team account so Firestore WebChannel has a valid
       // ID token (API-key-only connections are blocked at the transport level).
