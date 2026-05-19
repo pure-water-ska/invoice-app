@@ -606,7 +606,7 @@ async function _uploadPaymentImages(p) {
   const inv = p.invoiceNumber || 'x';
   if (p.transferImage) p.transferImage = await _drvUpload(p.transferImage, `transfer_${inv}_${ts}.jpg`);
   if (p.chequeImage)   p.chequeImage   = await _drvUpload(p.chequeImage,   `cheque_${inv}_${ts}.jpg`);
-  if (p.signedImage)   p.signedImage   = await _drvUpload(p.signedImage,   `signed_${inv}_${ts}.jpg`);
+  // signedImage is stored on the invoice record, not per-payment — skip here
   if (Array.isArray(p.imageHistory)) {
     for (const h of p.imageHistory) {
       if (h.image) h.image = await _drvUpload(h.image, `hist_${h.type}_${inv}_${ts}.jpg`);
@@ -829,6 +829,16 @@ function openPayModal(invNum, custId) {
 
   window._currentInvDate = inv?.createdAt ? inv.createdAt.slice(0,10) : '';
   checkPayDate();
+
+  // Pre-load signed image from invoice if one was already uploaded before
+  if (inv?.signedImage) {
+    payImages.signed = inv.signedImage;
+    const prev = document.getElementById('signedImagePreview');
+    prev.innerHTML = _imgTagHtml(inv.signedImage, 'pay-hist-img', 'ใบกำกับเซ็น') +
+      `<button class="btn btn-sm btn-outline-danger ms-1 align-self-start"
+         onclick="clearPayImage('signedImagePreview','paySignedImage')">
+         <i class="bi bi-x-lg"></i></button>`;
+  }
 
   renderExistingPayments(invNum);
   payModal.show();
@@ -1075,13 +1085,28 @@ function renderExistingPayments(invNum) {
   if (!payments.length) { el.innerHTML = ''; return; }
 
   const isAdmin = Auth.isAdmin();
-  el.innerHTML = `<h6 class="fw-semibold">ประวัติการชำระ</h6>` +
+
+  // Show signed invoice image once at the top (stored on invoice, not per-payment)
+  const inv = DB.getInvoices().find(i => i.invoiceNumber === invNum);
+  // Fallback: check legacy per-payment signedImage for older records
+  const legacySigned = payments.find(p => p.signedImage)?.signedImage || '';
+  const signedSrc = inv?.signedImage || legacySigned;
+  const signedHtml = signedSrc
+    ? `<div class="mb-3 pb-2 border-bottom">
+         <div class="small fw-semibold text-success mb-1">
+           <i class="bi bi-file-earmark-check me-1"></i>ใบกำกับที่ลูกค้าเซ็นรับแล้ว
+         </div>
+         ${_imgTagHtml(signedSrc, 'pay-hist-img', 'ใบกำกับเซ็น')}
+       </div>` : '';
+
+  el.innerHTML = `<h6 class="fw-semibold">ประวัติการชำระ</h6>` + signedHtml +
     payments.map((p, pi) => {
       const isCancelled = !!p.cancelled;
       const imgs = [
-        p.transferImage ? _imgTagHtml(p.transferImage, 'pay-hist-img', 'สลิปโอน')    : '',
-        p.chequeImage   ? _imgTagHtml(p.chequeImage,   'pay-hist-img', 'รูปเช็ค')    : '',
-        p.signedImage   ? _imgTagHtml(p.signedImage,   'pay-hist-img', 'ใบกำกับเซ็น') : '',
+        p.transferImage ? _imgTagHtml(p.transferImage, 'pay-hist-img', 'สลิปโอน') : '',
+        p.chequeImage   ? _imgTagHtml(p.chequeImage,   'pay-hist-img', 'รูปเช็ค') : '',
+        // legacy: old records may still have signedImage on the payment itself
+        (!signedSrc && p.signedImage) ? _imgTagHtml(p.signedImage, 'pay-hist-img', 'ใบกำกับเซ็น') : '',
       ].filter(Boolean).join('');
 
       // Image timeline (admin only)
@@ -1312,10 +1337,7 @@ function collectPaymentData() {
     id: Utils.uuid(), type: 'cheque', typeLabel: 'รูปเช็ค',
     image: payImages.cheque, reason: 'บันทึกครั้งแรก', at: now, by: session.name, byUser: session.username
   });
-  if (payImages.signed) imageHistory.push({
-    id: Utils.uuid(), type: 'signed', typeLabel: 'ใบกำกับที่เซ็นแล้ว',
-    image: payImages.signed, reason: 'บันทึกครั้งแรก', at: now, by: session.name, byUser: session.username
-  });
+  // signedImage is NOT included in imageHistory — it lives on the invoice, not per-payment
 
   return {
     id:            Utils.uuid(),
@@ -1332,7 +1354,7 @@ function collectPaymentData() {
     chequeDate:     Utils.parseBEToISO(document.getElementById('payChequeDate').value) || '',
     transferImage:  payImages.transfer,
     chequeImage:    payImages.cheque,
-    signedImage:    payImages.signed,
+    // signedImage intentionally omitted — stored once on the invoice record
     imageHistory,
     notes:          document.getElementById('payNote').value          || '',
     payDate:        Utils.parseBEToISO(document.getElementById('payDate').value) || Utils.todayInputValue(),
@@ -1485,6 +1507,19 @@ async function doSaveAllPayments(payments) {
   const inv         = DB.getInvoices().find(i => i.invoiceNumber === invNum);
   const total       = parseFloat(inv?.totalAmount) || 0;
   const alreadyPaid = DB.getInvoicePaidAmount(invNum);
+
+  // Save signedImage once on the invoice (not per-payment)
+  if (payImages.signed && inv) {
+    let signedSrc = payImages.signed;
+    // Upload to Drive if available
+    if (window.DriveStore && DriveStore.ready && signedSrc.startsWith('data:')) {
+      const ts = Date.now();
+      try { signedSrc = await _drvUpload(signedSrc, `signed_${invNum}_${ts}.jpg`); } catch {}
+    }
+    DB.updateInvoice(inv.id, { signedImage: signedSrc });
+    DB.logActivity(session.userId, session.username, 'บันทึกรูปใบกำกับเซ็น',
+      { invoiceNumber: invNum });
+  }
 
   let newPaid = alreadyPaid;
   for (const data of payments) {
