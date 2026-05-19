@@ -10,7 +10,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Hosting:** Netlify (static), deployed from GitHub on push to `main`
 - **Offline-first:** Service Worker + localStorage as primary data store
 
-- show example before push
+## UI/UX Workflow Rule
+
+**Always show an interactive mockup/example BEFORE writing any code for new UI features.**
+
+- For any new page, modal, card, form, or visible UI change — build an interactive HTML mockup using `mcp__visualize__show_widget` first.
+- Wait for explicit user approval ("ทำเลย" / "do it") before touching any source files.
+- This rule applies even when the request sounds straightforward. Mockup first, code second.
+
 ## Running Locally
 
 No install step. Serve the directory with any HTTP server:

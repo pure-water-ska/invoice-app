@@ -46,6 +46,9 @@
 <div class="page-wrap">
   <div class="d-flex justify-content-between align-items-center mb-3 page-header">
     <h5 class="mb-0 fw-bold"><i class="bi bi-cash-coin me-2 text-primary"></i>ติดตามการชำระเงิน</h5>
+    <button class="btn btn-primary btn-sm" onclick="openMultiPayModal()">
+      <i class="bi bi-layers me-1"></i>ชำระหลายบิล
+    </button>
   </div>
   <div id="alertBox" class="mb-2"></div>
 
@@ -485,6 +488,151 @@
 
 <datalist id="bankDatalist"></datalist>
 
+<!-- ── Multi-invoice payment modal ──────────────────────────────────── -->
+<div class="modal fade" id="multiPayModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-layers me-2 text-primary"></i>ชำระหลายบิลในครั้งเดียว</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="multiPayAlert"></div>
+
+        <!-- Customer select -->
+        <div class="mb-3">
+          <label class="form-label fw-semibold">ลูกค้า <span class="text-danger">*</span></label>
+          <select id="multiPayCust" class="form-select" onchange="onMultiCustChange()"></select>
+        </div>
+
+        <!-- Method tabs -->
+        <ul class="nav nav-tabs mb-3">
+          <li class="nav-item"><button class="nav-link active" id="multiTab-transfer" onclick="switchMultiTab('transfer')"><i class="bi bi-bank me-1"></i>โอน</button></li>
+          <li class="nav-item"><button class="nav-link"        id="multiTab-cheque"   onclick="switchMultiTab('cheque')"><i class="bi bi-file-text me-1"></i>เช็ค</button></li>
+          <li class="nav-item"><button class="nav-link"        id="multiTab-cash"     onclick="switchMultiTab('cash')"><i class="bi bi-cash me-1"></i>เงินสด</button></li>
+        </ul>
+
+        <!-- TRANSFER fields -->
+        <div id="multiFields-transfer">
+          <div class="row g-3 mb-3">
+            <div class="col-12 col-md-6">
+              <label class="form-label fw-semibold">บัญชีผู้รับโอน</label>
+              <div class="d-flex gap-1">
+                <select id="multiTransferAcct" class="form-select" onchange="onMultiTransferAcctChange()"></select>
+                <button class="btn btn-outline-secondary btn-sm px-2" onclick="openTransferAccountManager()" title="จัดการบัญชี"><i class="bi bi-list-ul"></i></button>
+              </div>
+            </div>
+            <div class="col-12 col-md-6">
+              <label class="form-label fw-semibold">ธนาคารต้นทาง</label>
+              <input type="text" id="multiSourceBank" class="form-control" list="bankDatalist" placeholder="พิมพ์ชื่อธนาคาร..." autocomplete="off">
+            </div>
+            <div class="col-6 col-md-4">
+              <label class="form-label fw-semibold">วันที่โอน (พ.ศ.) <span class="text-danger">*</span></label>
+              <input type="text" id="multiTransferDate" class="form-control" placeholder="DD/MM/YYYY" autocomplete="off">
+            </div>
+            <div class="col-6 col-md-3">
+              <label class="form-label fw-semibold">เวลาที่โอน <span class="text-danger">*</span></label>
+              <input type="time" id="multiTransferTime" class="form-control">
+            </div>
+            <div class="col-12 col-md-5">
+              <label class="form-label fw-semibold">ยอดโอนรวมในสลิป <span class="text-danger">*</span></label>
+              <div class="input-group">
+                <span class="input-group-text">฿</span>
+                <input type="number" id="multiSlipTransfer" class="form-control" min="0" step="0.01" placeholder="0.00" oninput="onMultiSlipChange()">
+              </div>
+            </div>
+            <div class="col-12">
+              <label class="form-label fw-semibold"><i class="bi bi-image me-1 text-primary"></i>รูปสลิปโอนเงิน</label>
+              <input type="file" id="multiTransferImg" class="form-control" accept="image/*" onchange="loadMultiPayImage(this,'transfer')">
+              <div id="multiTransferImgPreview" class="mt-2 d-flex gap-2 flex-wrap"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CHEQUE fields -->
+        <div id="multiFields-cheque" style="display:none">
+          <div class="row g-3 mb-3">
+            <div class="col-12 col-md-6">
+              <label class="form-label fw-semibold">บัญชีผู้รับเงิน (เช็ค)</label>
+              <div class="d-flex gap-1">
+                <select id="multiChequeAcct" class="form-select" onchange="onMultiChequeAcctChange()"></select>
+                <button class="btn btn-outline-secondary btn-sm px-2" onclick="openTransferAccountManager()" title="จัดการบัญชี"><i class="bi bi-list-ul"></i></button>
+              </div>
+            </div>
+            <div class="col-12 col-md-6">
+              <label class="form-label fw-semibold">ธนาคารออกเช็ค</label>
+              <input type="text" id="multiChequeBank" class="form-control" list="bankDatalist" placeholder="พิมพ์ชื่อธนาคาร..." autocomplete="off">
+            </div>
+            <div class="col-6 col-md-4">
+              <label class="form-label fw-semibold">เลขที่เช็ค</label>
+              <input type="text" id="multiChequeNo" class="form-control" placeholder="หมายเลขเช็ค">
+            </div>
+            <div class="col-6 col-md-4">
+              <label class="form-label fw-semibold">วันที่บนเช็ค <span class="text-danger">*</span></label>
+              <input type="text" id="multiChequeDate" class="form-control" placeholder="DD/MM/YYYY" autocomplete="off">
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label fw-semibold">ยอดบนเช็ค <span class="text-danger">*</span></label>
+              <div class="input-group">
+                <span class="input-group-text">฿</span>
+                <input type="number" id="multiSlipCheque" class="form-control" min="0" step="0.01" placeholder="0.00" oninput="onMultiSlipChange()">
+              </div>
+            </div>
+            <div class="col-12">
+              <label class="form-label fw-semibold"><i class="bi bi-image me-1 text-primary"></i>รูปหน้าเช็ค</label>
+              <input type="file" id="multiChequeImg" class="form-control" accept="image/*" onchange="loadMultiPayImage(this,'cheque')">
+              <div id="multiChequeImgPreview" class="mt-2 d-flex gap-2 flex-wrap"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CASH fields -->
+        <div id="multiFields-cash" style="display:none">
+          <div class="row g-3 mb-3">
+            <div class="col-12 col-md-6">
+              <label class="form-label fw-semibold">ผู้รับเงิน</label>
+              <input type="text" id="multiCashCollector" class="form-control" readonly>
+            </div>
+            <div class="col-12 col-md-6">
+              <label class="form-label fw-semibold">ยอดเงินสดรับ <span class="text-danger">*</span></label>
+              <div class="input-group">
+                <span class="input-group-text">฿</span>
+                <input type="number" id="multiSlipCash" class="form-control" min="0" step="0.01" placeholder="0.00" oninput="onMultiSlipChange()">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Invoice allocation -->
+        <div id="multiAllocSection" style="display:none">
+          <hr>
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <h6 class="fw-semibold mb-0"><i class="bi bi-layout-text-window-reverse me-1 text-primary"></i>กระจายยอดให้บิลที่ค้าง</h6>
+            <button class="btn btn-outline-primary btn-sm" onclick="autoFillMultiPay()">
+              <i class="bi bi-magic me-1"></i>เติมอัตโนมัติ
+            </button>
+          </div>
+          <div class="list-group list-group-flush border rounded mb-3" id="multiAllocRows"></div>
+          <div class="d-flex justify-content-between align-items-center bg-light rounded px-3 py-2">
+            <span class="text-muted small">กระจายแล้ว / ยอดรวม</span>
+            <span class="fw-semibold">
+              <span id="multiUsed">฿0</span>
+              <span class="text-muted small"> / <span id="multiTotal">฿0</span></span>
+              &nbsp;<span id="multiStatus"><span class="badge bg-secondary">รอกระจายยอด</span></span>
+            </span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+        <button class="btn btn-primary" id="btnMultiSave" onclick="saveMultiPay()">
+          <i class="bi bi-check-circle me-1"></i>บันทึกทุกบิล
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- A5 Payment Summary Print Area -->
 <div id="payPrintArea"></div>
 
@@ -559,6 +707,14 @@ let _pendingPaymentData = null;   // holds data (array) while waiting for date c
 let _pendingPayments    = [];     // staging list for multi-payment entry
 let _imgUpdateB64 = '';           // holds resized image for imgUpdateModal
 
+// ── Multi-invoice payment state ───────────────────────────────────────────────
+let multiPayModal;
+let _multiImages  = { transfer: '', cheque: '' };
+let _multiAllocs  = [];   // [{ invNum, custId, due, alloc, date }]
+let _multiCurTab  = 'transfer';
+let _multiDestBank = '', _multiAcctName = '';
+let _fpMultiTransfer, _fpMultiCheque;
+
 // ── Drive image helpers ───────────────────────────────────────────────────────
 function _isDrv(s) { return typeof s === 'string' && s.startsWith('drv|'); }
 
@@ -632,6 +788,9 @@ window.addEventListener('DOMContentLoaded', () => {
   cancelPayModal        = new bootstrap.Modal(document.getElementById('cancelPayModal'));
   dateConfirmModal      = new bootstrap.Modal(document.getElementById('dateConfirmModal'));
   imgUpdateModal        = new bootstrap.Modal(document.getElementById('imgUpdateModal'));
+  multiPayModal         = new bootstrap.Modal(document.getElementById('multiPayModal'));
+  _fpMultiTransfer      = BEDate.byId('multiTransferDate');
+  _fpMultiCheque        = BEDate.byId('multiChequeDate');
 
   document.getElementById('bankDatalist').innerHTML = Utils.bankDatalistOptions();
 
@@ -1941,6 +2100,290 @@ async function copyOutstandingImage() {
     await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
     Utils.showAlert('<i class="bi bi-check-circle me-1 text-success"></i>คัดลอกรูปลง Clipboard แล้ว');
   } catch (e) { Utils.showAlert('คัดลอกไม่สำเร็จ: ' + e.message, 'danger'); }
+}
+
+// ── Multi-invoice payment ─────────────────────────────────────────────────────
+function openMultiPayModal() {
+  _multiImages  = { transfer: '', cheque: '' };
+  _multiAllocs  = [];
+  _multiCurTab  = 'transfer';
+  _multiDestBank = '';
+  _multiAcctName = '';
+
+  document.getElementById('multiPayAlert').innerHTML = '';
+
+  // Build customer dropdown — only customers with at least one unpaid invoice
+  const invoices  = DB.getInvoices();
+  const customers = DB.getCustomers();
+  const custIds   = new Set();
+  [...new Set(invoices.map(i => i.invoiceNumber))].forEach(num => {
+    const page1 = invoices.find(i => i.invoiceNumber === num && i.page === 1)
+                || invoices.find(i => i.invoiceNumber === num);
+    if (!page1) return;
+    const due = (parseFloat(page1.totalAmount) || 0) - DB.getInvoicePaidAmount(num);
+    if (due > 0.005) custIds.add(page1.customerId);
+  });
+  document.getElementById('multiPayCust').innerHTML =
+    '<option value="">— เลือกลูกค้า —</option>' +
+    customers
+      .filter(c => custIds.has(c.id))
+      .sort((a, b) => a.name.localeCompare(b.name, 'th'))
+      .map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`)
+      .join('');
+
+  // Reset all method fields
+  ['multiTransferImg','multiChequeImg'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  ['multiTransferImgPreview','multiChequeImgPreview'].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ''; });
+  ['multiSlipTransfer','multiSlipCheque','multiSlipCash',
+   'multiSourceBank','multiChequeBank','multiChequeNo'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  if (_fpMultiCheque) _fpMultiCheque.clear();
+  else document.getElementById('multiChequeDate').value = '';
+
+  // Default transfer date/time to now
+  const now = new Date();
+  if (_fpMultiTransfer) _fpMultiTransfer.setDate(now);
+  else document.getElementById('multiTransferDate').value = Utils.todayBE();
+  document.getElementById('multiTransferTime').value =
+    String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+
+  // Cash collector
+  document.getElementById('multiCashCollector').value = session ? session.username : '';
+
+  // Build account selects
+  const accounts = DB.getTransferAccounts();
+  const acctOpts = '<option value="">— เลือกบัญชี —</option>' +
+    accounts.map((a, i) =>
+      `<option value="${i}">${esc(a.name)}${a.bank ? ' · ' + esc(a.bank) : ''}${a.accountNo ? ' · ' + esc(a.accountNo) : ''}</option>`
+    ).join('');
+  document.getElementById('multiTransferAcct').innerHTML = acctOpts;
+  document.getElementById('multiChequeAcct').innerHTML   = acctOpts;
+
+  switchMultiTab('transfer');
+  document.getElementById('multiAllocSection').style.display = 'none';
+  document.getElementById('multiAllocRows').innerHTML = '';
+  updateMultiSummary();
+  multiPayModal.show();
+}
+
+function onMultiCustChange() {
+  const custId = document.getElementById('multiPayCust').value;
+  if (!custId) {
+    _multiAllocs = [];
+    document.getElementById('multiAllocSection').style.display = 'none';
+    updateMultiSummary();
+    return;
+  }
+  const invoices = DB.getInvoices();
+  const invNums  = [...new Set(invoices.filter(i => i.customerId === custId).map(i => i.invoiceNumber))];
+  _multiAllocs = invNums.map(num => {
+    const page1 = invoices.find(i => i.invoiceNumber === num && i.page === 1)
+                || invoices.find(i => i.invoiceNumber === num);
+    if (!page1) return null;
+    const due = (parseFloat(page1.totalAmount) || 0) - DB.getInvoicePaidAmount(num);
+    if (due <= 0.005) return null;
+    return { invNum: num, custId, due, alloc: 0, date: page1.createdAt };
+  }).filter(Boolean).sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  document.getElementById('multiAllocSection').style.display = _multiAllocs.length ? '' : 'none';
+  renderMultiAllocRows();
+  updateMultiSummary();
+}
+
+function switchMultiTab(tab) {
+  _multiCurTab = tab;
+  ['transfer','cheque','cash'].forEach(t => {
+    document.getElementById('multiFields-' + t).style.display = t === tab ? '' : 'none';
+    const btn = document.getElementById('multiTab-' + t);
+    if (btn) btn.className = 'nav-link' + (t === tab ? ' active' : '');
+  });
+  updateMultiSummary();
+}
+
+function onMultiTransferAcctChange() {
+  const idx = parseInt(document.getElementById('multiTransferAcct').value);
+  const accounts = DB.getTransferAccounts();
+  const a = (!isNaN(idx) && accounts[idx]) ? accounts[idx] : null;
+  _multiDestBank = a ? (a.bank  || '') : '';
+  _multiAcctName = a ? (a.name  || '') : '';
+}
+
+function onMultiChequeAcctChange() {
+  const idx = parseInt(document.getElementById('multiChequeAcct').value);
+  const accounts = DB.getTransferAccounts();
+  const a = (!isNaN(idx) && accounts[idx]) ? accounts[idx] : null;
+  _multiDestBank = a ? (a.bank  || '') : '';
+  _multiAcctName = a ? (a.name  || '') : '';
+}
+
+function loadMultiPayImage(input, type) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const MAX = 1200;
+      const scale = Math.min(1, MAX / img.width, MAX / img.height);
+      canvas.width  = Math.round(img.width  * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      const b64 = canvas.toDataURL('image/jpeg', 0.55);
+      _multiImages[type] = b64;
+      const previewId = type === 'transfer' ? 'multiTransferImgPreview' : 'multiChequeImgPreview';
+      document.getElementById(previewId).innerHTML =
+        `<img src="${b64}" class="img-thumb" onclick="openLightboxSrc('${previewId}')">
+         <button class="btn btn-sm btn-outline-danger align-self-start"
+                 onclick="_clearMultiImg('${type}','${input.id}','${previewId}')"><i class="bi bi-x-lg"></i></button>`;
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function _clearMultiImg(type, inputId, previewId) {
+  _multiImages[type] = '';
+  document.getElementById(inputId).value = '';
+  document.getElementById(previewId).innerHTML = '';
+}
+
+function _getMultiSlipTotal() {
+  const idMap = { transfer: 'multiSlipTransfer', cheque: 'multiSlipCheque', cash: 'multiSlipCash' };
+  return parseFloat(document.getElementById(idMap[_multiCurTab])?.value) || 0;
+}
+
+function onMultiSlipChange() { updateMultiSummary(); }
+
+function autoFillMultiPay() {
+  let rem = _getMultiSlipTotal();
+  _multiAllocs.forEach((inv, i) => {
+    const give = Math.min(rem, inv.due);
+    inv.alloc = give;
+    rem -= give;
+    const inp = document.getElementById('multiAlloc_' + i);
+    if (inp) inp.value = give > 0 ? give.toFixed(2) : '';
+  });
+  renderMultiAllocRows();
+  updateMultiSummary();
+}
+
+function onMultiAllocChange(i) {
+  _multiAllocs[i].alloc = parseFloat(document.getElementById('multiAlloc_' + i)?.value) || 0;
+  renderMultiAllocRows();
+  updateMultiSummary();
+}
+
+function renderMultiAllocRows() {
+  document.getElementById('multiAllocRows').innerHTML = _multiAllocs.map((inv, i) => {
+    const a = inv.alloc;
+    const rowCls = a >= inv.due
+      ? 'list-group-item d-flex align-items-center gap-2 py-2 px-3 bg-success bg-opacity-10'
+      : 'list-group-item d-flex align-items-center gap-2 py-2 px-3';
+    let badge = '';
+    if (a <= 0)            badge = '<span class="badge bg-secondary">ยังไม่กระจาย</span>';
+    else if (a >= inv.due) badge = '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>ครบ</span>';
+    else                   badge = `<span class="badge bg-warning text-dark">ค้าง ฿${Utils.formatNumber(inv.due - a)}</span>`;
+    return `<div class="${rowCls}">
+      <div class="flex-grow-1">
+        <div class="fw-semibold small">${esc(inv.invNum)}</div>
+        <div class="text-muted" style="font-size:11px">${Utils.formatDateTH(inv.date)} · ค้าง <strong>฿${Utils.formatNumber(inv.due)}</strong></div>
+      </div>
+      <div class="input-group input-group-sm" style="width:130px">
+        <span class="input-group-text">฿</span>
+        <input type="number" id="multiAlloc_${i}" class="form-control" min="0" step="0.01" placeholder="0.00"
+               value="${a > 0 ? a.toFixed(2) : ''}" oninput="onMultiAllocChange(${i})">
+      </div>
+      <div style="min-width:90px;text-align:right">${badge}</div>
+    </div>`;
+  }).join('') || '<div class="list-group-item text-muted text-center small py-2">ไม่มีบิลค้างชำระ</div>';
+}
+
+function updateMultiSummary() {
+  const slip = _getMultiSlipTotal();
+  const used = _multiAllocs.reduce((s, inv) => s + (inv.alloc || 0), 0);
+  const rem  = slip - used;
+  document.getElementById('multiUsed').textContent  = '฿' + Utils.formatNumber(used);
+  document.getElementById('multiTotal').textContent = '฿' + Utils.formatNumber(slip);
+  const statusEl = document.getElementById('multiStatus');
+  if (used <= 0)             statusEl.innerHTML = '<span class="badge bg-secondary">รอกระจายยอด</span>';
+  else if (Math.abs(rem) < 0.01) statusEl.innerHTML = '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>ครบพอดี</span>';
+  else if (rem > 0)          statusEl.innerHTML = `<span class="badge bg-warning text-dark">เหลือ ฿${Utils.formatNumber(rem)}</span>`;
+  else                       statusEl.innerHTML = `<span class="badge bg-danger">กระจายเกิน ฿${Utils.formatNumber(Math.abs(rem))}</span>`;
+}
+
+async function saveMultiPay() {
+  document.getElementById('multiPayAlert').innerHTML = '';
+  const custId = document.getElementById('multiPayCust').value;
+  if (!custId) { Utils.showAlert('กรุณาเลือกลูกค้า', 'warning', 'multiPayAlert'); return; }
+
+  const allocations = _multiAllocs.filter(inv => inv.alloc > 0.005);
+  if (!allocations.length) { Utils.showAlert('กรุณากระจายยอดอย่างน้อย 1 บิล', 'warning', 'multiPayAlert'); return; }
+
+  const slip = _getMultiSlipTotal();
+  if (!slip || slip <= 0) { Utils.showAlert('กรุณากรอกยอดรวม (สลิป/เช็ค/เงินสด)', 'warning', 'multiPayAlert'); return; }
+
+  const used = allocations.reduce((s, inv) => s + inv.alloc, 0);
+  if (used > slip + 0.01) { Utils.showAlert('ยอดกระจายรวมเกินยอดในสลิป', 'warning', 'multiPayAlert'); return; }
+
+  const method = _multiCurTab === 'transfer' ? 'โอน' : _multiCurTab === 'cheque' ? 'เช็ค' : 'เงินสด';
+  const now    = new Date().toISOString();
+  const todayISO = Utils.todayInputValue();
+
+  let transferDate = '';
+  if (_multiCurTab === 'transfer') {
+    const iso = Utils.parseBEToISO(document.getElementById('multiTransferDate').value);
+    const t   = document.getElementById('multiTransferTime').value;
+    transferDate = iso ? iso + 'T' + (t || '00:00') : '';
+  }
+
+  // Upload shared images once, then reuse the reference for all payment records
+  const ts = Date.now();
+  let sharedTransferImg = _multiImages.transfer;
+  let sharedChequeImg   = _multiImages.cheque;
+  if (sharedTransferImg?.startsWith('data:')) sharedTransferImg = await _drvUpload(sharedTransferImg, `transfer_multi_${ts}.jpg`);
+  if (sharedChequeImg?.startsWith('data:'))   sharedChequeImg   = await _drvUpload(sharedChequeImg,   `cheque_multi_${ts}.jpg`);
+
+  const btnSave = document.getElementById('btnMultiSave');
+  if (btnSave) { btnSave.disabled = true; btnSave.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>กำลังบันทึก...'; }
+
+  for (const inv of allocations) {
+    const imageHistory = [];
+    if (sharedTransferImg) imageHistory.push({ id: Utils.uuid(), type: 'transfer', typeLabel: 'สลิปโอนเงิน',  image: sharedTransferImg, reason: 'บันทึกครั้งแรก', at: now, by: session.name, byUser: session.username });
+    if (sharedChequeImg)   imageHistory.push({ id: Utils.uuid(), type: 'cheque',   typeLabel: 'รูปเช็ค',       image: sharedChequeImg,   reason: 'บันทึกครั้งแรก', at: now, by: session.name, byUser: session.username });
+
+    DB.addPayment({
+      id:            Utils.uuid(),
+      invoiceNumber: inv.invNum,
+      customerId:    inv.custId,
+      method,
+      amount:        inv.alloc,
+      cashCollector: _multiCurTab === 'cash' ? session.username : '',
+      sourceBank:    document.getElementById('multiSourceBank').value || '',
+      destBank:      _multiDestBank,
+      accountName:   _multiAcctName,
+      transferDate,
+      chequeNo:      document.getElementById('multiChequeNo').value   || '',
+      chequeBank:    document.getElementById('multiChequeBank').value  || '',
+      chequeDate:    Utils.parseBEToISO(document.getElementById('multiChequeDate').value) || '',
+      transferImage: sharedTransferImg,
+      chequeImage:   sharedChequeImg,
+      imageHistory,
+      notes:         '',
+      payDate:       todayISO,
+      createdAt:     now,
+      createdBy:     session.name,
+      createdByUser: session.username,
+    });
+    DB.logActivity(session.userId, session.username, 'ชำระหลายบิล',
+      { invoiceNumber: inv.invNum, method, amount: inv.alloc });
+  }
+
+  if (btnSave) { btnSave.disabled = false; btnSave.innerHTML = '<i class="bi bi-check-circle me-1"></i>บันทึกทุกบิล'; }
+  multiPayModal.hide();
+  Utils.showAlert(`บันทึกชำระ ${allocations.length} บิลสำเร็จ`, 'success');
+  render();
 }
 </script>
 </body>

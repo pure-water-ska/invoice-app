@@ -9,6 +9,15 @@ var Sync = {
   _db:            null,
   _orgId:         null,
   _uid:           null,
+  // Per-device UUID — unique per browser instance, persisted in localStorage.
+  // Used instead of _uid to detect "my own echo" vs "remote change" because
+  // all devices share the same Firebase team account (same _uid everywhere).
+  _deviceId:      (function() {
+    const KEY = 'wt_sync_device_id';
+    let id = localStorage.getItem(KEY);
+    if (!id) { id = 'dev_' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem(KEY, id); }
+    return id;
+  })(),
   _online:        navigator.onLine,
   _unsubscribers: [],
   _skipInitialMs: 800,        // ms to ignore incoming snapshots (= our own writes)
@@ -285,7 +294,7 @@ var Sync = {
       await base.collection('data').doc(docName).set({
         d:  val,
         ts: firebase.firestore.FieldValue.serverTimestamp(),
-        by: this._uid,
+        by: this._deviceId,   // per-device ID so remote devices can detect this isn't their own echo
       });
 
     } else if (colName) {
@@ -319,7 +328,7 @@ var Sync = {
         if (!record.id) continue;
         batch.set(colRef.doc(record.id), {
           ...record,
-          _by: this._uid,
+          _by: this._deviceId,   // per-device ID so remote devices can detect this isn't their own echo
           _ts: firebase.firestore.FieldValue.serverTimestamp(),
         }, { merge: true });
         if (++ops >= 490) await commit();
@@ -447,7 +456,7 @@ var Sync = {
                 console.log(`[Sync] Merge: keeping ${localOnly.length} local-only ${colName} records`);
                 // Push local-only records to Firestore so they survive next pull
                 for (const rec of localOnly) {
-                  try { await base.collection(colName).doc(rec.id).set({ ...rec, _by: 'merge', _ts: Date.now() }); } catch {}
+                  try { await base.collection(colName).doc(rec.id).set({ ...rec, _by: this._deviceId, _ts: Date.now() }); } catch {}
                 }
                 const merged = [...fsArr, ...localOnly];
                 localStorage.setItem(lsKey, JSON.stringify(merged));
@@ -534,7 +543,7 @@ var Sync = {
           if (window.DB) DB.invalidate(lsKey);
           // Only notify when the write came from another user (not us)
           const writtenBy = doc.data().by;
-          if (writtenBy && writtenBy !== this._uid) this._notifyUpdate(lsKey);
+          if (writtenBy && writtenBy !== this._deviceId) this._notifyUpdate(lsKey);
         });
       this._unsubscribers.push(unsub);
     }
@@ -543,7 +552,7 @@ var Sync = {
     for (const [lsKey, colName] of Object.entries(this.COLLECTIONS)) {
       const unsub = base.collection(colName)
         .onSnapshot({ includeMetadataChanges: true }, async (snap) => {
-          if (shouldSkip(snap.metadata)) return;
+          if (shouldSkip(snap.metadata, lsKey)) return;
           // Apply tombstones — prevents pre-purge snapshots from restoring
           // records that were deleted locally but not yet purged from Firestore
           const fsArr = this._applyTombstones(colName, snap.docs).map(d => {
@@ -569,7 +578,7 @@ var Sync = {
                 console.log(`[Sync] Listener merge: keeping ${localOnly.length} local-only ${colName} records`);
                 // Push local-only records to Firestore so the next snapshot includes them
                 for (const rec of localOnly) {
-                  try { await base.collection(colName).doc(rec.id).set({ ...rec, _by: 'merge', _ts: Date.now() }); } catch {}
+                  try { await base.collection(colName).doc(rec.id).set({ ...rec, _by: this._deviceId, _ts: Date.now() }); } catch {}
                 }
                 finalArr = [...fsArr, ...localOnly];
               }
@@ -580,7 +589,7 @@ var Sync = {
           // Only notify when at least one changed doc came from another user
           const fromOther = snap.docChanges().some(c => {
             const by = c.doc.data()?._by;
-            return by && by !== this._uid;
+            return by && by !== this._deviceId;
           });
           if (fromOther) this._notifyUpdate(lsKey);
         });
