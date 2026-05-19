@@ -108,8 +108,8 @@ const Auth = {
       permissions: user.permissions || [],
       loginTime: new Date().toISOString()
     };
-    sessionStorage.setItem(this.KEY, JSON.stringify(session));
-    if (user.mustChangePw) sessionStorage.setItem('mustChangePw', '1');
+    localStorage.setItem(this.KEY, JSON.stringify(session));
+    if (user.mustChangePw) localStorage.setItem('mustChangePw', '1');
     DB.logLogin(user.id, user.username, true, geo, deviceInfo);
     DB.logActivity(user.id, user.username, 'เข้าสู่ระบบ', {});
     return { ok: true, user: session };
@@ -122,14 +122,24 @@ const Auth = {
       // Auto-download backup on sign-out if daily backup is enabled
       try { DB.runAutoBackup(s.username); } catch {}
     }
-    sessionStorage.removeItem(this.KEY);
+    localStorage.removeItem(this.KEY);
+    localStorage.removeItem('mustChangePw');
     // Sign out of Firebase if sync is active
     try { if (window.firebase && firebase.apps.length) firebase.auth().signOut(); } catch {}
     window.location.href = 'index.html';
   },
 
   session() {
-    try { return JSON.parse(sessionStorage.getItem(this.KEY)); } catch { return null; }
+    try {
+      const s = JSON.parse(localStorage.getItem(this.KEY));
+      if (!s) return null;
+      // Auto-expire session after 12 hours for security
+      if (s.loginTime && Date.now() - new Date(s.loginTime).getTime() > 12 * 60 * 60 * 1000) {
+        localStorage.removeItem(this.KEY);
+        return null;
+      }
+      return s;
+    } catch { return null; }
   },
 
   require() {

@@ -48,10 +48,10 @@ window.DriveStore = {
 
       const wasSignedIn = localStorage.getItem('wt_drive_signed_in') === '1';
       if (wasSignedIn) {
-        // Try restoring token from sessionStorage first — avoids OAuth popup on every page
-        const cachedTok = sessionStorage.getItem('wt_dr_tok');
-        const cachedExp = parseInt(sessionStorage.getItem('wt_dr_exp') || '0');
-        const cachedFid = sessionStorage.getItem('wt_dr_fid');
+        // Try restoring token from localStorage first — avoids OAuth popup on every page
+        const cachedTok = localStorage.getItem('wt_dr_tok');
+        const cachedExp = parseInt(localStorage.getItem('wt_dr_exp') || '0');
+        const cachedFid = localStorage.getItem('wt_dr_fid');
         if (cachedTok && cachedExp > Date.now() + 30000) {
           try {
             this._token    = cachedTok;
@@ -115,12 +115,12 @@ window.DriveStore = {
           this._tokenExp = Date.now() + (parseInt(resp.expires_in) - 60) * 1000;
           // Cache token for this browser session so page navigations don't re-trigger OAuth
           try {
-            sessionStorage.setItem('wt_dr_tok', this._token);
-            sessionStorage.setItem('wt_dr_exp', String(this._tokenExp));
+            localStorage.setItem('wt_dr_tok', this._token);
+            localStorage.setItem('wt_dr_exp', String(this._tokenExp));
           } catch {}
           try {
             this._folderId = await this._ensureFolder();
-            try { sessionStorage.setItem('wt_dr_fid', this._folderId); } catch {}
+            try { localStorage.setItem('wt_dr_fid', this._folderId); } catch {}
             this.ready = true;
             this._badge('online');
             this._saveSignInState(true);
@@ -147,7 +147,7 @@ window.DriveStore = {
     this._folderId = null; this.ready = false;
     this._badge('offline');
     this._saveSignInState(false);
-    try { sessionStorage.removeItem('wt_dr_tok'); sessionStorage.removeItem('wt_dr_exp'); sessionStorage.removeItem('wt_dr_fid'); } catch {}
+    try { localStorage.removeItem('wt_dr_tok'); localStorage.removeItem('wt_dr_exp'); localStorage.removeItem('wt_dr_fid'); } catch {}
     this._showConnectBanner();
     console.log('[DriveStore] Signed out');
   },
