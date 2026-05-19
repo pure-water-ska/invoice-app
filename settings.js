@@ -665,34 +665,86 @@ async function fsRetry() {
   renderFsStatus();
 }
 
+function _fsProgressHtml(done, total, current, pushed, failed) {
+  const pct  = total ? Math.round((done / total) * 100) : 0;
+  const name = current ? current.replace('wt_', '') : '';
+  return `
+    <div class="mb-1 fw-semibold"><i class="bi bi-cloud-upload me-1"></i>กำลัง Push ไป Firestore...</div>
+    <div class="progress mb-1" style="height:14px">
+      <div class="progress-bar progress-bar-striped progress-bar-animated bg-warning"
+           style="width:${pct}%;color:#333;font-size:11px;line-height:14px">${pct}%</div>
+    </div>
+    <div class="d-flex justify-content-between small text-muted">
+      <span>${done} / ${total} รายการ${name ? ` · กำลัง: <code>${name}</code>` : ''}</span>
+      <span>✓ ${pushed}${failed ? ` · ✗ ${failed}` : ''}</span>
+    </div>`;
+}
+
 async function fsPushAll() {
   const btn = document.getElementById('btnFsPush');
   const el  = document.getElementById('fsSyncMsg');
   if (!window.Sync?.ready) {
     el.className = 'alert alert-warning small py-2 mb-3';
     el.classList.remove('d-none');
-    el.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Firestore ยังไม่ได้เชื่อมต่อ — ตรวจสอบ Netlify env vars แล้ว redeploy';
+    el.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Firestore ยังไม่ได้เชื่อมต่อ';
     return;
   }
   if (!confirm('อัปโหลดข้อมูลทั้งหมดจากเครื่องนี้ไป Firestore?\nจะเขียนทับข้อมูลบน Firestore ด้วยข้อมูลจากเครื่องนี้')) return;
-  btn.disabled = true;
+  const btnSync = document.getElementById('btnFsSync');
+  btn.disabled = true; if (btnSync) btnSync.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลัง Push...';
   el.className = 'alert alert-info small py-2 mb-3';
   el.classList.remove('d-none');
-  el.innerHTML = 'กำลังอัปโหลดข้อมูลทั้งหมดไป Firestore...';
+  el.innerHTML = _fsProgressHtml(0, 1, null, 0, 0);
   try {
-    const result = await Sync.pushAll();
+    const result = await Sync.pushAll(({ done, total, current, pushed, failed }) => {
+      el.innerHTML = _fsProgressHtml(done, total, current, pushed, failed);
+    });
     el.className = 'alert alert-success small py-2 mb-3';
     el.innerHTML = `<i class="bi bi-check-circle me-1"></i>Push สำเร็จ — อัปโหลด <strong>${result.pushed} key</strong> ไป Firestore` +
-      (result.failed ? ` (ล้มเหลว ${result.failed})` : '') +
+      (result.failed ? ` <span class="text-danger">(ล้มเหลว ${result.failed})</span>` : '') +
       '<br><small class="text-muted">อุปกรณ์อื่นจะซิงค์โดยอัตโนมัติภายใน 1-2 วินาที</small>';
     renderFsStatus();
   } catch (e) {
     el.className = 'alert alert-danger small py-2 mb-3';
     el.innerHTML = '<i class="bi bi-x-circle me-1"></i>Push ล้มเหลว: ' + esc(e.message);
   }
-  btn.disabled = false;
+  btn.disabled = false; if (btnSync) btnSync.disabled = false;
   btn.innerHTML = '<i class="bi bi-cloud-upload me-1"></i>Push All → Firestore';
+}
+
+async function fsSyncNow() {
+  const btn = document.getElementById('btnFsSync');
+  const el  = document.getElementById('fsSyncMsg');
+  if (!window.Sync?.ready) {
+    el.className = 'alert alert-warning small py-2 mb-3';
+    el.classList.remove('d-none');
+    el.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Firestore ยังไม่ได้เชื่อมต่อ';
+    return;
+  }
+  const btnPush = document.getElementById('btnFsPush');
+  btn.disabled = true; if (btnPush) btnPush.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลัง Sync...';
+  el.className = 'alert alert-info small py-2 mb-3';
+  el.classList.remove('d-none');
+  el.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>กำลังดึงข้อมูลจาก Firestore...';
+  try {
+    await Sync._pullAll();
+    el.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>ดึงข้อมูลแล้ว — กำลัง Push ข้อมูลขึ้น...';
+    const result = await Sync.pushAll(({ done, total, current, pushed, failed }) => {
+      el.innerHTML = _fsProgressHtml(done, total, current, pushed, failed);
+    });
+    el.className = 'alert alert-success small py-2 mb-3';
+    el.innerHTML = `<i class="bi bi-check-circle me-1"></i>Sync สำเร็จ — Push ${result.pushed} key` +
+      (result.failed ? ` <span class="text-danger">(ล้มเหลว ${result.failed})</span>` : '') +
+      '<br><small class="text-muted">ข้อมูลตรงกันกับ Firestore แล้ว</small>';
+    renderFsStatus();
+  } catch (e) {
+    el.className = 'alert alert-danger small py-2 mb-3';
+    el.innerHTML = '<i class="bi bi-x-circle me-1"></i>Sync ล้มเหลว: ' + esc(e.message);
+  }
+  btn.disabled = false; if (btnPush) btnPush.disabled = false;
+  btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Sync Now';
 }
 
 async function drivePushAll() {

@@ -480,16 +480,19 @@ var Sync = {
   },
 
   // ── Force-push ALL local data to Firestore (use after LZString migration) ──
-  async pushAll() {
+  async pushAll(onProgress) {
     if (!this.ready) throw new Error('Sync not ready');
     const allKeys = [...Object.keys(this.DOCUMENTS), ...Object.keys(this.COLLECTIONS)];
-    let pushed = 0, failed = 0;
-    for (const lsKey of allKeys) {
+    const total = allKeys.length;
+    let pushed = 0, failed = 0, skipped = 0;
+    for (let i = 0; i < allKeys.length; i++) {
+      const lsKey = allKeys[i];
+      if (onProgress) onProgress({ done: i, total, current: lsKey, pushed, failed });
       try {
         const raw = this._localRead(lsKey);
-        if (!raw) continue;
+        if (!raw) { skipped++; continue; }
         const val = JSON.parse(raw);
-        if (val === null || val === undefined) continue;
+        if (val === null || val === undefined) { skipped++; continue; }
         await this._writeKey(lsKey, val);
         pushed++;
       } catch (e) {
@@ -497,7 +500,8 @@ var Sync = {
         failed++;
       }
     }
-    console.log(`[Sync] pushAll: pushed=${pushed} failed=${failed}`);
+    if (onProgress) onProgress({ done: total, total, current: null, pushed, failed });
+    console.log(`[Sync] pushAll: pushed=${pushed} skipped=${skipped} failed=${failed}`);
     return { pushed, failed };
   },
 

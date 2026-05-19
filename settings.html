@@ -543,9 +543,14 @@
         กด <strong>Push All → Firestore</strong> เพื่ออัปโหลดข้อมูลจากเครื่องนี้ไปยัง Firestore
         ทำครั้งเดียวหลังตั้งค่าครั้งแรก — หลังจากนั้นซิงค์อัตโนมัติทุกการเขียน
       </p>
-      <button class="btn btn-warning btn-sm" id="btnFsPush" onclick="fsPushAll()">
-        <i class="bi bi-cloud-upload me-1"></i>Push All → Firestore
-      </button>
+      <div class="d-flex gap-2 flex-wrap">
+        <button class="btn btn-warning btn-sm" id="btnFsPush" onclick="fsPushAll()">
+          <i class="bi bi-cloud-upload me-1"></i>Push All → Firestore
+        </button>
+        <button class="btn btn-outline-primary btn-sm" id="btnFsSync" onclick="fsSyncNow()">
+          <i class="bi bi-arrow-repeat me-1"></i>Sync Now
+        </button>
+      </div>
     </div>
   </div>
 
