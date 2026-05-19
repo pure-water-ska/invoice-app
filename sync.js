@@ -28,7 +28,6 @@ var Sync = {
   _tombstoneTTL:  5 * 60 * 1000,         // 5 minutes — auto-expire if purge never ran
   _serverIds:     {},                    // { [colName]: Set<id> } cached from last _pullAll
   _pushDebounce:  {},                    // { [lsKey]: timeoutId } — debounce rapid collection writes
-  _initialDone:   {},                    // { [lsKey]: bool } — true after first server-confirmed snapshot received
 
   // ── Large collections → one Firestore doc per record ──────────────────────
   // (avoids 1 MB Firestore document limit for busy businesses)
@@ -524,27 +523,19 @@ var Sync = {
       this._ignoreUntil[key] = now + this._skipInitialMs;
     }
 
-    const shouldSkip = (meta, lsKey) => {
-      // Skip during initial/post-write window for THIS key only
-      if (Date.now() < (this._ignoreUntil[lsKey] || 0)) return true;
-      // Skip our own pending writes (will fire again when server confirms)
-      if (meta?.hasPendingWrites) return true;
-      // Skip events served from local cache (only process server-confirmed events)
-      if (meta?.fromCache) return true;
-      return false;
-    };
+    // Only block snapshots during the initial page-load window or right after a local write.
+    // We do NOT filter on fromCache or hasPendingWrites: filtering fromCache breaks secondary
+    // Firestore tabs (synchronizeTabs:true) where every snapshot arrives fromCache:true.
+    const shouldSkip = (lsKey) => Date.now() < (this._ignoreUntil[lsKey] || 0);
 
     // Listen to document keys
     for (const [lsKey, docName] of Object.entries(this.DOCUMENTS)) {
       const unsub = base.collection('data').doc(docName)
-        .onSnapshot({ includeMetadataChanges: true }, (doc) => {
-          if (shouldSkip(doc.metadata, lsKey)) return;
+        .onSnapshot((doc) => {
+          if (shouldSkip(lsKey)) return;
           if (!doc.exists || doc.data()?.d === undefined) return;
           localStorage.setItem(lsKey, JSON.stringify(doc.data().d));
           if (window.DB) DB.invalidate(lsKey);
-          // Skip the very first server-confirmed snapshot on page load (already handled by _pullAll)
-          if (!this._initialDone[lsKey]) { this._initialDone[lsKey] = true; return; }
-          // Any subsequent snapshot = real remote change → notify page to re-render
           this._notifyUpdate(lsKey);
         });
       this._unsubscribers.push(unsub);
@@ -553,8 +544,8 @@ var Sync = {
     // Listen to collection keys
     for (const [lsKey, colName] of Object.entries(this.COLLECTIONS)) {
       const unsub = base.collection(colName)
-        .onSnapshot({ includeMetadataChanges: true }, async (snap) => {
-          if (shouldSkip(snap.metadata, lsKey)) return;
+        .onSnapshot(async (snap) => {
+          if (shouldSkip(lsKey)) return;
           // Apply tombstones — prevents pre-purge snapshots from restoring
           // records that were deleted locally but not yet purged from Firestore
           const fsArr = this._applyTombstones(colName, snap.docs).map(d => {
@@ -588,9 +579,6 @@ var Sync = {
           } catch {}
           localStorage.setItem(lsKey, JSON.stringify(finalArr));
           if (window.DB) DB.invalidate(lsKey);
-          // Skip the very first server-confirmed snapshot on page load (already handled by _pullAll)
-          if (!this._initialDone[lsKey]) { this._initialDone[lsKey] = true; return; }
-          // Any subsequent snapshot with data changes = real remote change → notify page to re-render
           if (snap.docChanges().length > 0) this._notifyUpdate(lsKey);
         });
       this._unsubscribers.push(unsub);
