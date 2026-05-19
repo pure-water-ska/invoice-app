@@ -1738,6 +1738,31 @@ function _printDateFmt(dateStr) {
   const yy = String(d.getFullYear() + 543).slice(-2);
   return `${dd}/${mm}/${yy}`;
 }
+function _printDateTimeFmt(dateStr) {
+  if (!dateStr) return '-';
+  const d = new Date(dateStr);
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yy = String(d.getFullYear() + 543).slice(-2);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mi = String(d.getMinutes()).padStart(2, '0');
+  return `${dd}/${mm}/${yy} ${hh}:${mi}`;
+}
+function _drvViewUrl(src) {
+  // src format: drv|FILE_ID|TIMESTAMP
+  if (!src || !src.startsWith('drv|')) return null;
+  const fileId = src.split('|')[1];
+  return fileId ? `https://drive.google.com/file/d/${fileId}/view` : null;
+}
+function _qrImgTag(url, label) {
+  if (!url) return '';
+  const encoded = encodeURIComponent(url);
+  return `<div style="text-align:center">
+    <img src="https://chart.googleapis.com/chart?cht=qr&chs=90x90&chl=${encoded}&choe=UTF-8"
+         width="90" height="90" alt="QR ${label}" style="display:block;margin:0 auto 3px">
+    <div style="font-size:7pt;color:#555;max-width:90px;word-break:break-all">${label}</div>
+  </div>`;
+}
 function _bankCode(val) {
   if (!val) return '';
   const byCode = Utils.BANKS.find(x => x.code === val);
@@ -1777,7 +1802,7 @@ function printPaymentSummary(invNum) {
     const methodEn = _methodEn[p.method] || p.method;
     return `<tr>
       <td style="padding:3px 5px;border:1px solid #ccc;text-align:center">${i+1}</td>
-      <td style="padding:3px 5px;border:1px solid #ccc;text-align:center">${_printDateFmt(p.payDate || p.createdAt)}</td>
+      <td style="padding:3px 5px;border:1px solid #ccc;text-align:center;white-space:nowrap">${_printDateTimeFmt(p.createdAt)}</td>
       <td style="padding:3px 5px;border:1px solid #ccc;text-align:center">${methodEn}</td>
       <td style="padding:3px 5px;border:1px solid #ccc">${detail}</td>
       <td style="padding:3px 5px;border:1px solid #ccc;text-align:right">${Utils.formatNumber(p.amount)}</td>
@@ -1855,6 +1880,29 @@ function printPaymentSummary(invNum) {
         <strong>จำนวนรายการ:</strong> ${payments.length} รายการ &nbsp;|&nbsp;
         <strong>พิมพ์โดย:</strong> ${printedBy}
       </div>
+
+      ${(() => {
+        // Collect Drive image URLs from all payments + invoice signed image
+        const qrItems = [];
+        payments.forEach((p, i) => {
+          const num = `#${i+1}`;
+          const tUrl = _drvViewUrl(p.transferImage);
+          const cUrl = _drvViewUrl(p.chequeImage);
+          if (tUrl) qrItems.push({ url: tUrl, label: `สลิปโอน ${num}` });
+          if (cUrl) qrItems.push({ url: cUrl, label: `รูปเช็ค ${num}` });
+        });
+        const sUrl = _drvViewUrl(inv.signedImage);
+        if (sUrl) qrItems.push({ url: sUrl, label: 'ใบกำกับเซ็น' });
+        if (!qrItems.length) return '';
+        return `<div style="margin-top:5mm;border-top:1px dashed #bbb;padding-top:4mm">
+          <div style="font-size:7.5pt;color:#666;font-weight:700;margin-bottom:3mm">
+            QR Code รูปภาพใน Google Drive — สแกนเพื่อเปิดรูป
+          </div>
+          <div style="display:flex;gap:6mm;flex-wrap:wrap">
+            ${qrItems.map(q => _qrImgTag(q.url, q.label)).join('')}
+          </div>
+        </div>`;
+      })()}
     </div>`;
 
   window.print();

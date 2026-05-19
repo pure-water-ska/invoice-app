@@ -571,6 +571,26 @@ function render() {
               ${unpaid > 0 ? `<span class="badge bg-danger">${unpaid} ค้างชำระ</span>` : '<span class="badge bg-success">ชำระครบ</span>'}
               <span class="badge bg-warning text-dark">${(c.notes||[]).length} บันทึก</span>
             </div>
+            ${(() => {
+              if (!unpaid) return '';
+              const unpaidList = uniqNums
+                .map(num => {
+                  const iv = invoices.find(i => i.invoiceNumber === num);
+                  const rem = (parseFloat(iv?.totalAmount)||0) - DB.getInvoicePaidAmount(num);
+                  return rem > 0.01 ? { num, rem } : null;
+                })
+                .filter(Boolean)
+                .sort((a, b) => b.rem - a.rem);
+              return `<div class="mt-2 d-flex flex-wrap gap-1" onclick="event.stopPropagation()">
+                ${unpaidList.map(r => `
+                  <a href="payments.html?inv=${encodeURIComponent(r.num)}"
+                     class="badge text-decoration-none"
+                     style="background:#fdecea;color:#c0392b;border:1px solid #f5c6cb;font-weight:400;font-size:11px;padding:3px 7px"
+                     title="เปิดหน้าชำระเงิน ${r.num}">
+                    <i class="bi bi-file-earmark-text me-1"></i>${r.num} · ฿${Utils.formatNumber(r.rem)}
+                  </a>`).join('')}
+              </div>`;
+            })()}
           </div>
         </div>
       </div>
