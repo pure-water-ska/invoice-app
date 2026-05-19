@@ -619,6 +619,11 @@ async function _uploadPaymentImages(p) {
 // Re-render after sync so newly-imported invoices (PDF/Excel) appear
 // even if their Firestore push was in-flight when the page first loaded.
 window.addEventListener('sync:ready', () => render());
+
+// Re-render when a remote device pushes payment/invoice changes
+window.addEventListener('sync:updated', (e) => {
+  if (['wt_payments', 'wt_invoices', 'wt_customers'].includes(e.detail?.key)) render();
+});
 window.addEventListener('DOMContentLoaded', () => {
   payModal              = new bootstrap.Modal(document.getElementById('payModal'));
   overpayModal          = new bootstrap.Modal(document.getElementById('overpayModal'));

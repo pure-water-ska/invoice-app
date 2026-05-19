@@ -11,8 +11,8 @@ var Sync = {
   _uid:           null,
   _online:        navigator.onLine,
   _unsubscribers: [],
-  _skipInitialMs: 3000,       // ms to ignore incoming snapshots (= our own writes)
-  _ignoreUntil:   0,          // epoch ms — listener ignores snapshots before this
+  _skipInitialMs: 800,        // ms to ignore incoming snapshots (= our own writes)
+  _ignoreUntil:   {},         // { [lsKey]: epoch ms } — per-key ignore window
   _pendingLsKey:  'wt_sync_pending',
   _lastSyncKey:   'wt_sync_lastAt',
   _tombstoneKey:  'wt_sync_tombstones',  // persists deleted IDs across page loads
@@ -243,8 +243,8 @@ var Sync = {
   // ── Called by db._set() ────────────────────────────────────────────────────
   push(key, val) {
     if (!this.COLLECTIONS[key] && !this.DOCUMENTS[key]) return; // key not synced
-    // Reset the ignore window so the listener won't re-apply our own write
-    this._ignoreUntil = Date.now() + this._skipInitialMs;
+    // Reset the ignore window for THIS key only so the listener won't echo our own write
+    this._ignoreUntil[key] = Date.now() + this._skipInitialMs;
     if (!this.ready || !this._online) {
       this._enqueue(key, val);
       return;
@@ -304,7 +304,7 @@ var Sync = {
         const syncDeleted = [...knownServerIds].filter(id => !localIds.has(id));
         if (syncDeleted.length > 0) {
           this._addTombstones(colName, syncDeleted);
-          this._ignoreUntil = Date.now() + this._skipInitialMs;
+          this._ignoreUntil[key] = Date.now() + this._skipInitialMs;
         }
       }
       // Update cached server IDs to reflect the new local state
@@ -341,7 +341,7 @@ var Sync = {
 
         const purgeIds = toDelete.map(d => d.id);
         this._addTombstones(colName, purgeIds);
-        this._ignoreUntil = Date.now() + this._skipInitialMs;
+        this._ignoreUntil[key] = Date.now() + this._skipInitialMs;
 
         let delBatch = this._db.batch();
         let delOps   = 0;
@@ -351,7 +351,7 @@ var Sync = {
         }
         if (delOps > 0) {
           await delBatch.commit();
-          this._ignoreUntil = Date.now() + this._skipInitialMs;
+          this._ignoreUntil[key] = Date.now() + this._skipInitialMs;
         }
         this._clearTombstones(colName, purgeIds);
       }).catch(() => {});
@@ -508,12 +508,15 @@ var Sync = {
   // ── Real-time listeners ────────────────────────────────────────────────────
   _setupListeners() {
     const base     = this._orgRef();
-    // Use the instance property (reset by push()) instead of a one-time closure var
-    this._ignoreUntil = Date.now() + this._skipInitialMs;
+    // Set per-key initial ignore window — only blocks echo for the key being written
+    const now = Date.now();
+    for (const key of [...Object.keys(this.DOCUMENTS), ...Object.keys(this.COLLECTIONS)]) {
+      this._ignoreUntil[key] = now + this._skipInitialMs;
+    }
 
-    const shouldSkip = (meta) => {
-      // Skip during initial window AND after any push() call for _skipInitialMs
-      if (Date.now() < this._ignoreUntil) return true;
+    const shouldSkip = (meta, lsKey) => {
+      // Skip during initial/post-write window for THIS key only
+      if (Date.now() < (this._ignoreUntil[lsKey] || 0)) return true;
       // Skip our own pending writes (will fire again when server confirms)
       if (meta?.hasPendingWrites) return true;
       // Skip events served from local cache (only process server-confirmed events)
@@ -525,7 +528,7 @@ var Sync = {
     for (const [lsKey, docName] of Object.entries(this.DOCUMENTS)) {
       const unsub = base.collection('data').doc(docName)
         .onSnapshot({ includeMetadataChanges: true }, (doc) => {
-          if (shouldSkip(doc.metadata)) return;
+          if (shouldSkip(doc.metadata, lsKey)) return;
           if (!doc.exists || doc.data()?.d === undefined) return;
           localStorage.setItem(lsKey, JSON.stringify(doc.data().d));
           if (window.DB) DB.invalidate(lsKey);
@@ -686,6 +689,9 @@ var Sync = {
       clearTimeout(toast._hide);
       toast._hide = setTimeout(() => toast.remove(), 3000);
     }
+
+    // Notify any page that is listening for real-time remote changes
+    window.dispatchEvent(new CustomEvent('sync:updated', { detail: { key: lsKey } }));
   },
 };
 

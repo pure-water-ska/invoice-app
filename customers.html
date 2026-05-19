@@ -417,6 +417,13 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('searchInput').addEventListener('input', Utils.debounce(() => { _custPage = 1; render(); }, 200));
 });
 
+// Re-render when a remote device pushes customer/invoice/payment changes
+window.addEventListener('sync:updated', (e) => {
+  if (['wt_customers', 'wt_invoices', 'wt_payments'].includes(e.detail?.key)) {
+    _custPage = 1; render();
+  }
+});
+
 function render() {
   const q = document.getElementById('searchInput').value.toLowerCase();
   let list = DB.getCustomers().filter(c => {
