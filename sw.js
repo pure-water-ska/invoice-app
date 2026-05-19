@@ -35,6 +35,8 @@ const APP_SHELL = [
   // flatpickr (B.E. date picker)
   'https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css',
   'https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js',
+  // QR code generator (used in payment summary print)
+  'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js',
 ];
 
 // ── INSTALL: pre-cache app shell ───────────────────────────────────────────────
@@ -146,4 +148,8 @@ self.addEventListener('fetch', (event) => {
 });
 
 // ── MESSAGE: triggered by clients ─────────────────────────────────────────────
-self.addEventListener('message', (event) =>
+self.addEventListener('message', (event) => {
+  if (event.data === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});

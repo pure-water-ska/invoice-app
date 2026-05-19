@@ -491,6 +491,7 @@
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
@@ -1754,14 +1755,30 @@ function _drvViewUrl(src) {
   const fileId = src.split('|')[1];
   return fileId ? `https://drive.google.com/file/d/${fileId}/view` : null;
 }
-function _qrImgTag(url, label) {
+function _qrPlaceholder(url, label) {
+  // Returns a placeholder div; _renderQrCodes() fills it with a real QR canvas after innerHTML is set
   if (!url) return '';
-  const encoded = encodeURIComponent(url);
   return `<div style="text-align:center">
-    <img src="https://chart.googleapis.com/chart?cht=qr&chs=90x90&chl=${encoded}&choe=UTF-8"
-         width="90" height="90" alt="QR ${label}" style="display:block;margin:0 auto 3px">
+    <div class="_qr-placeholder" data-url="${url.replace(/"/g,'&quot;')}"
+         style="width:90px;height:90px;display:inline-block"></div>
     <div style="font-size:7pt;color:#555;max-width:90px;word-break:break-all">${label}</div>
   </div>`;
+}
+function _renderQrCodes(container) {
+  if (typeof QRCode === 'undefined') return;
+  container.querySelectorAll('._qr-placeholder').forEach(el => {
+    const url = el.getAttribute('data-url');
+    if (!url) return;
+    el.innerHTML = '';
+    try {
+      new QRCode(el, {
+        text: url,
+        width: 90,
+        height: 90,
+        correctLevel: QRCode.CorrectLevel.M,
+      });
+    } catch(e) { console.warn('[QR]', e); }
+  });
 }
 function _bankCode(val) {
   if (!val) return '';
@@ -1899,13 +1916,17 @@ function printPaymentSummary(invNum) {
             QR Code รูปภาพใน Google Drive — สแกนเพื่อเปิดรูป
           </div>
           <div style="display:flex;gap:6mm;flex-wrap:wrap">
-            ${qrItems.map(q => _qrImgTag(q.url, q.label)).join('')}
+            ${qrItems.map(q => _qrPlaceholder(q.url, q.label)).join('')}
           </div>
         </div>`;
       })()}
     </div>`;
 
-  window.print();
+  // Render QR codes into placeholders after innerHTML is set, then print
+  const printArea = document.getElementById('payPrintArea');
+  _renderQrCodes(printArea);
+  // Small delay so canvas renders before print dialog opens
+  setTimeout(() => window.print(), 300);
 }
 
 async function copyOutstandingImage() {
