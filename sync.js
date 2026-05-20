@@ -52,6 +52,8 @@ var Sync = {
     'wt_cap_deductions':  'cap_deductions',
     'wt_price_history':   'price_history',
     'wt_inv_counter':     'inv_counter',
+    'wt_activity':        'activity_log',   // activity log — shared across devices
+    'wt_logins':          'login_log',      // login history — shared across devices
   },
 
   // ── Tombstones: persist deleted record IDs so _pullAll + listener won't restore them ──
@@ -692,4 +694,23 @@ var Sync = {
       toast.innerHTML = `
         <div class="d-flex">
           <div class="toast-body fw-semibold">
-            <i class="bi bi-arrow-repeat me-1"></i>ซิงค�
+            <i class="bi bi-arrow-repeat me-1"></i>ซิงค์ <strong>${label}</strong> แล้ว
+          </div>
+          <button type="button" class="btn-close btn-close-white me-2 m-auto" onclick="this.closest('.toast').remove()"></button>
+        </div>`;
+      clearTimeout(toast._hide);
+      toast._hide = setTimeout(() => toast.remove(), 3000);
+    }
+
+    // Update last-sync timestamp + snapshot counter for the settings card
+    localStorage.setItem(this._lastSyncKey, new Date().toISOString());
+    const cnt = (parseInt(localStorage.getItem('wt_sync_snap_count') || '0') + 1);
+    localStorage.setItem('wt_sync_snap_count', String(cnt));
+
+    // Notify any page that is listening for real-time remote changes
+    window.dispatchEvent(new CustomEvent('sync:updated', { detail: { key: lsKey } }));
+  },
+};
+
+// Auto-start on load (nav.js loads this script after Firebase SDK is ready)
+Sync.init();
