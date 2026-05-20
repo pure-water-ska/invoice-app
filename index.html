@@ -67,6 +67,8 @@
   const cfg = DB.getSettings();
   document.getElementById('companySubtitle').textContent = cfg.companyName || '';
 
+  // Clear any stale localStorage session left from the old localStorage-based auth.
+  localStorage.removeItem('wt_session');
   if (Auth.session()) window.location.href = 'dashboard.html';
 
   // Restore username from last session, but NEVER pre-fill password

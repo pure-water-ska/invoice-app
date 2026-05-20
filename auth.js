@@ -108,7 +108,7 @@ const Auth = {
       permissions: user.permissions || [],
       loginTime: new Date().toISOString()
     };
-    localStorage.setItem(this.KEY, JSON.stringify(session));
+    sessionStorage.setItem(this.KEY, JSON.stringify(session));
     if (user.mustChangePw) localStorage.setItem('mustChangePw', '1');
     DB.logLogin(user.id, user.username, true, geo, deviceInfo);
     DB.logActivity(user.id, user.username, 'เข้าสู่ระบบ', {});
@@ -122,7 +122,7 @@ const Auth = {
       // Auto-download backup on sign-out if daily backup is enabled
       try { DB.runAutoBackup(s.username); } catch {}
     }
-    localStorage.removeItem(this.KEY);
+    sessionStorage.removeItem(this.KEY);
     localStorage.removeItem('mustChangePw');
     // Sign out of Firebase if sync is active
     try { if (window.firebase && firebase.apps.length) firebase.auth().signOut(); } catch {}
@@ -131,11 +131,12 @@ const Auth = {
 
   session() {
     try {
-      const s = JSON.parse(localStorage.getItem(this.KEY));
+      const s = JSON.parse(sessionStorage.getItem(this.KEY));
       if (!s) return null;
-      // Auto-expire session after 12 hours for security
+      // Auto-expire session after 12 hours for security (belt-and-suspenders
+      // since sessionStorage already clears on tab close).
       if (s.loginTime && Date.now() - new Date(s.loginTime).getTime() > 12 * 60 * 60 * 1000) {
-        localStorage.removeItem(this.KEY);
+        sessionStorage.removeItem(this.KEY);
         return null;
       }
       return s;
