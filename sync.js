@@ -537,6 +537,8 @@ var Sync = {
         .onSnapshot(
           (doc) => {
             if (shouldSkip(lsKey)) return;
+            // Skip delayed echo: document was last written by this device
+            if (doc.data()?.by === this._deviceId) return;
             if (!doc.exists || doc.data()?.d === undefined) return;
             localStorage.setItem(lsKey, JSON.stringify(doc.data().d));
             if (window.DB) DB.invalidate(lsKey);
@@ -553,6 +555,12 @@ var Sync = {
         .onSnapshot(
           async (snap) => {
           if (shouldSkip(lsKey)) return;
+          // Skip delayed echo: all changed docs were written by this device.
+          // The time-based _ignoreUntil window can be too short when Firestore
+          // queues a snapshot before our write but delivers it after the window
+          // expires — this would restore a just-cancelled/deleted record.
+          const docChanges = snap.docChanges();
+          if (docChanges.length > 0 && docChanges.every(c => c.doc.data()?._by === this._deviceId)) return;
           // Apply tombstones — prevents pre-purge snapshots from restoring
           // records that were deleted locally but not yet purged from Firestore
           const fsArr = this._applyTombstones(colName, snap.docs).map(d => {
