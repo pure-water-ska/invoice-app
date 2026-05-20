@@ -27,6 +27,7 @@ var Sync = {
   _tombstoneKey:  'wt_sync_tombstones',  // persists deleted IDs across page loads
   _tombstoneTTL:  5 * 60 * 1000,         // 5 minutes — auto-expire if purge never ran
   _serverIds:     {},                    // { [colName]: Set<id> } cached from last _pullAll
+  _pullIds:       {},                    // { [colName]: Set<id> } IDs seen at _pullAll time — used by listener to distinguish "new this session" vs "deleted on another device"
   _pushDebounce:  {},                    // { [lsKey]: timeoutId } — debounce rapid collection writes
 
   // ── Large collections → one Firestore doc per record ──────────────────────
@@ -432,6 +433,8 @@ var Sync = {
         if (!snap.empty) {
           // Cache server IDs — used by _writeKey() to tombstone deletions synchronously
           this._serverIds[colName] = new Set(snap.docs.map(d => d.id));
+          // Cache pull IDs — used by listener to tell "new this session" from "deleted on another device"
+          this._pullIds[colName] = new Set(snap.docs.map(d => d.id));
           // Apply tombstones so recently-deleted records aren't restored on page reload
           const fsArr = this._applyTombstones(colName, snap.docs).map(d => {
             const { _by, _ts, ...rec } = d.data();
@@ -557,24 +560,30 @@ var Sync = {
           // MERGE: keep any local-only records not yet confirmed by Firestore.
           // The listener fires ~3s after page load; a just-imported invoice may
           // be in localStorage but not yet in this snapshot (push race condition).
+          //
+          // IMPORTANT: only consider records added AFTER this page loaded (_pullIds).
+          // Records that existed at pull time but are now gone from Firestore were
+          // DELETED on another device — do NOT push them back (that is what caused
+          // deleted payments to keep reappearing).
           let finalArr = fsArr;
           try {
             const raw = this._localRead(lsKey);
             const localArr = JSON.parse(raw || '[]');
             if (Array.isArray(localArr) && localArr.length > 0) {
-              const fsIds = new Set(snap.docs.map(d => d.id));
-              const stones = this._getTombstones(colName);
-              const now = Date.now();
+              const fsIds    = new Set(snap.docs.map(d => d.id));
+              const pullIds  = this._pullIds[colName] || new Set();
+              const stones   = this._getTombstones(colName);
+              const now      = Date.now();
               const localOnly = localArr.filter(r =>
                 r.id && !fsIds.has(r.id) &&
+                !pullIds.has(r.id) &&   // added AFTER page load — not a remote deletion
                 (!stones[r.id] || now - stones[r.id] > this._tombstoneTTL)
               );
               if (localOnly.length > 0) {
-                console.log(`[Sync] Listener merge: keeping ${localOnly.length} local-only ${colName} records`);
-                // Push local-only records to Firestore so the next snapshot includes them
-                for (const rec of localOnly) {
-                  try { await base.collection(colName).doc(rec.id).set({ ...rec, _by: this._deviceId, _ts: Date.now() }); } catch {}
-                }
+                console.log(`[Sync] Listener merge: keeping ${localOnly.length} new-session ${colName} records (not pushing — next write will sync)`);
+                // Do NOT push back here — pushing is what caused records deleted on
+                // another device to be restored.  The next DB._set() call (debounced
+                // write) will include these records and push them to Firestore naturally.
                 finalArr = [...fsArr, ...localOnly];
               }
             }
@@ -683,23 +692,4 @@ var Sync = {
       toast.innerHTML = `
         <div class="d-flex">
           <div class="toast-body fw-semibold">
-            <i class="bi bi-arrow-repeat me-1"></i>ซิงค์ <strong>${label}</strong> แล้ว
-          </div>
-          <button type="button" class="btn-close btn-close-white me-2 m-auto" onclick="this.closest('.toast').remove()"></button>
-        </div>`;
-      clearTimeout(toast._hide);
-      toast._hide = setTimeout(() => toast.remove(), 3000);
-    }
-
-    // Update last-sync timestamp + snapshot counter for the settings card
-    localStorage.setItem(this._lastSyncKey, new Date().toISOString());
-    const cnt = (parseInt(localStorage.getItem('wt_sync_snap_count') || '0') + 1);
-    localStorage.setItem('wt_sync_snap_count', String(cnt));
-
-    // Notify any page that is listening for real-time remote changes
-    window.dispatchEvent(new CustomEvent('sync:updated', { detail: { key: lsKey } }));
-  },
-};
-
-// Auto-start on load (nav.js loads this script after Firebase SDK is ready)
-Sync.init();
+            <i class="bi bi-arrow-repeat me-1"></i>ซิงค�
