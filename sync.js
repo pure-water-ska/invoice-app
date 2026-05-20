@@ -318,17 +318,25 @@ var Sync = {
       // Writing to localStorage here (synchronously) means the tombstones
       // survive even if the user navigates away immediately afterward.
       const knownServerIds = this._serverIds[colName];
+      let syncDeletedIds = [];
       if (knownServerIds && knownServerIds.size > 0) {
-        const syncDeleted = [...knownServerIds].filter(id => !localIds.has(id));
-        if (syncDeleted.length > 0) {
-          this._addTombstones(colName, syncDeleted);
+        syncDeletedIds = [...knownServerIds].filter(id => !localIds.has(id));
+        if (syncDeletedIds.length > 0) {
+          this._addTombstones(colName, syncDeletedIds);
           this._ignoreUntil[key] = Date.now() + this._skipInitialMs;
         }
       }
       // Update cached server IDs to reflect the new local state
       this._serverIds[colName] = new Set(localIds);
 
-      // ── ② Upsert remaining records to Firestore ───────────────────────────
+      // ── ② Upsert + delete in ONE atomic batch ────────────────────────────
+      // Deletions are in the same batch as upserts so Firestore transitions
+      // to the correct state atomically.  The old two-step approach (upsert
+      // now, background-purge later) left a gap — any snapshot delivered
+      // between "upsert complete" and "purge complete" could restore a
+      // just-deleted record.  This was especially visible when the deleted
+      // record was the ONLY payment: arr is empty, ops=0, batch.commit() was
+      // never called at all, and the record stayed in Firestore indefinitely.
       let batch = this._db.batch();
       let ops   = 0;
       const commit = async () => { await batch.commit(); batch = this._db.batch(); ops = 0; };
@@ -342,37 +350,22 @@ var Sync = {
         }, { merge: true });
         if (++ops >= 490) await commit();
       }
-      if (ops > 0) await batch.commit();
 
-      // ── ③ Background purge: delete Firestore docs that were deleted locally ──
-      // IMPORTANT: only delete docs that existed at _pullAll() time (knownServerIds).
-      // Docs NOT in knownServerIds were added AFTER our pull — either by a later
-      // push from this tab (rapid import race) or by another device. Deleting them
-      // here would silently drop data that was just written.
-      const purgeBase = new Set(knownServerIds || []);  // snapshot from pull time
-      colRef.get().then(async snap => {
-        const toDelete = snap.docs.filter(d =>
-          !localIds.has(d.id) &&   // not in our current local array
-          purgeBase.has(d.id)      // was on server at pull time → legitimately deleted
-        );
-        if (!toDelete.length) return;
+      // Delete records removed locally — in the same batch as the upserts.
+      for (const id of syncDeletedIds) {
+        batch.delete(colRef.doc(id));
+        if (++ops >= 490) await commit();
+      }
 
-        const purgeIds = toDelete.map(d => d.id);
-        this._addTombstones(colName, purgeIds);
+      if (ops > 0) {
+        await batch.commit();
+        // Extend the ignore window after the commit so the listener skips
+        // our own echo (covers both the upserts and the deletes above).
         this._ignoreUntil[key] = Date.now() + this._skipInitialMs;
-
-        let delBatch = this._db.batch();
-        let delOps   = 0;
-        for (const d of toDelete) {
-          delBatch.delete(d.ref);
-          if (++delOps >= 490) { await delBatch.commit(); delBatch = this._db.batch(); delOps = 0; }
-        }
-        if (delOps > 0) {
-          await delBatch.commit();
-          this._ignoreUntil[key] = Date.now() + this._skipInitialMs;
-        }
-        this._clearTombstones(colName, purgeIds);
-      }).catch(() => {});
+        // Tombstones served their purpose — Firestore now reflects the
+        // deletion, so clear them to avoid false-blocking future restores.
+        if (syncDeletedIds.length > 0) this._clearTombstones(colName, syncDeletedIds);
+      }
     }
 
     localStorage.setItem(this._lastSyncKey, new Date().toISOString());
@@ -578,8 +571,8 @@ var Sync = {
           // expires — this would restore a just-cancelled/deleted record.
           const docChanges = snap.docChanges();
           if (docChanges.length > 0 && docChanges.every(c => c.doc.data()?._by === this._deviceId)) return;
-          // Apply tombstones — prevents pre-purge snapshots from restoring
-          // records that were deleted locally but not yet purged from Firestore
+          // Apply tombstones — prevents snapshots from restoring records
+          // that were tombstoned locally (belt-and-suspenders with the main batch)
           const fsArr = this._applyTombstones(colName, snap.docs).map(d => {
             const { _by, _ts, ...rec } = d.data();
             return rec;
