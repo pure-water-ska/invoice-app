@@ -29,6 +29,7 @@ var Sync = {
   _serverIds:     {},                    // { [colName]: Set<id> } cached from last _pullAll
   _pullIds:       {},                    // { [colName]: Set<id> } IDs seen at _pullAll time — used by listener to distinguish "new this session" vs "deleted on another device"
   _pushDebounce:  {},                    // { [lsKey]: timeoutId } — debounce rapid collection writes
+  _pendingWrite:  {},                    // { [lsKey]: boolean } — true while a debounced write is in-flight; listener skips snapshots during this window to avoid overwriting just-modified local data (e.g. cancelled payment)
 
   // ── Large collections → one Firestore doc per record ──────────────────────
   // (avoids 1 MB Firestore document limit for busy businesses)
@@ -266,14 +267,21 @@ var Sync = {
     // Debouncing 600 ms means the full batch lands in ONE write after the loop.
     if (this.COLLECTIONS[key]) {
       clearTimeout(this._pushDebounce[key]);
+      // Mark write as pending so the listener ignores incoming snapshots that
+      // still carry pre-write Firestore data (e.g. a snapshot showing a payment
+      // as uncancelled that was queued before our cancel but delivered later).
+      this._pendingWrite[key] = true;
       this._pushDebounce[key] = setTimeout(() => {
         // Read fresh value from DB cache at fire time (not the stale closure val)
         const fresh = window.DB ? DB._cache[key] ?? val : val;
-        this._writeKey(key, fresh).catch(e => {
-          console.warn('[Sync] push failed, queuing:', key, e.message);
-          this._enqueue(key, fresh);
-          this._badge('pending');
-        });
+        this._writeKey(key, fresh)
+          .then(() => { this._pendingWrite[key] = false; })
+          .catch(e => {
+            this._pendingWrite[key] = false;
+            console.warn('[Sync] push failed, queuing:', key, e.message);
+            this._enqueue(key, fresh);
+            this._badge('pending');
+          });
       }, 600);
       return;
     }
@@ -555,6 +563,15 @@ var Sync = {
         .onSnapshot(
           async (snap) => {
           if (shouldSkip(lsKey)) return;
+          // Skip if a debounced local write is still pending — local state is
+          // authoritative during this window and must not be overwritten by a
+          // Firestore snapshot that predates our write (e.g. a snapshot showing
+          // a payment as uncancelled that Firestore delivered after the 800 ms
+          // _ignoreUntil window but before our debounced batch.commit() landed).
+          if (this._pendingWrite[lsKey]) {
+            console.log(`[Sync] Listener skip: pending local write for ${lsKey}`);
+            return;
+          }
           // Skip delayed echo: all changed docs were written by this device.
           // The time-based _ignoreUntil window can be too short when Firestore
           // queues a snapshot before our write but delivers it after the window
