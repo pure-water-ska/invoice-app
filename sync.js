@@ -28,6 +28,7 @@ var Sync = {
   _tombstoneTTL:  5 * 60 * 1000,         // 5 minutes — auto-expire if purge never ran
   _serverIds:     {},                    // { [colName]: Set<id> } cached from last _pullAll
   _pullIds:       {},                    // { [colName]: Set<id> } IDs seen at _pullAll time — used by listener to distinguish "new this session" vs "deleted on another device"
+  _lastPushedIds: {},                    // { [colName]: Set<id> } IDs from the most recent push() call — used to detect same-debounce-window add→delete (where ADD is cancelled and _serverIds never gets the new ID)
   _pushDebounce:  {},                    // { [lsKey]: timeoutId } — debounce rapid collection writes
   _pendingWrite:  {},                    // { [lsKey]: boolean } — true while a debounced write is in-flight; listener skips snapshots during this window to avoid overwriting just-modified local data (e.g. cancelled payment)
 
@@ -267,6 +268,36 @@ var Sync = {
     // Debouncing 600 ms means the full batch lands in ONE write after the loop.
     if (this.COLLECTIONS[key]) {
       clearTimeout(this._pushDebounce[key]);
+
+      // ── Track deletions across push() calls ───────────────────────────────
+      // Problem: when the user adds Y and then deletes Y within the 600 ms debounce
+      // window, the ADD debounce timer is cancelled by the DELETE push().  The DELETE
+      // debounce then fires _writeKey([]) but _serverIds does NOT include Y (the ADD
+      // write never ran), so syncDeletedIds = [] and Y is never deleted from Firestore.
+      // The listener eventually fires a snapshot that includes Y, and it gets restored.
+      //
+      // Fix: compare the new val's IDs against the IDs from the PREVIOUS push() call.
+      // Any ID present last time but absent now was just deleted — tombstone it
+      // immediately and ensure _serverIds contains it so _writeKey issues a Firestore
+      // delete even if the earlier ADD was cancelled.
+      const colName   = this.COLLECTIONS[key];
+      const newArr    = Array.isArray(val) ? val : [];
+      const newIds    = new Set(newArr.filter(r => r.id).map(r => r.id));
+      const prevIds   = this._lastPushedIds[colName] || new Set();
+      const justDeletedIds = [...prevIds].filter(id => !newIds.has(id));
+      if (justDeletedIds.length > 0) {
+        // Tombstone immediately — prevents listener from restoring while write is pending
+        this._addTombstones(colName, justDeletedIds);
+        // Ensure _serverIds includes these IDs so _writeKey() can compute syncDeletedIds
+        if (!this._serverIds[colName]) this._serverIds[colName] = new Set();
+        justDeletedIds.forEach(id => this._serverIds[colName].add(id));
+      }
+      // Record the IDs being pushed so the NEXT push() can diff against them
+      this._lastPushedIds[colName] = newIds;
+      // Also add newly-seen IDs to _serverIds so later deletes (> 600 ms) are detected
+      if (!this._serverIds[colName]) this._serverIds[colName] = new Set();
+      newIds.forEach(id => this._serverIds[colName].add(id));
+
       // Mark write as pending so the listener ignores incoming snapshots that
       // still carry pre-write Firestore data (e.g. a snapshot showing a payment
       // as uncancelled that was queued before our cancel but delivered later).
