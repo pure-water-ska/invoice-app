@@ -93,11 +93,12 @@ self.addEventListener('fetch', (event) => {
     const isHTML = request.destination === 'document' ||
                    url.pathname.endsWith('.html');
 
-    // nav.js, sync.js, and settings.js are always fetched from network so badge/sync/settings
-    // fixes take effect immediately without requiring users to go through an SW update cycle.
+    // nav.js, sync.js, connection-status.js, and settings.js are always fetched from
+    // network so fixes take effect immediately without requiring an SW update cycle.
     const isNetworkOnly = isHTML ||
                           url.pathname.endsWith('/nav.js') ||
                           url.pathname.endsWith('/sync.js') ||
+                          url.pathname.endsWith('/connection-status.js') ||
                           url.pathname.endsWith('/settings.js');
 
     if (isNetworkOnly) {
@@ -151,5 +152,33 @@ self.addEventListener('fetch', (event) => {
 self.addEventListener('message', (event) => {
   if (event.data === 'SKIP_WAITING') {
     self.skipWaiting();
+  }
+});
+
+// ── BACKGROUND SYNC: flush pending Firestore writes ───────────────────────────
+// Triggered by the browser when connectivity is restored, even if the page was
+// backgrounded or closed since the write was queued.
+// Strategy: we can't use the Firestore SDK here (no Firebase in the SW context),
+// so we forward the wake-up to all open clients by posting FLUSH_PENDING_WRITES.
+// The page's sync.js then calls _flushQueue() which replays the localStorage queue.
+// Browsers without Background Sync support (Safari, Firefox) fall back to
+// Firestore's own built-in offline write queue + the window 'online' listener.
+self.addEventListener('sync', (event) => {
+  if (event.tag === 'sync-pending-writes') {
+    event.waitUntil(
+      self.clients
+        .matchAll({ includeUncontrolled: true, type: 'window' })
+        .then((clients) => {
+          if (clients.length === 0) {
+            // No open tabs — Firestore's own offline queue will flush when next opened
+            console.log('[SW] Background Sync: no clients to notify');
+            return;
+          }
+          clients.forEach((client) =>
+            client.postMessage({ type: 'FLUSH_PENDING_WRITES' })
+          );
+          console.log(`[SW] Background Sync: notified ${clients.length} client(s)`);
+        })
+    );
   }
 });

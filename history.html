@@ -148,6 +148,12 @@ window.addEventListener('sync:updated', (e) => {
   if (['wt_activity', 'wt_logins'].includes(e.detail?.key)) render();
 });
 
+// Re-render after initial Firestore pull completes.
+// DOMContentLoaded fires BEFORE _pullAll() runs, so if wt_activity is empty
+// at page load (fresh device, cleared storage) the first render shows nothing.
+// sync:pulled fires once _pullAll() has written all Firestore data to localStorage.
+window.addEventListener('sync:pulled', render);
+
 window.addEventListener('DOMContentLoaded', () => {
   const users = DB.getUsers();
   const userSel = document.getElementById('filterUser');

@@ -48,6 +48,26 @@ Open `index.html` (login page) in the browser. The app works fully offline witho
 - **`sync.js`** — Firestore bidirectional sync. Listens for remote changes → writes to localStorage. Debounces with a 2.5 s echo-prevention window.
 - **`drive-store.js` + `drive-db-sync.js`** — Google Drive OAuth token in sessionStorage, uploads DB keys debounced at 5 s. Drive token cached in IndexedDB (`idb.js`).
 
+### Hybrid Architecture (Online / Offline / Background Sync)
+
+The sync layer implements a three-tier hybrid strategy:
+
+**Layer 1 — Real-time listeners (`sync.js`)**
+All Firestore reads use `onSnapshot()` with `{ includeMetadataChanges: true }`. Every snapshot callback inspects `snapshot.metadata.fromCache` to distinguish live server data from cached data. Do NOT use `navigator.onLine` for Firestore connection state — only `fromCache` is reliable (the network can be up but Firestore unreachable, or vice-versa).
+
+**Layer 2 — Connection banner (`connection-status.js`)**
+`sync.js` dispatches `sync:connectionstate` custom events whenever `fromCache` transitions between `true` and `false`. `ConnectionStatus` (in `connection-status.js`) listens for these events and shows/hides a non-blocking amber bottom banner:
+- `fromCache === true` → banner visible: *"⏳ รอการอัปเดต — การเปลี่ยนแปลงจะซิงค์เมื่อเชื่อมต่ออีกครั้ง"*
+- `fromCache === false` → banner dismissed automatically
+
+`connection-status.js` is loaded by `nav.js` dynamically (Network-Only, same as `sync.js`) just before `sync.js`.
+
+**Layer 3 — Background Sync (`sw.js` + `sync.js`)**
+When a Firestore write fails and is enqueued (`sync._enqueue()`), the code registers a Background Sync tag via `navigator.serviceWorker.ready → reg.sync.register('sync-pending-writes')`. When the browser detects connectivity, `sw.js` handles the `sync` event and posts `{ type: 'FLUSH_PENDING_WRITES' }` to all open clients. Each client's `sync.js` then calls `_flushQueue()` to replay the localStorage write queue. Browsers without Background Sync support (Safari, Firefox) fall back to Firestore's own built-in offline write queue (enabled via `enableIndexedDbPersistence`) plus the existing `window online` listener.
+
+**Firestore offline persistence**
+`sync.js` calls `this._db.enableIndexedDbPersistence({ synchronizeTabs: false })` during `init()`. `synchronizeTabs: false` is required for multi-device safety — `synchronizeTabs: true` uses a single primary-tab lock that blocks a second device from connecting when both devices share the same Firebase team account.
+
 ### Auth & Permissions
 
 `auth.js` — session stored in sessionStorage (clears on tab close). SHA-256 hashed passwords. 47 granular permissions in `Auth.PERMS`; Admin role bypasses all checks. First-login forces password change.
@@ -74,7 +94,7 @@ Then call `Nav.render('page-name')` in an inline script.
 
 ### Service Worker
 
-`sw.js` uses Network-First for HTML, Cache-First for assets. `nav.js` and `sync.js` are always Network-Only. Cache version is bumped by `netlify-build.sh` on every deploy so browsers clear stale assets.
+`sw.js` uses Network-First for HTML, Cache-First for assets. `nav.js`, `sync.js`, `connection-status.js`, and `settings.js` are always Network-Only so fixes take effect immediately without an SW update cycle. Cache version is bumped by `netlify-build.sh` on every deploy so browsers clear stale assets. `sw.js` also handles the `sync` event (tag `sync-pending-writes`) for Background Sync.
 
 ## Key Conventions
 

@@ -207,7 +207,14 @@
     loadScript(`${FB_BASE}/firebase-app-compat.js`, function() {
       loadScript(`${FB_BASE}/firebase-auth-compat.js`, function() {
         loadScript(`${FB_BASE}/firebase-firestore-compat.js`, function() {
-          loadScript('./sync.js', null, onSDKError);
+          // Load connection-status.js first (no Firebase dependency — just event listener)
+          // then sync.js which starts Sync.init() and begins dispatching connectionstate events
+          loadScript('./connection-status.js', function() {
+            loadScript('./sync.js', null, onSDKError);
+          }, function() {
+            // connection-status.js failed to load — still start sync
+            loadScript('./sync.js', null, onSDKError);
+          });
         }, onSDKError);
       }, onSDKError);
     }, onSDKError);

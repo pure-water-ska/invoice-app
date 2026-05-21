@@ -31,6 +31,7 @@ var Sync = {
   _lastPushedIds: {},                    // { [colName]: Set<id> } IDs from the most recent push() call — used to detect same-debounce-window add→delete (where ADD is cancelled and _serverIds never gets the new ID)
   _pushDebounce:  {},                    // { [lsKey]: timeoutId } — debounce rapid collection writes
   _pendingWrite:  {},                    // { [lsKey]: boolean } — true while a debounced write is in-flight; listener skips snapshots during this window to avoid overwriting just-modified local data (e.g. cancelled payment)
+  _lastFromCache: undefined,             // last known snapshot.metadata.fromCache value — deduplicates sync:connectionstate events
 
   // ── Large collections → one Firestore doc per record ──────────────────────
   // (avoids 1 MB Firestore document limit for busy businesses)
@@ -102,6 +103,16 @@ var Sync = {
     });
   },
 
+  // ── Emit Firestore connection state (fromCache) for the connection banner ──
+  // Called by every onSnapshot callback with the snapshot's metadata.fromCache value.
+  // Deduplicates: only dispatches when the state actually changes so the banner
+  // doesn't flicker on every snapshot delivery.
+  _emitConnectionState(fromCache) {
+    if (fromCache === this._lastFromCache) return;
+    this._lastFromCache = fromCache;
+    window.dispatchEvent(new CustomEvent('sync:connectionstate', { detail: { fromCache } }));
+  },
+
   // ── Show badge helper (always makes badge item visible) ───────────────────
   _showBadge(status, msg) {
     // Ensure badge item is visible
@@ -130,15 +141,40 @@ var Sync = {
       this._db    = firebase.firestore();
       this._orgId = FIREBASE_CONFIG.orgId || 'main';
 
-      // NOTE: enablePersistence() is intentionally disabled.
-      // synchronizeTabs:true uses an IndexedDB primary-tab ownership model that is
-      // designed for multiple tabs within ONE browser, not for separate devices.
-      // When two different devices both try to claim the primary-tab lock they can
-      // block each other — one device connects, the other cannot.  Disabling
-      // persistence means both devices connect directly to Firestore over the
-      // network (no IndexedDB cache race), which is what we actually want for a
-      // multi-device real-time sync scenario.  Offline data is already handled by
-      // localStorage + the queue, so we don't need Firestore's offline cache.
+      // ── Enable IndexedDB offline persistence ─────────────────────────────
+      // synchronizeTabs:false avoids the multi-tab primary-lock that previously
+      // blocked a second device from connecting (both devices share the same Firebase
+      // team account and both tried to claim the single-primary-tab IndexedDB lock).
+      // With synchronizeTabs:false each tab/device keeps its own independent cache —
+      // no lock contention, multi-device safe.
+      // This enables Firestore's built-in offline write queue and fromCache metadata.
+      try {
+        await this._db.enableIndexedDbPersistence({ synchronizeTabs: false });
+        console.log('[Sync] IndexedDB persistence enabled');
+      } catch (e) {
+        // failed-precondition = another tab already owns the lock (harmless with synchronizeTabs:false — shouldn't happen, but defensive)
+        // unimplemented       = browser doesn't support IndexedDB persistence (Safari private mode, etc.)
+        const known = ['failed-precondition', 'unimplemented'];
+        if (known.includes(e.code)) {
+          console.log('[Sync] Persistence:', e.code === 'unimplemented'
+            ? 'not supported by this browser — running without cache'
+            : 'lock conflict (another tab) — running without cache');
+        } else {
+          console.warn('[Sync] Persistence error:', e.code, e.message);
+        }
+      }
+
+      // ── Listen for Background Sync wake-up from the Service Worker ───────
+      // When a write was queued (offline) and the SW fires 'sync-pending-writes',
+      // the SW posts FLUSH_PENDING_WRITES to all clients so they flush the queue.
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.addEventListener('message', (event) => {
+          if (event.data?.type === 'FLUSH_PENDING_WRITES') {
+            console.log('[Sync] Background Sync wake-up — flushing queue');
+            this._flushQueue();
+          }
+        });
+      }
 
       // Sign in with shared team account so Firestore WebChannel has a valid
       // ID token (API-key-only connections are blocked at the transport level).
@@ -586,8 +622,13 @@ var Sync = {
     for (const [lsKey, docName] of Object.entries(this.DOCUMENTS)) {
       const unsub = base.collection('data').doc(docName)
         .onSnapshot(
+          { includeMetadataChanges: true },   // fires on fromCache transitions too
           (doc) => {
+            // Track fromCache BEFORE any guards so the banner always reflects reality
+            this._emitConnectionState(doc.metadata.fromCache);
             if (shouldSkip(lsKey)) return;
+            // Skip if this is a metadata-only event (e.g. pending write confirmed) — no data change
+            if (!doc.metadata.hasPendingWrites && doc.metadata.fromCache) return;
             // Skip delayed echo: document was last written by this device
             if (doc.data()?.by === this._deviceId) return;
             if (!doc.exists || doc.data()?.d === undefined) return;
@@ -636,7 +677,10 @@ var Sync = {
     for (const [lsKey, colName] of Object.entries(this.COLLECTIONS)) {
       const unsub = base.collection(colName)
         .onSnapshot(
+          { includeMetadataChanges: true },   // fires on fromCache transitions too
           async (snap) => {
+          // Track fromCache BEFORE any guards so the banner always reflects reality
+          this._emitConnectionState(snap.metadata.fromCache);
           if (shouldSkip(lsKey)) return;
           // Skip if a debounced local write is still pending — local state is
           // authoritative during this window and must not be overwritten by a
@@ -708,6 +752,15 @@ var Sync = {
     if (i >= 0) q[i] = entry; else q.push(entry);
     try { localStorage.setItem(this._pendingLsKey, JSON.stringify(q)); } catch {}
     this._badge('pending');
+    // Register a Background Sync tag so the SW can wake the page (or prompt a
+    // background flush) when connectivity resumes — even if the tab is backgrounded.
+    // Falls back gracefully: browsers without SyncManager (Safari, Firefox) rely on
+    // the existing window online/offline listeners + Firestore's own offline queue.
+    if ('serviceWorker' in navigator && 'SyncManager' in window) {
+      navigator.serviceWorker.ready
+        .then(reg => reg.sync.register('sync-pending-writes'))
+        .catch(e => console.warn('[Sync] Background Sync register failed:', e.message));
+    }
   },
 
   _getQueue() {
