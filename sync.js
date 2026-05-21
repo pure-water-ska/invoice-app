@@ -339,6 +339,8 @@ var Sync = {
       // as uncancelled that was queued before our cancel but delivered later).
       this._pendingWrite[key] = true;
       this._pushDebounce[key] = setTimeout(() => {
+        // Clear the timer ID now so beforeunload won't re-enqueue already-written data.
+        this._pushDebounce[key] = null;
         // Read fresh value from DB cache at fire time (not the stale closure val)
         const fresh = window.DB ? DB._cache[key] ?? val : val;
         this._writeKey(key, fresh)

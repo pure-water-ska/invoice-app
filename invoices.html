@@ -233,9 +233,12 @@ function executeBulkDelete() {
   render();
 }
 
-// Re-render after sync so newly-imported invoices appear
-// even if their Firestore push was in-flight when the page first loaded.
-window.addEventListener('sync:ready', () => { _invPage = 1; render(); });
+// Re-render after initial Firestore pull and after sync is fully ready.
+// DOMContentLoaded fires before _pullAll() runs, so on a fresh device or after
+// clearing storage the first render may show stale/empty data.
+// sync:pulled fires once _pullAll() has written all Firestore data to localStorage.
+window.addEventListener('sync:pulled', () => { _invPage = 1; render(); });
+window.addEventListener('sync:ready',  () => { _invPage = 1; render(); });
 
 // Re-render when a remote device pushes invoice/customer/pricing changes
 window.addEventListener('sync:updated', (e) => {

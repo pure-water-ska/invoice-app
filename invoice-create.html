@@ -1314,43 +1314,43 @@ async function saveInvoiceEdit(shouldPrint = false) {
     byUser: session.username
   }];
 
-  // Remove old pages, keep the rest
-  DB.saveInvoices(DB.getInvoices().filter(i => i.invoiceNumber !== currentInvNum));
-
   const totalAmount = activeItems.reduce((s, item) => s + calcTotal(item), 0);
   const _editDateISO = Utils.parseBEToISO(dateVal) || Utils.todayInputValue();
   const createdAt    = new Date(_editDateISO).toISOString() || (meta.createdAt || new Date().toISOString());
   const chunks = [];
   for (let i = 0; i < activeItems.length; i += ROWS_PER_PAGE) chunks.push(activeItems.slice(i, i + ROWS_PER_PAGE));
 
-  chunks.forEach((chunk, pageIdx) => {
-    DB.addInvoice({
-      id:            Utils.uuid(),
-      invoiceNumber: currentInvNum,
-      page:          pageIdx + 1,
-      totalPages:    chunks.length,
-      customerId,
-      shippingMethod,
-      items: chunk.map(item => ({
-        productId: item.productId,
-        name:      item.name,
-        brand:     item.brand,
-        qty:       parseFloat(item.qty)       || 0,
-        unitSize:  parseFloat(item.unitSize)  || 0,
-        remainder: parseFloat(item.remainder) || 0,
-        price:     parseFloat(item.price)     || 0,
-        total:     calcTotal(item)
-      })),
-      totalAmount,
-      createdAt,
-      createdBy:      meta.createdBy      || session.name,
-      createdByUser:  meta.createdByUser  || session.username,
-      printCount:     meta.printCount     || 0,
-      printHistory:   meta.printHistory   || [],
-      editCount:      newEditCount,
-      editHistory
-    });
-  });
+  // Build the new pages array first, then write once — avoids an intermediate state
+  // where the invoice is absent from wt_invoices (which caused the list to flash empty
+  // on invoices.html if Sync or a re-render fired between the remove and re-add).
+  const newPages = chunks.map((chunk, pageIdx) => ({
+    id:            Utils.uuid(),
+    invoiceNumber: currentInvNum,
+    page:          pageIdx + 1,
+    totalPages:    chunks.length,
+    customerId,
+    shippingMethod,
+    items: chunk.map(item => ({
+      productId: item.productId,
+      name:      item.name,
+      brand:     item.brand,
+      qty:       parseFloat(item.qty)       || 0,
+      unitSize:  parseFloat(item.unitSize)  || 0,
+      remainder: parseFloat(item.remainder) || 0,
+      price:     parseFloat(item.price)     || 0,
+      total:     calcTotal(item)
+    })),
+    totalAmount,
+    createdAt,
+    createdBy:      meta.createdBy      || session.name,
+    createdByUser:  meta.createdByUser  || session.username,
+    printCount:     meta.printCount     || 0,
+    printHistory:   meta.printHistory   || [],
+    editCount:      newEditCount,
+    editHistory
+  }));
+  // Replace old pages with new pages in one atomic DB write
+  DB.saveInvoices([...newPages, ...DB.getInvoices().filter(i => i.invoiceNumber !== currentInvNum)]);
 
   DB.removeCapDeductionsByInvoice(currentInvNum);
   deductCapStock(currentInvNum, activeItems, createdAt, customerId);
