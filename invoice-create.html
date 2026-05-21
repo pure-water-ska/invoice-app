@@ -279,6 +279,8 @@ let items = [];          // all product rows
 let viewMode = false;
 let editMode = false;
 let currentInvNum = null;
+let _editBaseEditCount = 0;   // editCount snapshot taken when entering edit mode — baseline for conflict detection
+let _editSaving = false;      // true while saveInvoiceEdit() is committing — suppresses false-positive conflict banner
 
 let _fpInvDate;
 
@@ -401,6 +403,25 @@ window.addEventListener('DOMContentLoaded', () => {
   // Close dropdown when clicking outside
   document.addEventListener('mousedown', (e) => {
     if (!document.getElementById('custSearchWrap').contains(e.target)) _custClose();
+  });
+
+  // ── Concurrent-edit conflict detection ────────────────────────────────────
+  // When another device saves changes to the same invoice we're editing,
+  // sync.js fires sync:updated for wt_invoices.  We compare the remote
+  // editCount against _editBaseEditCount (set in loadEdit) to decide
+  // whether the remote change touches OUR invoice.
+  window.addEventListener('sync:updated', (e) => {
+    if (!editMode || _editSaving) return;
+    if (e.detail?.key !== 'wt_invoices') return;
+    const remotePages = DB.getInvoices().filter(i => i.invoiceNumber === currentInvNum);
+    if (!remotePages.length) {
+      _showEditConflictBanner('deleted');
+      return;
+    }
+    const remoteEditCount = remotePages[0].editCount || 0;
+    if (remoteEditCount > _editBaseEditCount) {
+      _showEditConflictBanner('edited', remotePages[0]);
+    }
   });
 
   if (editNum) {
@@ -1236,6 +1257,37 @@ function deductCapStock(invNumber, items, date, custId) {
   });
 }
 
+// ── Conflict banner — shown when a remote device edits the same invoice ──────
+function _showEditConflictBanner(type, remotePage) {
+  const id = 'editConflictBanner';
+  if (document.getElementById(id)) return; // don't stack duplicate banners
+
+  const banner = document.createElement('div');
+  banner.id        = id;
+  banner.className = 'alert alert-warning alert-dismissible mb-3 no-print';
+  banner.style.cssText = 'border-left:4px solid #e6a817;';
+
+  let msg;
+  if (type === 'deleted') {
+    msg = '<i class="bi bi-trash text-warning me-2"></i>' +
+          `<strong>ใบกำกับ ${currentInvNum} ถูกลบโดยอุปกรณ์อื่น</strong> — ` +
+          'การแก้ไขของคุณไม่สามารถบันทึกได้';
+  } else {
+    const lastEdit = remotePage?.editHistory?.slice(-1)[0];
+    const editor   = lastEdit?.by || 'ผู้ใช้อื่น';
+    msg = '<i class="bi bi-exclamation-triangle text-warning me-2"></i>' +
+          `<strong>ใบกำกับนี้ถูกแก้ไขโดย ${editor} ขณะที่คุณกำลังแก้ไขอยู่</strong> — ` +
+          'การบันทึกจะทับข้อมูลล่าสุด &nbsp; ' +
+          `<a href="invoice-create.html?view=${currentInvNum}" class="alert-link fw-semibold">` +
+          '<i class="bi bi-eye me-1"></i>ดูเวอร์ชันล่าสุด</a>';
+  }
+  banner.innerHTML = msg +
+    '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>';
+
+  // Insert right after alertBox so it appears between the header and the form
+  document.getElementById('alertBox').insertAdjacentElement('afterend', banner);
+}
+
 // ── EDIT MODE (load existing invoice into form) ───────────────────────────────
 function loadEdit(invNum) {
   editMode = true;
@@ -1249,6 +1301,9 @@ function loadEdit(invNum) {
   if (!pages.length) { Utils.showAlert('ไม่พบใบกำกับ', 'danger'); return; }
 
   const first = pages[0];
+  // Snapshot the current editCount — any remote update that increments this triggers the conflict banner
+  _editBaseEditCount = first.editCount || 0;
+  _editSaving = false;
   document.getElementById('invNumber').value  = invNum;
   if (_fpInvDate) _fpInvDate.setDate(first.createdAt ? first.createdAt.slice(0, 10) : new Date());
   else document.getElementById('invDate').value = first.createdAt ? Utils.isoToBE(first.createdAt) : Utils.todayBE();
@@ -1349,6 +1404,9 @@ async function saveInvoiceEdit(shouldPrint = false) {
     editCount:      newEditCount,
     editHistory
   }));
+  // Suppress conflict banner for our own save — the sync:updated that fires
+  // after this write is our own echo, not a concurrent change from another device.
+  _editSaving = true;
   // Replace old pages with new pages in one atomic DB write
   DB.saveInvoices([...newPages, ...DB.getInvoices().filter(i => i.invoiceNumber !== currentInvNum)]);
 
