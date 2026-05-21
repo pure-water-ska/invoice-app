@@ -30,6 +30,8 @@ var Sync = {
   _pushDebounce:  {},                    // { [lsKey]: timeoutId } — debounce rapid collection writes
   _pendingWrite:  {},                    // { [lsKey]: boolean } — true while a debounced write is in-flight; listener skips snapshots during this window to avoid overwriting just-modified local data (e.g. cancelled payment)
   _lastFromCache: undefined,             // last known snapshot.metadata.fromCache value — deduplicates sync:connectionstate events
+  ARCHIVE_MONTHS:    6,                  // invoices older than this are not fetched on page load (date-filtered _pullAll)
+  _persistedSidsKey: 'wt_sync_sids',    // localStorage key for per-collection Set<id> that survives page reloads — enables tombstone-deletion of archived invoices outside the pull window
 
   // ── Large collections → one Firestore doc per record ──────────────────────
   // (avoids 1 MB Firestore document limit for busy businesses)
@@ -99,6 +101,27 @@ var Sync = {
       }
       return false;                           // tombstoned — skip
     });
+  },
+
+  // ── Persisted server IDs — survive page reloads for archive tombstone correctness ──
+  // _pullAll() only fetches the last ARCHIVE_MONTHS of invoices. Without persistence,
+  // _serverIds[invoices] would only contain the recent window, so _writeKey() couldn't
+  // detect deletions of older archived invoices and they'd silently linger in Firestore.
+  // By persisting the full known-server-ID set to localStorage, every page load starts
+  // with the complete picture regardless of how far back the archive window extends.
+  _saveServerIds(colName) {
+    try {
+      const all = JSON.parse(localStorage.getItem(this._persistedSidsKey) || '{}');
+      all[colName] = [...(this._serverIds[colName] || new Set())];
+      localStorage.setItem(this._persistedSidsKey, JSON.stringify(all));
+    } catch {}
+  },
+
+  _loadSavedServerIds(colName) {
+    try {
+      const all = JSON.parse(localStorage.getItem(this._persistedSidsKey) || '{}');
+      return new Set(all[colName] || []);
+    } catch { return new Set(); }
   },
 
   // ── Emit Firestore connection state (fromCache) for the connection banner ──
@@ -474,8 +497,10 @@ var Sync = {
         this._ignoreUntil[key] = Date.now() + this._skipInitialMs;
       }
 
-      // Update cached server IDs to reflect the new local state
+      // Update cached server IDs to reflect the new local state.
+      // Persist for invoices so archive records remain tombstone-trackable across page loads.
       this._serverIds[colName] = new Set(localIds);
+      if (colName === 'invoices') this._saveServerIds(colName);
 
       // ── ② Upsert + delete in ONE atomic batch ────────────────────────────
       // Deletions are in the same batch as upserts so Firestore transitions
@@ -616,17 +641,48 @@ var Sync = {
           const localArr = JSON.parse(raw || '[]');
           if (Array.isArray(localArr)) {
             const ids = new Set(localArr.filter(r => r.id).map(r => r.id));
-            this._serverIds[colName] = new Set(ids);   // deletion detection in _writeKey()
+            if (colName === 'invoices') {
+              // Invoices: merge local IDs into the full persisted server-ID set so
+              // _writeKey() can tombstone-delete archived records outside the pull window.
+              const persisted = this._loadSavedServerIds(colName);
+              ids.forEach(id => persisted.add(id));
+              this._serverIds[colName] = persisted;
+            } else {
+              this._serverIds[colName] = new Set(ids);   // deletion detection in _writeKey()
+            }
             this._pullIds[colName]   = new Set(ids);   // "new-this-session" guard in listener
           }
         } catch {}
         return;
       }
+      // ── Invoice archive: seed _serverIds from persisted IDs before querying ──
+      // _pullAll() only fetches the last ARCHIVE_MONTHS of invoices. Loading the
+      // persisted set first ensures _writeKey() can tombstone-delete archived
+      // invoices even though they won't appear in this page's date-filtered snapshot.
+      if (colName === 'invoices') {
+        this._serverIds[colName] = this._loadSavedServerIds(colName);
+      }
+      // ── Date-filtered Firestore query for invoices (archive window) ───────────
+      // Regular collections are fetched in full; invoices are filtered to the last
+      // ARCHIVE_MONTHS to stay within Firestore read quotas and page-load budgets.
+      const cutoffISO = colName === 'invoices'
+        ? new Date(Date.now() - this.ARCHIVE_MONTHS * 30.44 * 24 * 3600 * 1000).toISOString()
+        : null;
+      const colQuery = cutoffISO
+        ? base.collection(colName).where('createdAt', '>=', cutoffISO)
+        : base.collection(colName);
       try {
-        const snap = await base.collection(colName).get();
+        const snap = await colQuery.get();
         if (!snap.empty) {
-          // Cache server IDs — used by _writeKey() to tombstone deletions synchronously
-          this._serverIds[colName] = new Set(snap.docs.map(d => d.id));
+          // Cache server IDs — used by _writeKey() to tombstone deletions synchronously.
+          // Invoices: MERGE fetched IDs into the seeded persisted set (not replace) so
+          // archived records outside the 6-month window remain tombstone-trackable.
+          if (colName === 'invoices') {
+            snap.docs.forEach(d => this._serverIds[colName].add(d.id));
+            this._saveServerIds(colName);
+          } else {
+            this._serverIds[colName] = new Set(snap.docs.map(d => d.id));
+          }
           // Cache pull IDs — used by listener to tell "new this session" from "deleted on another device"
           this._pullIds[colName] = new Set(snap.docs.map(d => d.id));
           // Apply tombstones so recently-deleted records aren't restored on page reload
@@ -969,6 +1025,55 @@ var Sync = {
 
     // Notify any page that is listening for real-time remote changes
     window.dispatchEvent(new CustomEvent('sync:updated', { detail: { key: lsKey } }));
+  },
+
+  // ── Load archived invoices on demand ──────────────────────────────────────
+  // Called by invoices.html when the user sets filterFrom older than ARCHIVE_MONTHS.
+  // Queries Firestore with a date range, merges results into wt_invoices localStorage,
+  // and updates the persisted server-ID set so future deletions of archive records work.
+  //
+  // @param {string} fromISO  — ISO date string for the lower bound (inclusive)
+  // @param {string} [toISO]  — ISO date string for the upper bound (inclusive).
+  //                            Defaults to the ARCHIVE_MONTHS cutoff so we only
+  //                            fetch the truly "old" records not already in localStorage.
+  // @returns {{ count: number }}  — number of NEW records merged into localStorage
+  async loadArchive(fromISO, toISO) {
+    if (!this.ready || !this._db) throw new Error('Sync not ready');
+    const base = this._orgRef();
+    const cutoffISO = new Date(Date.now() - this.ARCHIVE_MONTHS * 30.44 * 24 * 3600 * 1000).toISOString();
+    const from = fromISO || '2000-01-01T00:00:00.000Z';
+    const to   = toISO   || cutoffISO;
+
+    console.log(`[Sync] loadArchive: ${from} → ${to}`);
+    let q = base.collection('invoices').where('createdAt', '>=', from)
+                                        .where('createdAt', '<=', to);
+    const snap = await q.get();
+    if (snap.empty) {
+      console.log('[Sync] loadArchive: no records found');
+      return { count: 0 };
+    }
+
+    const lsKey   = 'wt_invoices';
+    const existing   = JSON.parse(this._localRead(lsKey) || '[]');
+    const existingIds = new Set(existing.filter(r => r.id).map(r => r.id));
+    const newRecords  = this._applyTombstones('invoices', snap.docs)
+      .filter(d => !existingIds.has(d.id))
+      .map(d => { const { _by, _ts, ...rec } = d.data(); return rec; });
+
+    if (newRecords.length > 0) {
+      const merged = [...existing, ...newRecords];
+      localStorage.setItem(lsKey, JSON.stringify(merged));
+      if (window.DB) DB.invalidate(lsKey);
+    }
+
+    // Merge all fetched IDs into persisted server-ID set so future deletes of
+    // archive records are detected correctly even if _pullAll() won't re-fetch them.
+    if (!this._serverIds['invoices']) this._serverIds['invoices'] = new Set();
+    snap.docs.forEach(d => this._serverIds['invoices'].add(d.id));
+    this._saveServerIds('invoices');
+
+    console.log(`[Sync] loadArchive: merged ${newRecords.length} new records (${snap.size} fetched)`);
+    return { count: newRecords.length };
   },
 };
 

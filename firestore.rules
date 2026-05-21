@@ -1,0 +1,23 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Per-org data ────────────────────────────────────────────────────────
+    // Only Firebase accounts whose email domain matches the org ID can access
+    // that org's data.  Both per-user accounts (Phase 3: username@{orgId}.wt.local)
+    // and the shared team/service account (team@{orgId}.wt.local) must use the
+    // {orgId}.wt.local email domain.  This binds every Firebase Auth identity to
+    // a single organisation and prevents cross-org data leakage.
+    //
+    // Deploy with:  firebase deploy --only firestore:rules
+    match /orgs/{orgId}/{document=**} {
+      allow read, write: if request.auth != null
+        && request.auth.token.email.matches('^.+@' + orgId + '\\.wt\\.local$');
+    }
+
+    // ── Deny all paths outside /orgs/* ──────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

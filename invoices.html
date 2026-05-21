@@ -88,6 +88,15 @@
     <div class="col-4"><div class="card text-center py-2"><div class="fw-bold text-danger" id="sumUnpaid">฿0</div><div class="small text-muted">ค้างชำระ</div></div></div>
   </div>
 
+  <!-- Archive banner — shown when filterFrom goes beyond ARCHIVE_MONTHS -->
+  <div id="archiveBanner" class="alert alert-info d-flex align-items-center gap-2 mb-3 d-none" role="alert">
+    <i class="bi bi-archive fs-5"></i>
+    <span>ใบกำกับก่อนหน้า <strong id="archiveMonthsLabel">6</strong> เดือน อาจยังไม่ถูกโหลดมา</span>
+    <button class="btn btn-sm btn-info ms-auto fw-semibold" onclick="loadArchiveInvoices()">
+      <i class="bi bi-cloud-download me-1"></i>โหลดใบกำกับเก่า
+    </button>
+  </div>
+
   <div class="card">
     <div class="table-responsive">
       <table class="table table-hover mb-0">
@@ -272,6 +281,7 @@ window.addEventListener('DOMContentLoaded', () => {
 const INV_PAGE_SIZE = 30;
 let _invPage = 1;
 let _sortCol = 'date', _sortDir = -1;
+let _archiveLoaded = false;  // true once loadArchiveInvoices() has run for the current from-filter
 
 function clearFilters() {
   ['searchInput','filterCustomer','filterStatus'].forEach(id => document.getElementById(id).value = '');
@@ -334,6 +344,19 @@ function render() {
   const fs = document.getElementById('filterStatus').value;
   const from = Utils.parseBEToISO(document.getElementById('filterFrom').value);
   const to   = Utils.parseBEToISO(document.getElementById('filterTo').value);
+
+  // ── Archive banner ────────────────────────────────────────────────────────
+  // Show when filterFrom reaches further back than ARCHIVE_MONTHS so the user
+  // knows older invoices may not be loaded yet and can trigger an on-demand fetch.
+  const archiveBanner = document.getElementById('archiveBanner');
+  if (archiveBanner) {
+    const ARCHIVE_MONTHS = (window.Sync && Sync.ARCHIVE_MONTHS) ? Sync.ARCHIVE_MONTHS : 6;
+    document.getElementById('archiveMonthsLabel').textContent = ARCHIVE_MONTHS;
+    const cutoff   = new Date(Date.now() - ARCHIVE_MONTHS * 30.44 * 24 * 3600 * 1000);
+    const oldEnough = from && new Date(from) < cutoff;
+    if (!oldEnough) _archiveLoaded = false;   // reset flag when filter comes back to recent range
+    archiveBanner.classList.toggle('d-none', !(oldEnough && !_archiveLoaded));
+  }
 
   const allInvoices = DB.getInvoices();
   const customers   = DB.getCustomers();
@@ -484,6 +507,36 @@ function deleteInvoice(num) {
   DB.logActivity(session.userId, session.username, 'ลบใบกำกับ', { invoiceNumber: num });
   Utils.showAlert(`ลบใบกำกับ ${num} แล้ว`, 'warning');
   render();
+}
+
+// ── Load archived invoices from Firestore on demand ───────────────────────
+// Called by the archive banner button when filterFrom is older than ARCHIVE_MONTHS.
+async function loadArchiveInvoices() {
+  if (!window.Sync || !Sync.ready) {
+    Utils.showAlert('ยังไม่ได้เชื่อมต่อ Firebase — ไม่สามารถโหลดใบกำกับเก่าได้', 'warning');
+    return;
+  }
+  const btn = document.querySelector('#archiveBanner .btn');
+  const origHtml = btn ? btn.innerHTML : null;
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลังโหลด...'; }
+  try {
+    const from = Utils.parseBEToISO(document.getElementById('filterFrom').value) || undefined;
+    const result = await Sync.loadArchive(from, undefined);
+    _archiveLoaded = true;
+    Utils.showAlert(
+      result.count > 0
+        ? `โหลดใบกำกับเก่าแล้ว ${result.count} รายการ`
+        : 'ไม่พบใบกำกับเก่าในช่วงเวลาที่เลือก',
+      result.count > 0 ? 'success' : 'info'
+    );
+    _invPage = 1;
+    render();
+  } catch (e) {
+    console.error('[loadArchiveInvoices]', e);
+    Utils.showAlert('โหลดไม่สำเร็จ: ' + (e.message || e), 'danger');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = origHtml; }
+  }
 }
 </script>
 </body>
