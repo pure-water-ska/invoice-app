@@ -21,6 +21,7 @@ var Sync = {
   _ignoreUntil:   {},         // { [lsKey]: epoch ms } — per-key ignore window
   _pendingLsKey:  'wt_sync_pending',
   _lastSyncKey:   'wt_sync_lastAt',
+  _lastPulledKey: 'wt_sync_lastPulledAt', // set at end of every successful _pullAll(); used for delta optimisation
   _tombstoneKey:  'wt_sync_tombstones',  // persists deleted IDs across page loads
   _tombstoneTTL:  30 * 60 * 1000,        // 30 minutes — auto-expire if purge never ran
   _serverIds:     {},                    // { [colName]: Set<id> } cached from last _pullAll
@@ -511,11 +512,37 @@ var Sync = {
   async _pullAll() {
     const base = this._orgRef();
 
+    // ── Delta pull optimisation ──────────────────────────────────────────────
+    // Avoid redundant Firestore reads on every page navigation.
+    //
+    // DOCUMENTS: each Firestore doc carries a server `ts` field.  If that ts
+    // is clearly before our last pull we already have the latest — skip the write.
+    //
+    // COLLECTIONS (invoices, payments): a partial query can't detect deletions,
+    // so we keep doing a full read — BUT if we pulled very recently (< 30 s) we
+    // trust the real-time listener to have caught any remote changes and skip the
+    // round-trip entirely.  We still populate _serverIds/_pullIds from localStorage
+    // so deletion tombstoning in _writeKey() keeps working correctly.
+    const lastPulledAt  = localStorage.getItem(this._lastPulledKey);
+    const lastPulledMs  = lastPulledAt ? new Date(lastPulledAt).getTime() : 0;
+    const msSincePull   = Date.now() - lastPulledMs;
+    const CLOCK_SKEW_MS = 5  * 1000;   // allow 5 s of server/client clock drift
+    const COL_SKIP_MS   = 30 * 1000;   // skip collection pull if done within last 30 s
+
     // Documents
     const docPromises = Object.entries(this.DOCUMENTS).map(async ([lsKey, docName]) => {
       try {
         const doc = await base.collection('data').doc(docName).get();
         if (doc.exists && doc.data().d !== undefined) {
+          // Delta: skip write if the Firestore document hasn't changed since last pull.
+          // doc.data().ts is a Firestore server Timestamp — compare against lastPulledMs.
+          // A 5 s clock-skew buffer ensures we never skip a doc that was written right
+          // before our last pull on a server whose clock drifts slightly ahead.
+          const docTs = doc.data().ts?.toDate?.()?.getTime?.() ?? 0;
+          if (lastPulledMs > 0 && docTs > 0 && docTs < lastPulledMs - CLOCK_SKEW_MS) {
+            console.log(`[Sync] Delta: skip unchanged doc ${docName} (doc ts ${new Date(docTs).toISOString()} ≤ last pull)`);
+            return;
+          }
           const fsVal = doc.data().d;
           // For array documents (users, customers, products, etc.) merge with local data
           // so records created locally before sync was working are never lost on pull.
@@ -559,6 +586,23 @@ var Sync = {
 
     // Collections
     const colPromises = Object.entries(this.COLLECTIONS).map(async ([lsKey, colName]) => {
+      // Delta: if we pulled recently, populate _serverIds/_pullIds from localStorage and
+      // skip the Firestore round-trip — the real-time listener will have kept local data
+      // current during navigation.  We can't do a partial query here because it can't
+      // detect server-side deletions; a full pull or "skip + trust listener" is the choice.
+      if (lastPulledMs > 0 && msSincePull < COL_SKIP_MS) {
+        console.log(`[Sync] Delta: skip collection pull ${colName} (pulled ${Math.round(msSincePull / 1000)}s ago — trusting listener)`);
+        try {
+          const raw      = this._localRead(lsKey);
+          const localArr = JSON.parse(raw || '[]');
+          if (Array.isArray(localArr)) {
+            const ids = new Set(localArr.filter(r => r.id).map(r => r.id));
+            this._serverIds[colName] = new Set(ids);   // deletion detection in _writeKey()
+            this._pullIds[colName]   = new Set(ids);   // "new-this-session" guard in listener
+          }
+        } catch {}
+        return;
+      }
       try {
         const snap = await base.collection(colName).get();
         if (!snap.empty) {
@@ -615,6 +659,8 @@ var Sync = {
     });
 
     await Promise.all([...docPromises, ...colPromises]);
+    // Record timestamp of this successful pull — used by delta optimisation on the next page load
+    try { localStorage.setItem(this._lastPulledKey, new Date().toISOString()); } catch {}
     // Notify pages that fresh data is available so they can re-render
     window.dispatchEvent(new CustomEvent('sync:pulled'));
     console.log('[Sync] Initial pull complete');
