@@ -9,15 +9,12 @@ var Sync = {
   _db:            null,
   _orgId:         null,
   _uid:           null,
-  // Per-device UUID — unique per browser instance, persisted in localStorage.
+  // Per-device UUID — unique per browser instance, persisted in IndexedDB
+  // (survives localStorage.clear()).  Loaded asynchronously by _initDeviceId()
+  // at the very start of init() before any Firestore calls.
   // Used instead of _uid to detect "my own echo" vs "remote change" because
   // all devices share the same Firebase team account (same _uid everywhere).
-  _deviceId:      (function() {
-    const KEY = 'wt_sync_device_id';
-    let id = localStorage.getItem(KEY);
-    if (!id) { id = 'dev_' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem(KEY, id); }
-    return id;
-  })(),
+  _deviceId:      null,
   _online:        navigator.onLine,
   _unsubscribers: [],
   _skipInitialMs: 800,        // ms to ignore incoming snapshots (= our own writes)
@@ -25,7 +22,7 @@ var Sync = {
   _pendingLsKey:  'wt_sync_pending',
   _lastSyncKey:   'wt_sync_lastAt',
   _tombstoneKey:  'wt_sync_tombstones',  // persists deleted IDs across page loads
-  _tombstoneTTL:  5 * 60 * 1000,         // 5 minutes — auto-expire if purge never ran
+  _tombstoneTTL:  30 * 60 * 1000,        // 30 minutes — auto-expire if purge never ran
   _serverIds:     {},                    // { [colName]: Set<id> } cached from last _pullAll
   _pullIds:       {},                    // { [colName]: Set<id> } IDs seen at _pullAll time — used by listener to distinguish "new this session" vs "deleted on another device"
   _lastPushedIds: {},                    // { [colName]: Set<id> } IDs from the most recent push() call — used to detect same-debounce-window add→delete (where ADD is cancelled and _serverIds never gets the new ID)
@@ -122,8 +119,51 @@ var Sync = {
     if (msg) console.log('[Sync]', msg);
   },
 
+  // ── Load / generate device ID from IndexedDB ──────────────────────────────
+  // IndexedDB is used instead of localStorage so the ID survives
+  // Settings → Clear Data (which wipes localStorage).  A stable ID means
+  // echo detection keeps working even after the user clears local data.
+  //
+  // Migration path: on first run after this upgrade the old ID is read from
+  // localStorage and promoted to IndexedDB — no echo-suppression gap.
+  async _initDeviceId() {
+    const IDB_KEY = 'sync_device_id';
+    const LS_KEY  = 'wt_sync_device_id';
+    try {
+      // 1. Primary source: IndexedDB (durable across localStorage.clear())
+      let id = await IDB.get(IDB_KEY);
+      if (!id) {
+        // 2. Migrate from localStorage if this device already has one
+        id = localStorage.getItem(LS_KEY) || null;
+      }
+      if (!id) {
+        // 3. Generate a brand-new ID
+        id = 'dev_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      }
+      // Always write to IDB so the ID is safe from future localStorage clears
+      await IDB.set(IDB_KEY, id);
+      // Keep a best-effort copy in localStorage as a fast read cache
+      try { localStorage.setItem(LS_KEY, id); } catch {}
+      this._deviceId = id;
+      console.log('[Sync] Device ID ready (IDB):', id);
+    } catch (e) {
+      // IDB unavailable (e.g. private browsing with strict settings) — fall back
+      console.warn('[Sync] IDB unavailable for device ID, using localStorage fallback:', e.message);
+      let id = localStorage.getItem(LS_KEY);
+      if (!id) {
+        id = 'dev_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+        try { localStorage.setItem(LS_KEY, id); } catch {}
+      }
+      this._deviceId = id;
+    }
+  },
+
   // ── Initialize ─────────────────────────────────────────────────────────────
   async init() {
+    // Load (or generate) device ID from IndexedDB first — must be ready before
+    // any _writeKey() or listener echo-detection call.
+    await this._initDeviceId();
+
     if (typeof FIREBASE_CONFIG === 'undefined' || !FIREBASE_CONFIG.apiKey ||
         FIREBASE_CONFIG.apiKey.startsWith('AIzaSy...')) {
       console.log('[Sync] No valid Firebase config — local-only mode');
