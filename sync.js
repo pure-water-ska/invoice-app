@@ -354,9 +354,28 @@ var Sync = {
         syncDeletedIds = [...knownServerIds].filter(id => !localIds.has(id));
         if (syncDeletedIds.length > 0) {
           this._addTombstones(colName, syncDeletedIds);
-          this._ignoreUntil[key] = Date.now() + this._skipInitialMs;
         }
       }
+
+      // ── Belt-and-suspenders: flush active tombstones even if _serverIds is empty ──
+      // Covers the queue-flush path: user deletes a payment and navigates away within
+      // the 600 ms debounce window → beforeunload enqueues the deletion → new page load
+      // calls _flushQueueNow() BEFORE _pullAll(), so _serverIds is not populated yet.
+      // Without this, syncDeletedIds stays empty and the record is never deleted from
+      // Firestore — the tombstone blocks it for 5 min, then it silently comes back.
+      // Tombstones ARE persisted to localStorage (in push()), so they survive page loads.
+      const activeStones = this._getTombstones(colName);
+      const stoneNow = Date.now();
+      for (const [id, ts] of Object.entries(activeStones)) {
+        if (stoneNow - ts <= this._tombstoneTTL && !localIds.has(id) && !syncDeletedIds.includes(id)) {
+          syncDeletedIds.push(id);
+        }
+      }
+
+      if (syncDeletedIds.length > 0) {
+        this._ignoreUntil[key] = Date.now() + this._skipInitialMs;
+      }
+
       // Update cached server IDs to reflect the new local state
       this._serverIds[colName] = new Set(localIds);
 
@@ -572,7 +591,39 @@ var Sync = {
             // Skip delayed echo: document was last written by this device
             if (doc.data()?.by === this._deviceId) return;
             if (!doc.exists || doc.data()?.d === undefined) return;
-            localStorage.setItem(lsKey, JSON.stringify(doc.data().d));
+
+            const fsVal = doc.data().d;
+
+            // For array documents (activity log, login log, users, etc.) MERGE
+            // local-only entries rather than wholesale overwriting.
+            // Scenario: Device A logs an activity; Device B then writes any document
+            // keyed under this same Firestore doc → Device A's listener would replace
+            // its local array with Device B's older version, silently losing A's entries.
+            if (Array.isArray(fsVal)) {
+              try {
+                const raw = this._localRead(lsKey);
+                const localArr = JSON.parse(raw || '[]');
+                if (Array.isArray(localArr) && localArr.length > 0) {
+                  const fsIds    = new Set(fsVal.filter(r => r && r.id).map(r => r.id));
+                  const localOnly = localArr.filter(r => r && r.id && !fsIds.has(r.id));
+                  if (localOnly.length > 0) {
+                    // Local has entries not yet in this Firestore snapshot — merge them in
+                    // and push the merged array back so Firestore stays canonical.
+                    const merged = [...fsVal, ...localOnly];
+                    localStorage.setItem(lsKey, JSON.stringify(merged));
+                    if (window.DB) DB.invalidate(lsKey);
+                    this._notifyUpdate(lsKey);
+                    // Push the merged array back to Firestore so all devices agree
+                    this._writeKey(lsKey, merged).catch(e =>
+                      console.warn('[Sync] Doc merge push failed:', docName, e.message)
+                    );
+                    return;
+                  }
+                }
+              } catch {}
+            }
+
+            localStorage.setItem(lsKey, JSON.stringify(fsVal));
             if (window.DB) DB.invalidate(lsKey);
             this._notifyUpdate(lsKey);
           },

@@ -143,6 +143,11 @@ const ACTION_ICONS = {
   'พิมพ์ใบกำกับ': 'bi-printer text-info',
 };
 
+// Re-render when activity or login log syncs in from another device
+window.addEventListener('sync:updated', (e) => {
+  if (['wt_activity', 'wt_logins'].includes(e.detail?.key)) render();
+});
+
 window.addEventListener('DOMContentLoaded', () => {
   const users = DB.getUsers();
   const userSel = document.getElementById('filterUser');
