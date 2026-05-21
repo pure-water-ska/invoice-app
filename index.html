@@ -147,6 +147,31 @@
       localStorage.setItem('wt_last_user', u);           // remember username only
       sessionStorage.removeItem('connModalDone'); // reset so modal shows on each login
       sessionStorage.setItem('justLoggedIn', '1');
+
+      // ── Phase 3: switch Firebase Auth to per-user account ─────────────────
+      // Pre-caches the correct Firebase token in IndexedDB so sync.js on
+      // dashboard.html has the right account immediately without a sign-out
+      // / sign-in round-trip.  Non-fatal: sync.js handles any residual mismatch.
+      try {
+        if (window.firebase &&
+            typeof FIREBASE_CONFIG !== 'undefined' &&
+            FIREBASE_CONFIG.apiKey &&
+            !FIREBASE_CONFIG.apiKey.startsWith('AIzaSy...')) {
+          const userRecord = DB.getUserByUsername(u);
+          const fbEmail    = userRecord?.firebaseEmail    || FIREBASE_CONFIG.teamEmail;
+          const fbPass     = userRecord?.firebasePassword || FIREBASE_CONFIG.teamPassword;
+          const current    = firebase.auth().currentUser;
+          if (fbEmail && fbPass && (!current || current.email !== fbEmail)) {
+            if (current) await firebase.auth().signOut();
+            await firebase.auth().signInWithEmailAndPassword(fbEmail, fbPass);
+            console.log('[Login] Firebase Auth → per-user account:', fbEmail);
+          }
+        }
+      } catch (e) {
+        console.warn('[Login] Firebase Auth switch failed (non-fatal):', e.message);
+        // sync.js will handle the mismatch on the next page load
+      }
+
       window.location.href = 'dashboard.html';
     } else {
       Utils.showAlert(result.msg, 'danger');

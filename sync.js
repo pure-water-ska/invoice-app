@@ -217,8 +217,17 @@ var Sync = {
         });
       }
 
-      // Sign in with shared team account so Firestore WebChannel has a valid
-      // ID token (API-key-only connections are blocked at the transport level).
+      // ── Determine which Firebase account to use for this session (Phase 3) ──
+      // Each app user gets their own Firebase Auth account provisioned by users.html.
+      // sync.js reads the app session (sessionStorage) → user record → firebaseEmail /
+      // firebasePassword.  Users not yet provisioned fall back to the shared teamEmail.
+      // On the login page itself Auth.session() returns null → teamEmail is used.
+      const _appSession = (window.Auth && Auth.session) ? Auth.session() : null;
+      const _appUser    = (_appSession && window.DB) ? DB.getUserById(_appSession.userId) : null;
+      const _fbEmail    = _appUser?.firebaseEmail    || FIREBASE_CONFIG.teamEmail;
+      const _fbPass     = _appUser?.firebasePassword || FIREBASE_CONFIG.teamPassword;
+
+      // Sign in so Firestore WebChannel has a valid ID token.
       // Firebase Auth persists credentials in IndexedDB across page loads.
       // We wait for the cached state to restore first — if already signed in,
       // no network request is needed, avoiding auth/network-request-failed errors
@@ -232,15 +241,25 @@ var Sync = {
         }),
         new Promise(resolve => setTimeout(() => resolve(null), 3000)),
       ]);
-      console.log('[Sync] Step 4: auth state =', restoredUser ? 'cached' : 'none (timed out or fresh)');
+      console.log('[Sync] Step 4: auth state =', restoredUser ? restoredUser.email || 'anon' : 'none (timed out or fresh)');
 
       if (!restoredUser) {
         // No cached session — need a real network sign-in
-        console.log('[Sync] Step 4b: signIn (network)');
-        const email = FIREBASE_CONFIG.teamEmail;
-        const pass  = FIREBASE_CONFIG.teamPassword;
-        if (email && pass) {
-          await firebase.auth().signInWithEmailAndPassword(email, pass);
+        console.log('[Sync] Step 4b: signIn (network) →', _fbEmail || 'anonymous');
+        if (_fbEmail && _fbPass) {
+          await firebase.auth().signInWithEmailAndPassword(_fbEmail, _fbPass);
+        } else {
+          await firebase.auth().signInAnonymously();
+        }
+      } else if (_fbEmail && restoredUser.email !== _fbEmail) {
+        // Cached session belongs to a different Firebase account — this happens
+        // when a different app user logs in, or when a user's account was just
+        // provisioned after they were already signed in via teamEmail.
+        // Sign out of the stale session and authenticate with the correct account.
+        console.log('[Sync] Step 4c: auth switch', restoredUser.email, '→', _fbEmail);
+        await firebase.auth().signOut();
+        if (_fbEmail && _fbPass) {
+          await firebase.auth().signInWithEmailAndPassword(_fbEmail, _fbPass);
         } else {
           await firebase.auth().signInAnonymously();
         }

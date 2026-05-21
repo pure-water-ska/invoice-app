@@ -177,7 +177,7 @@ function render() {
     const lastLogin = logins.find(l => l.userId === u.id && l.success);
     return `<tr>
       <td class="text-muted">${i+1}</td>
-      <td class="fw-semibold">${u.username}</td>
+      <td class="fw-semibold">${u.username}${u.firebaseEmail ? `<i class="bi bi-cloud-check text-success ms-1" style="font-size:.8rem" title="Firebase: ${u.firebaseEmail}"></i>` : '<i class="bi bi-cloud-slash text-muted ms-1" style="font-size:.75rem;opacity:.45" title="ยังไม่ได้เชื่อม Firebase"></i>'}</td>
       <td>${u.name}</td>
       <td class="text-center"><span class="badge ${u.role==='admin'?'bg-danger':'bg-primary'}">${u.role==='admin'?'Admin':'User'}</span></td>
       <td class="text-center">
@@ -221,7 +221,55 @@ function openModal(id) {
   modal.show();
 }
 
-function saveUser() {
+// ── Phase 3: Firebase Auth helpers ────────────────────────────────────────────
+// Generate a random strong password for the Firebase Auth account.
+// The app never shows this password to the user — it is only used by sync.js
+// to sign into Firestore.  The primary login password is managed by auth.js.
+function _genFirebasePassword() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+  let pw = '';
+  for (let i = 0; i < 20; i++) pw += chars.charAt(Math.floor(Math.random() * chars.length));
+  return pw;
+}
+
+// Create a Firebase Auth account for the given username using a secondary
+// Firebase App instance so the admin's own session is not disturbed.
+// Returns { firebaseEmail, firebasePassword } on success;
+//          { firebaseEmail, firebasePassword: null } if account already exists;
+//          null if Firebase is not configured or creation fails.
+async function _createFirebaseAccount(username) {
+  if (typeof firebase === 'undefined' ||
+      typeof FIREBASE_CONFIG === 'undefined' ||
+      !FIREBASE_CONFIG.apiKey ||
+      FIREBASE_CONFIG.apiKey.startsWith('AIzaSy...')) {
+    return null; // Firebase not configured — silent no-op
+  }
+  const orgId         = FIREBASE_CONFIG.orgId || 'main';
+  const firebaseEmail = `${username}@${orgId}.wt.local`;
+  const firebasePw    = _genFirebasePassword();
+  const appName       = 'usr-create-' + Date.now();
+  let secondaryApp    = null;
+  try {
+    secondaryApp = firebase.initializeApp(FIREBASE_CONFIG, appName);
+    await secondaryApp.auth().createUserWithEmailAndPassword(firebaseEmail, firebasePw);
+    console.log('[Users] Firebase account created:', firebaseEmail);
+    return { firebaseEmail, firebasePassword: firebasePw };
+  } catch (e) {
+    if (e.code === 'auth/email-already-in-use') {
+      // Account exists (user was provisioned before, e.g. DB was restored).
+      // Return the email but no password — the caller must keep the existing
+      // firebasePassword stored in the user record rather than overwriting it.
+      console.log('[Users] Firebase account already exists:', firebaseEmail);
+      return { firebaseEmail, firebasePassword: null };
+    }
+    console.warn('[Users] Firebase account creation failed:', e.code, e.message);
+    return null;
+  } finally {
+    if (secondaryApp) { try { await secondaryApp.delete(); } catch {} }
+  }
+}
+
+async function saveUser() {
   const id = document.getElementById('userId').value;
   const username = document.getElementById('uUsername').value.trim();
   const name = document.getElementById('uName').value.trim();
@@ -237,18 +285,51 @@ function saveUser() {
   const existing = DB.getUserByUsername(username);
   if (existing && existing.id !== id) { Utils.showAlert('ชื่อผู้ใช้นี้มีอยู่แล้ว', 'danger', 'modalAlert'); return; }
 
-  const data = { username, name, role, active };
-  if (password) data.password = Utils.hashPassword(password);
+  // Disable the save button while Firebase account provisioning runs
+  const saveBtn  = document.querySelector('#userModal .modal-footer .btn-primary');
+  const origHtml = saveBtn ? saveBtn.innerHTML : null;
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลังสร้างบัญชี...'; }
 
-  if (id) {
-    DB.updateUser(id, data);
-    DB.logActivity(session.userId, session.username, 'แก้ไขผู้ใช้', { targetUser: username });
-    Utils.showAlert('บันทึกสำเร็จ');
-  } else {
-    DB.addUser({ id: Utils.uuid(), ...data, password: Utils.hashPassword(password), createdAt: new Date().toISOString(), mustChangePw: true });
-    DB.logActivity(session.userId, session.username, 'เพิ่มผู้ใช้', { targetUser: username });
-    Utils.showAlert('เพิ่มผู้ใช้สำเร็จ');
+  try {
+    const data = { username, name, role, active };
+    if (password) data.password = Utils.hashPassword(password);
+
+    if (id) {
+      // ── Edit existing user ────────────────────────────────────────────────
+      // Provision a Firebase account if the user doesn't have one yet
+      // (e.g. users created before Phase 3 was deployed).
+      const existingUser = DB.getUserById(id);
+      if (!existingUser.firebaseEmail) {
+        const fbResult = await _createFirebaseAccount(username);
+        if (fbResult?.firebaseEmail) {
+          data.firebaseEmail = fbResult.firebaseEmail;
+          if (fbResult.firebasePassword) data.firebasePassword = fbResult.firebasePassword;
+        }
+      }
+      DB.updateUser(id, data);
+      DB.logActivity(session.userId, session.username, 'แก้ไขผู้ใช้', { targetUser: username });
+      Utils.showAlert('บันทึกสำเร็จ');
+    } else {
+      // ── Add new user — always provision a Firebase account ────────────────
+      const fbResult  = await _createFirebaseAccount(username);
+      const userRecord = {
+        id: Utils.uuid(),
+        ...data,
+        createdAt:   new Date().toISOString(),
+        mustChangePw: true,
+      };
+      if (fbResult?.firebaseEmail) {
+        userRecord.firebaseEmail = fbResult.firebaseEmail;
+        if (fbResult.firebasePassword) userRecord.firebasePassword = fbResult.firebasePassword;
+      }
+      DB.addUser(userRecord);
+      DB.logActivity(session.userId, session.username, 'เพิ่มผู้ใช้', { targetUser: username });
+      Utils.showAlert('เพิ่มผู้ใช้สำเร็จ');
+    }
+  } finally {
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = origHtml; }
   }
+
   modal.hide();
   render();
 }
