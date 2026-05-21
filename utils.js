@@ -470,4 +470,35 @@ const Utils = {
     if (isNaN(d.getTime())) return '';
     return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()+543}`;
   },
+
+  /**
+   * Returns an empty-state <tr> for a table, with context-aware messaging.
+   *
+   * @param {number} colSpan      - Number of columns the cell should span.
+   * @param {object} [opts]
+   * @param {boolean} [opts.hasDate=false]    - A date-range filter is currently active.
+   * @param {boolean} [opts.hasOther=false]   - Some other filter (text/dropdown) is active.
+   * @param {string}  [opts.clearFn='clearFilters'] - JS function name to call when user clicks "clear".
+   * @param {string}  [opts.noDataMsg='ไม่พบรายการ']  - Message shown when no filter is active.
+   */
+  emptyTableRow(colSpan, { hasDate = false, hasOther = false, clearFn = 'clearFilters', noDataMsg = 'ไม่พบรายการ' } = {}) {
+    let icon, msg, extra = '';
+    if (hasDate) {
+      icon = 'bi-calendar-x';
+      msg  = 'ไม่พบรายการในช่วงวันที่ที่เลือก';
+    } else if (hasOther) {
+      icon = 'bi-funnel';
+      msg  = 'ไม่พบรายการที่ตรงกับตัวกรอง';
+    } else {
+      icon = 'bi-inbox';
+      msg  = noDataMsg;
+    }
+    if (hasDate || hasOther) {
+      extra = `<br><button type="button" class="btn btn-link btn-sm p-0 mt-1" onclick="${clearFn}()">` +
+              `<i class="bi bi-x-circle me-1"></i>ล้างตัวกรอง</button>`;
+    }
+    return `<tr><td colspan="${colSpan}" class="text-center text-muted py-4">` +
+           `<i class="bi ${icon} d-block mb-1" style="font-size:1.4rem;opacity:.55"></i>` +
+           `${msg}${extra}</td></tr>`;
+  },
 };

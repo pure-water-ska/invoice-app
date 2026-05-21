@@ -235,7 +235,13 @@ function renderActivity() {
   document.getElementById('activityCount').textContent = list.length + ' รายการ';
   const shown = f.limit > 0 ? list.slice(0, f.limit) : list;
   const tbody = document.getElementById('activityTable');
-  if (!shown.length) { tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">ไม่พบรายการ</td></tr>'; return; }
+  if (!shown.length) {
+    tbody.innerHTML = Utils.emptyTableRow(6, {
+      hasDate:  !!(f.from || f.to),
+      hasOther: !!(f.q || f.user || f.action),
+    });
+    return;
+  }
   tbody.innerHTML = shown.map((item, i) => {
     const icon = ACTION_ICONS[item.action] || 'bi-circle text-muted';
     const details = item.details || {};
@@ -260,7 +266,13 @@ function renderLogin() {
   document.getElementById('loginCount').textContent = list.length + ' รายการ';
   const shown = f.limit > 0 ? list.slice(0, f.limit) : list;
   const tbody = document.getElementById('loginTable');
-  if (!shown.length) { tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">ไม่พบรายการ</td></tr>'; return; }
+  if (!shown.length) {
+    tbody.innerHTML = Utils.emptyTableRow(8, {
+      hasDate:  !!(f.from || f.to),
+      hasOther: !!(f.q || f.user || f.success),
+    });
+    return;
+  }
   tbody.innerHTML = shown.map((item, i) => {
     const locationParts = [item.city, item.region, item.country].filter(Boolean);
     const location = locationParts.length ? locationParts.join(', ') : null;

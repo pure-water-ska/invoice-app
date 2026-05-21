@@ -908,7 +908,10 @@ function render() {
 
   const tbody = document.getElementById('paymentTable');
   if (!list.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">ไม่พบรายการ</td></tr>';
+    tbody.innerHTML = Utils.emptyTableRow(6, {
+      hasDate:  !!(from || to),
+      hasOther: !!(q || fc || fs || fDestAcct || fDestBank || fSrcBank),
+    });
     return;
   }
 

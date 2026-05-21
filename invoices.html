@@ -412,7 +412,11 @@ function render() {
 
   const tbody = document.getElementById('invoiceTable');
   if (list.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">ไม่พบใบกำกับ</td></tr>';
+    tbody.innerHTML = Utils.emptyTableRow(6, {
+      hasDate:  !!(from || to),
+      hasOther: !!(q || fc || fs),
+      noDataMsg: 'ยังไม่มีใบกำกับ',
+    });
     document.getElementById('invPagination').style.display = 'none';
     return;
   }
