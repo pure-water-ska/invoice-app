@@ -703,28 +703,38 @@ var Sync = {
           });
           // MERGE: keep any local records not yet in Firestore (e.g. just-imported, race condition).
           // This prevents a navigating-away-too-quickly race from wiping locally-added records.
+          //
+          // IMPORTANT: for invoices the Firestore query is date-filtered (last ARCHIVE_MONTHS).
+          // Records outside that window fall into two categories:
+          //   (a) Archive-already-in-Firestore: knownServerIds.has(r.id) → keep locally, skip push
+          //   (b) Newly imported with an old date (PDF import): NOT in knownServerIds → push to
+          //       Firestore AND keep locally
+          // The previous code used `createdAt < cutoffISO` to detect (a), but that also silently
+          // dropped (b) — erasing PDF-imported old invoices the moment the user navigated away.
           try {
             const raw = this._localRead(lsKey);
             const localArr = JSON.parse(raw || '[]');
             if (Array.isArray(localArr) && localArr.length > 0) {
-              const fsIds = new Set(snap.docs.map(d => d.id));
-              const stones = this._getTombstones(colName);
+              const fsIds          = new Set(snap.docs.map(d => d.id));
+              const stones         = this._getTombstones(colName);
+              const knownServerIds = this._serverIds[colName] || new Set();
               const now = Date.now();
               const localOnly = localArr.filter(r =>
                 r.id && !fsIds.has(r.id) &&
-                (!stones[r.id] || now - stones[r.id] > this._tombstoneTTL) &&
-                // Skip archive records (createdAt before the pull cutoff) — they already
-                // exist in Firestore and are simply absent from the date-filtered snapshot.
-                // Pushing them back on every page load wastes Firestore write quota.
-                !(colName === 'invoices' && cutoffISO && r.createdAt && r.createdAt < cutoffISO)
+                (!stones[r.id] || now - stones[r.id] > this._tombstoneTTL)
               );
               if (localOnly.length > 0) {
-                console.log(`[Sync] Merge: keeping ${localOnly.length} local-only ${colName} records`);
-                // Push local-only records to Firestore so they survive next pull
-                for (const rec of localOnly) {
+                // Split: records already known to Firestore (outside archive window) vs genuinely new.
+                // knownServerIds is seeded from the persisted ID set + this pull, so it covers all
+                // IDs Firestore has ever held — even archived ones outside the date-filtered window.
+                const toSync      = localOnly.filter(r => !knownServerIds.has(r.id)); // new → push
+                const toKeepLocal = localOnly.filter(r =>  knownServerIds.has(r.id)); // archive → keep only
+                console.log(`[Sync] Merge: ${toSync.length} new-to-Firestore + ${toKeepLocal.length} archive-local for ${colName}`);
+                // Push genuinely-new records to Firestore so they survive the next pull
+                for (const rec of toSync) {
                   try { await base.collection(colName).doc(rec.id).set({ ...rec, _by: this._deviceId, _ts: Date.now() }); } catch {}
                 }
-                const merged = [...fsArr, ...localOnly];
+                const merged = [...fsArr, ...toSync, ...toKeepLocal];
                 localStorage.setItem(lsKey, JSON.stringify(merged));
                 if (window.DB) DB.invalidate(lsKey);
                 return; // skip the plain fsArr write below
