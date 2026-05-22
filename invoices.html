@@ -35,7 +35,7 @@
            onchange="toggleAllSel(this.checked)" title="เลือก/ยกเลิกทั้งหมด">
     <span id="selLabel" class="fw-semibold small">เลือก 0 รายการ</span>
     <div class="ms-auto d-flex gap-2 flex-wrap">
-      <button class="btn btn-sm btn-light border" onclick="toggleAllSel(true)">เลือกทั้งหมด</button>
+      <button id="selAllBtn" class="btn btn-sm btn-light border" onclick="toggleAllSel(_selectedNums.size < _filteredList.length)">เลือกทั้งหมด</button>
       <button class="btn btn-sm btn-outline-secondary" onclick="clearSel()">ยกเลิก</button>
       <button class="btn btn-sm btn-danger" id="bulkDelBtn" disabled onclick="confirmBulkDelete()">
         <i class="bi bi-trash me-1"></i>ลบที่เลือก (<span id="bulkDelCount">0</span>)
@@ -152,6 +152,8 @@ Nav.render('invoices');
 
 // ── Bulk select state ─────────────────────────────────────────────────────────
 let _selMode = false;
+let _selectedNums = new Set();  // persists across page changes
+let _filteredList = [];         // set during render(), used for cross-page "select all"
 
 function toggleSelMode() {
   _selMode = !_selMode;
@@ -178,48 +180,65 @@ function toggleSelMode() {
 }
 
 function onInvChkChange() {
+  // Sync DOM checkboxes → persistent _selectedNums set
+  document.querySelectorAll('.inv-chk').forEach(c => {
+    if (c.checked) _selectedNums.add(c.dataset.num);
+    else _selectedNums.delete(c.dataset.num);
+  });
   updateSelCount();
 }
 
 function updateSelCount() {
-  const chks  = document.querySelectorAll('.inv-chk:checked');
-  const total = document.querySelectorAll('.inv-chk');
-  const n = chks.length;
-  document.getElementById('selLabel').textContent   = 'เลือก ' + n + ' รายการ';
+  const n = _selectedNums.size;
+  const allCount = _filteredList.length;
+  document.getElementById('selLabel').textContent =
+    n > 0 && allCount > INV_PAGE_SIZE
+      ? `เลือก ${n} / ${allCount} รายการ (รวมทุกหน้า)`
+      : `เลือก ${n} รายการ`;
   document.getElementById('bulkDelCount').textContent = n;
-  document.getElementById('bulkDelBtn').disabled    = n === 0;
-  // Highlight selected rows
+  document.getElementById('bulkDelBtn').disabled = n === 0;
+  // Highlight rows on current page
   document.querySelectorAll('#invoiceTable tr[data-num]').forEach(tr => {
-    const chk = tr.querySelector('.inv-chk');
-    if (chk) tr.classList.toggle('table-danger', chk.checked);
+    tr.classList.toggle('table-danger', _selectedNums.has(tr.dataset.num));
   });
   // Sync header checkbox state
+  const visible = document.querySelectorAll('.inv-chk');
+  const checkedVisible = [...visible].filter(c => _selectedNums.has(c.dataset.num)).length;
   const allChk = document.getElementById('selAllChk');
   if (allChk) {
-    allChk.checked       = n > 0 && n === total.length;
-    allChk.indeterminate = n > 0 && n < total.length;
+    allChk.checked       = n > 0 && n === allCount;
+    allChk.indeterminate = n > 0 && n < allCount;
   }
+  // Keep select-all button label in sync
+  const selAllBtn = document.getElementById('selAllBtn');
+  if (selAllBtn) selAllBtn.textContent = n === allCount ? 'ยกเลิกทั้งหมด' : `เลือกทั้งหมด (${allCount})`;
 }
 
 function toggleAllSel(v) {
+  if (v) {
+    _filteredList.forEach(inv => _selectedNums.add(inv.invoiceNumber));
+  } else {
+    _selectedNums.clear();
+  }
+  // Update visible checkboxes to match
   document.querySelectorAll('.inv-chk').forEach(c => c.checked = v);
   updateSelCount();
 }
 
 function clearSel() {
+  _selectedNums.clear();
   document.querySelectorAll('.inv-chk').forEach(c => c.checked = false);
   updateSelCount();
 }
 
 function confirmBulkDelete() {
-  const nums = [...document.querySelectorAll('.inv-chk:checked')].map(c => c.dataset.num);
-  if (!nums.length) return;
-  document.getElementById('bulkDelModalCount').textContent = nums.length;
+  if (!_selectedNums.size) return;
+  document.getElementById('bulkDelModalCount').textContent = _selectedNums.size;
   new bootstrap.Modal(document.getElementById('bulkDelModal')).show();
 }
 
 function executeBulkDelete() {
-  const nums = new Set([...document.querySelectorAll('.inv-chk:checked')].map(c => c.dataset.num));
+  const nums = new Set([..._selectedNums]);
   if (!nums.size) return;
   bootstrap.Modal.getInstance(document.getElementById('bulkDelModal'))?.hide();
 
@@ -433,6 +452,12 @@ function render() {
   document.getElementById('sumPaid').textContent    = '฿' + Utils.formatNumber(sumPaid);
   document.getElementById('sumUnpaid').textContent  = '฿' + Utils.formatNumber(Math.max(0, sumTotal - sumPaid));
 
+  // Save full filtered list so cross-page "select all" and count work correctly
+  _filteredList = list;
+  // Prune any selected nums that no longer exist in the filtered list (e.g. after delete or filter change)
+  const filteredSet = new Set(list.map(i => i.invoiceNumber));
+  for (const num of [..._selectedNums]) { if (!filteredSet.has(num)) _selectedNums.delete(num); }
+
   const tbody = document.getElementById('invoiceTable');
   if (list.length === 0) {
     tbody.innerHTML = Utils.emptyTableRow(6, {
@@ -460,6 +485,7 @@ function render() {
       <td class="text-center sel-chk-cell ${_selMode ? '' : 'd-none'}">
         <input type="checkbox" class="inv-chk" data-num="${inv.invoiceNumber}"
                style="width:15px;height:15px;accent-color:#dc3545;cursor:pointer"
+               ${_selectedNums.has(inv.invoiceNumber) ? 'checked' : ''}
                onchange="onInvChkChange()">
       </td>
       <td><a href="invoice-create.html?view=${inv.invoiceNumber}" class="fw-semibold text-decoration-none">${inv.invoiceNumber}</a>
@@ -483,6 +509,9 @@ function render() {
       </td>
     </tr>`;
   }).join('');
+
+  // Update toolbar count (reflects cross-page selection)
+  if (_selMode) updateSelCount();
 
   // Render pagination bar
   const pg = document.getElementById('invPagination');
