@@ -154,6 +154,7 @@ Nav.render('invoices');
 let _selMode = false;
 let _selectedNums = new Set();  // persists across page changes
 let _filteredList = [];         // set during render(), used for cross-page "select all"
+let _expandedNums = new Set();  // invoice numbers whose per-page sub-rows are expanded
 
 function toggleSelMode() {
   _selMode = !_selMode;
@@ -392,6 +393,14 @@ function render() {
   const pageCountMap = {};
   for (const inv of allInvoices) pageCountMap[inv.invoiceNumber] = (pageCountMap[inv.invoiceNumber] || 0) + 1;
 
+  // all-pages map: invoiceNumber → sorted array of every page record (for sub-rows)
+  const allPagesMap = new Map();
+  for (const inv of allInvoices) {
+    if (!allPagesMap.has(inv.invoiceNumber)) allPagesMap.set(inv.invoiceNumber, []);
+    allPagesMap.get(inv.invoiceNumber).push(inv);
+  }
+  for (const [, pgs] of allPagesMap) pgs.sort((a, b) => (a.page || 1) - (b.page || 1));
+
   const seen = new Map();
   for (const inv of allInvoices) {
     if (!seen.has(inv.invoiceNumber)) seen.set(inv.invoiceNumber, inv);
@@ -481,14 +490,24 @@ function render() {
     const remaining = Math.max(0, total - paid);
     const si        = statusInfo(paid, total);
     const pages     = pageCountMap[inv.invoiceNumber] || 1;
-    return `<tr data-num="${inv.invoiceNumber}">
+    const allPages  = allPagesMap.get(inv.invoiceNumber) || [inv];
+    const isExp     = _expandedNums.has(inv.invoiceNumber);
+
+    const expandBtn = pages > 1
+      ? `<button class="btn btn-sm p-0 border-0 me-1 text-secondary" style="width:16px;line-height:1;vertical-align:middle"
+             onclick="toggleInvExpand('${inv.invoiceNumber}')" title="${isExp ? 'ย่อ' : 'ขยายดูแต่ละหน้า'}">
+           <i class="bi bi-chevron-${isExp ? 'down' : 'right'}" style="font-size:11px"></i>
+         </button>`
+      : '<span style="display:inline-block;width:18px"></span>';
+
+    let html = `<tr data-num="${inv.invoiceNumber}">
       <td class="text-center sel-chk-cell ${_selMode ? '' : 'd-none'}">
         <input type="checkbox" class="inv-chk" data-num="${inv.invoiceNumber}"
                style="width:15px;height:15px;accent-color:#dc3545;cursor:pointer"
                ${_selectedNums.has(inv.invoiceNumber) ? 'checked' : ''}
                onchange="onInvChkChange()">
       </td>
-      <td><a href="invoice-create.html?view=${inv.invoiceNumber}" class="fw-semibold text-decoration-none">${inv.invoiceNumber}</a>
+      <td>${expandBtn}<a href="invoice-create.html?view=${inv.invoiceNumber}" class="fw-semibold text-decoration-none">${inv.invoiceNumber}</a>
         ${pages > 1 ? `<span class="badge bg-secondary ms-1">${pages} หน้า</span>` : ''}
       </td>
       <td>${Utils.formatDateTH(inv.createdAt)}</td>
@@ -504,10 +523,48 @@ function render() {
           ${inv.importedFrom === 'pdf' ? `<button class="btn btn-outline-danger" onclick="viewPdfInvoice('${inv.invoiceNumber}')" title="ดูไฟล์ PDF ต้นฉบับ"><i class="bi bi-file-earmark-pdf"></i></button>` : ''}
           <a class="btn btn-outline-warning" href="invoice-create.html?edit=${inv.invoiceNumber}" title="แก้ไข"><i class="bi bi-pencil"></i></a>
           <a class="btn btn-outline-success" href="payments.html?inv=${inv.invoiceNumber}" title="ชำระเงิน"><i class="bi bi-cash-coin"></i></a>
-          <button class="btn btn-outline-danger" onclick="deleteInvoice('${inv.invoiceNumber}')" title="ลบ"><i class="bi bi-trash"></i></button>
+          <button class="btn btn-outline-danger" onclick="deleteInvoice('${inv.invoiceNumber}',${pages})"
+                  title="${pages > 1 ? 'ลบทุกหน้า' : 'ลบ'}">
+            <i class="bi bi-trash"></i>${pages > 1 ? ' <small>ทั้งหมด</small>' : ''}
+          </button>
         </div>
       </td>
     </tr>`;
+
+    // Expanded sub-rows: one row per page with individual view/edit/delete
+    if (pages > 1 && isExp) {
+      html += allPages.map((pg, idx) => {
+        const pgSubtotal = Array.isArray(pg.items)
+          ? pg.items.reduce((s, it) => s + (parseFloat(it.qty)||0) * (parseFloat(it.price)||0), 0)
+          : 0;
+        const pgItemSummary = Array.isArray(pg.items) && pg.items.length
+          ? pg.items.filter(it => it.name).slice(0, 2).map(it => it.name).join(', ') + (pg.items.length > 2 ? '…' : '')
+          : '—';
+        const pgNum = pg.page || (idx + 1);
+        return `<tr class="table-light" data-parent="${inv.invoiceNumber}" style="font-size:12px">
+          <td class="sel-chk-cell ${_selMode ? '' : 'd-none'}"></td>
+          <td style="border-left:3px solid #0d6efd; padding-left:20px; color:#666">
+            ↳ หน้า ${pgNum}
+          </td>
+          <td class="text-muted">${Utils.formatDateTH(pg.createdAt)}</td>
+          <td class="text-muted">${pgItemSummary}</td>
+          <td class="d-none d-md-table-cell"></td>
+          <td class="text-end d-none d-md-table-cell text-muted">฿${Utils.formatNumber(pgSubtotal)}</td>
+          <td class="d-none d-md-table-cell"></td>
+          <td></td>
+          <td></td>
+          <td class="text-center sel-action-cell${_selMode ? ' d-none' : ''}">
+            <div class="btn-group btn-group-sm">
+              <a class="btn btn-outline-primary btn-sm" href="invoice-create.html?view=${inv.invoiceNumber}" title="ดู/พิมพ์"><i class="bi bi-eye"></i></a>
+              <a class="btn btn-outline-warning btn-sm" href="invoice-create.html?edit=${inv.invoiceNumber}" title="แก้ไข"><i class="bi bi-pencil"></i></a>
+              <button class="btn btn-outline-danger btn-sm" onclick="deleteInvoicePage('${pg.id}','${inv.invoiceNumber}',${pgNum})" title="ลบหน้านี้"><i class="bi bi-trash"></i></button>
+            </div>
+          </td>
+        </tr>`;
+      }).join('');
+    }
+
+    return html;
   }).join('');
 
   // Update toolbar count (reflects cross-page selection)
@@ -528,13 +585,39 @@ function render() {
     </div>`;
 }
 
-function deleteInvoice(num) {
-  if (!confirm(`ลบใบกำกับ "${num}" และข้อมูลทั้งหมดใช่หรือไม่?\nการลบไม่สามารถกู้คืนได้`)) return;
+function deleteInvoice(num, pageCount) {
+  const pc  = pageCount || DB.getInvoicesByNumber(num).length || 1;
+  const msg = pc > 1
+    ? `ลบใบกำกับ "${num}" ทั้ง ${pc} หน้า และข้อมูลทั้งหมดใช่หรือไม่?\nการลบไม่สามารถกู้คืนได้`
+    : `ลบใบกำกับ "${num}" และข้อมูลทั้งหมดใช่หรือไม่?\nการลบไม่สามารถกู้คืนได้`;
+  if (!confirm(msg)) return;
   const all = DB.getInvoices().filter(i => i.invoiceNumber !== num);
   DB.saveInvoices(all);
   DB.removeCapDeductionsByInvoice(num);
   DB.logActivity(session.userId, session.username, 'ลบใบกำกับ', { invoiceNumber: num });
   Utils.showAlert(`ลบใบกำกับ ${num} แล้ว`, 'warning');
+  _expandedNums.delete(num);
+  render();
+}
+
+function toggleInvExpand(num) {
+  if (_expandedNums.has(num)) _expandedNums.delete(num);
+  else _expandedNums.add(num);
+  render();
+}
+
+function deleteInvoicePage(pageId, invoiceNumber, pageNum) {
+  // If this is the last page, delete the whole invoice instead
+  const remaining = DB.getInvoicesByNumber(invoiceNumber);
+  if (remaining.length <= 1) {
+    if (!confirm(`ลบใบกำกับ "${invoiceNumber}" ใช่หรือไม่?\n(หน้า ${pageNum} เป็นหน้าสุดท้าย — จะลบใบกำกับนี้ทั้งหมด)\nการลบไม่สามารถกู้คืนได้`)) return;
+    deleteInvoice(invoiceNumber, 1);
+    return;
+  }
+  if (!confirm(`ลบหน้า ${pageNum} ของใบกำกับ "${invoiceNumber}" ใช่หรือไม่?\nการลบไม่สามารถกู้คืนได้`)) return;
+  DB.deleteInvoice(pageId);
+  DB.logActivity(session.userId, session.username, 'ลบหน้าใบกำกับ', { invoiceNumber, pageId, pageNum });
+  Utils.showAlert(`ลบหน้า ${pageNum} ของ ${invoiceNumber} แล้ว`, 'warning');
   render();
 }
 
