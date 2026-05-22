@@ -1299,6 +1299,30 @@ function renderExistingPayments(invNum) {
           </div>
         </div>` : '';
 
+      // ── Payment time & bank→account line ───────────────────────────────────
+      const isTransfer = !!p.sourceBank;
+      const isCheque   = !!p.chequeNo;
+      const isCashPay  = !isTransfer && !isCheque;
+
+      let payTimeHtml = '';
+      if (isCashPay) {
+        payTimeHtml = `<div class="small text-muted mt-1"><i class="bi bi-clock me-1"></i>เวลาบันทึก: ${Utils.formatDateTimeTH(p.createdAt)}</div>`;
+      } else if (isTransfer && p.transferDate) {
+        payTimeHtml = `<div class="small mt-1"><i class="bi bi-clock me-1"></i>เวลาโอน: <strong>${Utils.formatDateTimeTH(p.transferDate)}</strong></div>`;
+      } else if (isCheque && p.chequeDate) {
+        payTimeHtml = `<div class="small mt-1"><i class="bi bi-calendar me-1"></i>วันที่บนเช็ค: <strong>${Utils.formatDateTH(p.chequeDate)}</strong></div>`;
+      }
+
+      const bankAccountLine = isTransfer
+        ? `${Utils.getBankName(p.sourceBank)} → ${p.accountName || Utils.getBankName(p.destBank)}`
+        : isCheque
+          ? `เช็ค#${p.chequeNo}${p.chequeBank ? ' · ' + Utils.getBankName(p.chequeBank) : ''} → ${p.accountName || ''}`
+          : '';
+
+      const savingTimeLine = !isCashPay
+        ? `<div class="mt-2 pt-1 border-top text-muted" style="font-size:11px"><i class="bi bi-floppy me-1"></i>บันทึกเมื่อ ${Utils.formatDateTimeTH(p.createdAt)}</div>`
+        : '';
+
       return `
       <div class="border rounded p-2 mb-2 ${isCancelled ? 'opacity-75 border-danger' : ''}">
         <div class="d-flex justify-content-between align-items-start flex-wrap gap-1">
@@ -1308,11 +1332,10 @@ function renderExistingPayments(invNum) {
             <strong class="${isCancelled ? 'text-decoration-line-through text-muted' : ''}">
               ฿${Utils.formatNumber(p.amount)}
             </strong>
-            <span class="text-muted small ms-2">${Utils.formatDateTimeTH(p.createdAt)}</span>
-            ${p.cashCollector ? `<span class="text-muted small">(${p.cashCollector})</span>` : ''}
-            ${p.sourceBank    ? `<span class="text-muted small"> ${Utils.getBankName(p.sourceBank)} → ${Utils.getBankName(p.destBank)}</span>` : ''}
-            ${p.chequeNo  ? `<span class="text-muted small"> เช็ค#${p.chequeNo}${p.chequeDate ? ' วันที่เช็ค ' + Utils.formatDateTH(p.chequeDate) : ''}</span>` : ''}
-            ${p.notes         ? `<span class="text-muted small"> | ${p.notes}</span>` : ''}
+            ${p.cashCollector ? `<span class="text-muted small ms-1">(${p.cashCollector})</span>` : ''}
+            ${payTimeHtml}
+            ${bankAccountLine ? `<div class="text-muted small mt-1">${bankAccountLine}</div>` : ''}
+            ${p.notes ? `<div class="text-muted small mt-1">${p.notes}</div>` : ''}
             ${isCancelled && p.cancelNote
               ? `<div class="text-danger small mt-1"><i class="bi bi-chat-left-text me-1"></i>เหตุผลยกเลิก: ${p.cancelNote}</div>` : ''}
             ${isCancelled
@@ -1342,6 +1365,7 @@ function renderExistingPayments(invNum) {
         </div>
         ${imgs ? `<div class="d-flex gap-2 mt-1 flex-wrap">${imgs}</div>` : ''}
         ${timelineHtml}
+        ${savingTimeLine}
       </div>`;
     }).join('');
   _loadDrvImages();
