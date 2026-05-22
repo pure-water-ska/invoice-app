@@ -498,9 +498,20 @@ var Sync = {
       }
 
       // Update cached server IDs to reflect the new local state.
-      // Persist for invoices so archive records remain tombstone-trackable across page loads.
-      this._serverIds[colName] = new Set(localIds);
-      if (colName === 'invoices') this._saveServerIds(colName);
+      // Invoices: MERGE into the persisted set instead of replacing it.
+      // Replacing would erase archive IDs that are not currently in localStorage (those
+      // outside the ARCHIVE_MONTHS pull window) on every write — tombstone detection for
+      // archived invoices would then silently stop working.
+      // Rule: only IDs in syncDeletedIds are removed; all others (including archive) are kept.
+      if (colName === 'invoices') {
+        const persisted = this._loadSavedServerIds(colName);
+        syncDeletedIds.forEach(id => persisted.delete(id));   // remove just-deleted IDs
+        localIds.forEach(id => persisted.add(id));             // add / refresh current IDs
+        this._serverIds[colName] = persisted;
+        this._saveServerIds(colName);
+      } else {
+        this._serverIds[colName] = new Set(localIds);
+      }
 
       // ── ② Upsert + delete in ONE atomic batch ────────────────────────────
       // Deletions are in the same batch as upserts so Firestore transitions
@@ -701,7 +712,11 @@ var Sync = {
               const now = Date.now();
               const localOnly = localArr.filter(r =>
                 r.id && !fsIds.has(r.id) &&
-                (!stones[r.id] || now - stones[r.id] > this._tombstoneTTL)
+                (!stones[r.id] || now - stones[r.id] > this._tombstoneTTL) &&
+                // Skip archive records (createdAt before the pull cutoff) — they already
+                // exist in Firestore and are simply absent from the date-filtered snapshot.
+                // Pushing them back on every page load wastes Firestore write quota.
+                !(colName === 'invoices' && cutoffISO && r.createdAt && r.createdAt < cutoffISO)
               );
               if (localOnly.length > 0) {
                 console.log(`[Sync] Merge: keeping ${localOnly.length} local-only ${colName} records`);
@@ -838,7 +853,17 @@ var Sync = {
 
     // Listen to collection keys
     for (const [lsKey, colName] of Object.entries(this.COLLECTIONS)) {
-      const unsub = base.collection(colName)
+      // ── Invoice archive: apply the same ARCHIVE_MONTHS window used in _pullAll() ──
+      // Without this, the very first live snapshot delivers ALL historical invoices and
+      // overwrites localStorage — completely bypassing the date-filtered _pullAll().
+      // Both the pull query and the listener must use the same cutoff so they stay in sync.
+      const listenerCutoffISO = colName === 'invoices'
+        ? new Date(Date.now() - this.ARCHIVE_MONTHS * 30.44 * 24 * 3600 * 1000).toISOString()
+        : null;
+      const colRef = listenerCutoffISO
+        ? base.collection(colName).where('createdAt', '>=', listenerCutoffISO)
+        : base.collection(colName);
+      const unsub = colRef
         .onSnapshot(
           { includeMetadataChanges: true },   // fires on fromCache transitions too
           async (snap) => {
@@ -996,14 +1021,28 @@ var Sync = {
       wt_returns:   'คืนสินค้า',
     }[lsKey];
 
+    // Only show toast when the current page actually uses this key.
+    // Prevents e.g. "คืนสินค้า synced" appearing on the invoices page.
+    const page = (location.pathname.split('/').pop() || 'index.html').replace(/\?.*$/, '');
+    const PAGE_KEYS = {
+      'returns.html':   ['wt_returns'],
+      'invoices.html':  ['wt_invoices'],
+      'payments.html':  ['wt_invoices', 'wt_payments'],
+      'products.html':  ['wt_products', 'wt_pricing'],
+      'customers.html': ['wt_customers'],
+      'dashboard.html': ['wt_invoices', 'wt_payments'],
+    };
+    const relevantKeys = PAGE_KEYS[page];
+    const isRelevant   = !relevantKeys || relevantKeys.includes(lsKey);
+
     // Show toast
-    if (label) {
+    if (label && isRelevant) {
       let toast = document.getElementById('syncToast');
       if (!toast) {
         toast = document.createElement('div');
         toast.id = 'syncToast';
         toast.style.cssText = 'position:fixed;bottom:1rem;right:1rem;z-index:9999;min-width:180px;';
-        toast.className = 'toast show align-items-center text-white border-0';
+        toast.className = 'toast show align-items-center text-white bg-dark border-0';
         toast.setAttribute('role', 'alert');
         document.body.appendChild(toast);
       }
