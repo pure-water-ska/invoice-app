@@ -49,7 +49,8 @@ var Sync = {
     'wt_users':           'users_cfg',      // avoid name clash with Firebase auth
     'wt_returns':         'returns',
     'wt_versions':        'versions',
-    'wt_pay_methods':     'pay_methods',
+    'wt_pay_methods':          'pay_methods',
+    'wt_transfer_accounts':    'transfer_accounts',
     'wt_cap_colors':      'cap_colors',
     'wt_cap_receipts':    'cap_receipts',
     'wt_cap_deductions':  'cap_deductions',

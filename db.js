@@ -13,13 +13,14 @@ const DB = {
     COUNTER:     'wt_inv_counter',
     SETTINGS:    'wt_settings',
     VERSIONS:    'wt_versions',
-    PAY_METHODS:      'wt_pay_methods',
-    CAP_COLORS:       'wt_cap_colors',
-    CAP_RECEIPTS:     'wt_cap_receipts',
-    CAP_DEDUCTIONS:   'wt_cap_deductions',
-    PRICE_HISTORY:    'wt_price_history',
-    ERRORS:           'wt_errors',
-    RETURNS:          'wt_returns'
+    PAY_METHODS:          'wt_pay_methods',
+    TRANSFER_ACCOUNTS:    'wt_transfer_accounts',
+    CAP_COLORS:           'wt_cap_colors',
+    CAP_RECEIPTS:         'wt_cap_receipts',
+    CAP_DEDUCTIONS:       'wt_cap_deductions',
+    PRICE_HISTORY:        'wt_price_history',
+    ERRORS:               'wt_errors',
+    RETURNS:              'wt_returns'
   },
 
   // ── In-memory read cache — eliminates repeated JSON.parse on the same key ──
@@ -72,7 +73,26 @@ const DB = {
     const stored = (typeof LZString !== 'undefined')
       ? LZString.compressToUTF16(json)
       : json;
-    localStorage.setItem(key, stored);
+    try {
+      localStorage.setItem(key, stored);
+    } catch (e) {
+      // QuotaExceededError: localStorage is full — data stays in cache (in-memory for
+      // this session) but is NOT persisted.  Show a sticky banner so the user knows,
+      // and record it in the error log using a raw write (avoids re-entering _set).
+      if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
+        console.error('[DB] localStorage full — could not persist', key);
+        this._warnQuota(key);
+        try {
+          const raw  = localStorage.getItem(this.K.ERRORS);
+          const errs = raw ? JSON.parse(raw) : [];
+          errs.unshift({ type: 'QUOTA_EXCEEDED', message: `localStorage full — could not save ${key}`, ts: new Date().toISOString() });
+          if (errs.length > 200) errs.length = 200;
+          localStorage.setItem(this.K.ERRORS, JSON.stringify(errs));
+        } catch {}  // if error log write also fails, silently drop — don't loop
+      } else {
+        throw e;   // unexpected error — let it surface normally
+      }
+    }
     // Push to Firestore sync if available (sync.js loaded + ready, or queue if not yet ready)
     if (window.Sync) {
       if (Sync.ready) Sync.push(key, val);
@@ -80,6 +100,27 @@ const DB = {
     }
     // Queue upload to Google Drive (debounced, no-op if Drive not connected)
     if (window.DriveDbSync) DriveDbSync.queueUpload(key, val);
+  },
+
+  // ── Sticky banner shown when localStorage is full ─────────────────────────
+  _warnQuota(key) {
+    const id = 'wt-quota-banner';
+    if (document.getElementById(id)) return;    // already showing
+    const banner = document.createElement('div');
+    banner.id = id;
+    banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:99999;' +
+      'background:#dc3545;color:#fff;padding:10px 16px;font-size:13px;' +
+      'display:flex;align-items:center;gap:8px;';
+    banner.innerHTML =
+      '<i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>' +
+      '<strong>พื้นที่จัดเก็บเต็ม</strong> — ไม่สามารถบันทึก ' +
+      '<code style="background:rgba(0,0,0,.2);padding:1px 5px;border-radius:3px;">' + key + '</code>' +
+      ' &nbsp;กรุณาไปที่ <strong>ตั้งค่า → แก้ไขปัญหา</strong> เพื่อล้างข้อมูลเก่า' +
+      '<button onclick="this.parentElement.remove()" style="margin-left:auto;background:none;' +
+      'border:1px solid rgba(255,255,255,.5);color:#fff;padding:3px 10px;' +
+      'border-radius:4px;cursor:pointer;font-size:13px;">ปิด</button>';
+    const attach = () => document.body.appendChild(banner);
+    document.body ? attach() : document.addEventListener('DOMContentLoaded', attach);
   },
   // Called by sync.js when Firestore/Drive writes localStorage directly
   invalidate(key) {
@@ -101,8 +142,25 @@ const DB = {
   saveSettings(s) { this._set(this.K.SETTINGS, s); },
   getReceivers() { const s = this.getSettings(); return Array.isArray(s.receivers) ? s.receivers : []; },
   saveReceivers(arr) { const s = this.getSettings(); s.receivers = arr; this.saveSettings(s); },
-  getTransferAccounts() { const s = this.getSettings(); return Array.isArray(s.transferAccounts) ? s.transferAccounts : []; },
-  saveTransferAccounts(arr) { const s = this.getSettings(); s.transferAccounts = arr; this.saveSettings(s); },
+  getTransferAccounts() {
+    // Stored in its own key (wt_transfer_accounts) so a settings sync from another device
+    // can never wipe the list.  One-time migration: if the old location (settings.transferAccounts)
+    // has data and the new key is empty, promote it automatically.
+    const stored = this._getObj(this.K.TRANSFER_ACCOUNTS, null);
+    if (Array.isArray(stored)) return stored;
+    // Migration: pull from old settings location, save to new key, clear old location
+    const s = this.getSettings();
+    if (Array.isArray(s.transferAccounts) && s.transferAccounts.length > 0) {
+      const migrated = s.transferAccounts;
+      this._set(this.K.TRANSFER_ACCOUNTS, migrated);
+      delete s.transferAccounts;
+      this.saveSettings(s);
+      console.log('[DB] Migrated transferAccounts → wt_transfer_accounts');
+      return migrated;
+    }
+    return [];
+  },
+  saveTransferAccounts(arr) { this._set(this.K.TRANSFER_ACCOUNTS, arr); },
 
   // ─── PAYMENT METHODS ─────────────────────────────────────────────────────────
   getPayMethods() {
@@ -833,7 +891,7 @@ const DB = {
   _SNAP_DATA_KEYS: [
     'wt_users','wt_customers','wt_products','wt_pricing','wt_invoices',
     'wt_payments','wt_inv_counter','wt_settings','wt_versions','wt_pay_methods',
-    'wt_cap_colors','wt_cap_receipts','wt_cap_deductions','wt_price_history','wt_returns'
+    'wt_transfer_accounts','wt_cap_colors','wt_cap_receipts','wt_cap_deductions','wt_price_history','wt_returns'
   ],
 
   getSnapshots()       { return this._get('wt_snapshots'); },
