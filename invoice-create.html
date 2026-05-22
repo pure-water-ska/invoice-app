@@ -411,6 +411,14 @@ window.addEventListener('DOMContentLoaded', () => {
   // editCount against _editBaseEditCount (set in loadEdit) to decide
   // whether the remote change touches OUR invoice.
   window.addEventListener('sync:updated', (e) => {
+    // ── Admin settings change: re-render preview header ──────────────────────
+    if (e.detail?.key === 'wt_settings' && currentInvNum && (viewMode || editMode)) {
+      const pages = DB.getInvoices().filter(i => i.invoiceNumber === currentInvNum);
+      if (pages.length) renderPreview(pages);
+      return;
+    }
+
+    // ── Concurrent-edit conflict detection ───────────────────────────────────
     if (!editMode || _editSaving) return;
     if (e.detail?.key !== 'wt_invoices') return;
     const remotePages = DB.getInvoices().filter(i => i.invoiceNumber === currentInvNum);

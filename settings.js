@@ -22,6 +22,14 @@ window.addEventListener('DOMContentLoaded', () => {
     loadAutoBackup();        // reload auto-backup toggle
     loadStats();             // reload invoice/payment counts
   });
+
+  // ── Admin settings broadcast: re-render form when Firestore pushes a remote change ──
+  window.addEventListener('sync:updated', (e) => {
+    if (e.detail?.key !== 'wt_settings') return;
+    loadCompanySettings();
+    loadAutoBackup();
+    Utils.showAlert('<i class="bi bi-person-check me-1"></i>ผู้ดูแลระบบอัปเดตการตั้งค่าระบบแล้ว', 'info');
+  });
   ['companyName','address','phone'].forEach(id =>
     document.getElementById(id).addEventListener('input', updatePreview)
   );
