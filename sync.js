@@ -484,12 +484,41 @@ var Sync = {
     const colName = this.COLLECTIONS[key];
 
     if (docName) {
-      // ── Document write ──────────────────────────────────────────────────
-      await base.collection('data').doc(docName).set({
-        d:  val,
-        ts: firebase.firestore.FieldValue.serverTimestamp(),
-        by: this._deviceId,   // per-device ID so remote devices can detect this isn't their own echo
-      });
+      const docRef = base.collection('data').doc(docName);
+
+      if (Array.isArray(val)) {
+        // ── Array document: replace the whole `d` field ──────────────────
+        // Arrays have no meaningful sub-key identity — replace entirely.
+        await docRef.set({
+          d:  val,
+          ts: firebase.firestore.FieldValue.serverTimestamp(),
+          by: this._deviceId,
+        });
+
+      } else {
+        // ── Object document (e.g. wt_settings, wt_inv_counter): field-path update ──
+        // Instead of replacing the whole `d` object, write each sub-key via dot-notation
+        // (`d.companyName`, `d.autoBackup`, …).  Firestore merges at the field level, so:
+        //   • An old-app-version device saving settings without knowing about `autoBackup`
+        //     leaves `d.autoBackup` in Firestore completely untouched.
+        //   • Two devices editing different sub-keys simultaneously each keep their change.
+        // Falls back to set() on 'not-found' (first bootstrap write for this org).
+        const updates = {
+          ts: firebase.firestore.FieldValue.serverTimestamp(),
+          by: this._deviceId,
+        };
+        for (const [k, v] of Object.entries(val ?? {})) {
+          updates[`d.${k}`] = v;
+        }
+        try {
+          await docRef.update(updates);
+        } catch (e) {
+          if (e.code === 'not-found') {
+            // Document doesn't exist yet — create it with the full value
+            await docRef.set({ d: val, ts: firebase.firestore.FieldValue.serverTimestamp(), by: this._deviceId });
+          } else { throw e; }
+        }
+      }
 
     } else if (colName) {
       // ── Collection write: upsert each record as its own Firestore doc ──────

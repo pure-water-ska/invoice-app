@@ -84,6 +84,9 @@ Firestore bidirectional sync. Two categories of data with different Firestore la
 
 #### Write path optimisations (all three active)
 
+**⓪ Object DOCUMENTS use field-path updates**
+Object-type DOCUMENTS (`wt_settings`, `wt_inv_counter`) are written via Firestore `update()` with dot-notation paths (`d.companyName`, `d.autoBackup`, …) instead of `set({d: wholeObject})`. Firestore merges at the field level, so concurrent writes from different devices each preserve their own sub-keys. Falls back to `set()` if the document doesn't exist yet (bootstrap). Array-type documents still use `set()` since arrays have no sub-key identity.
+
 **① Debounce DOCUMENTS (600 ms)**
 DOCUMENTS writes are debounced 600 ms (same as COLLECTIONS). Rapid saves within the window collapse into one Firestore write. Pending timers are flushed to the offline queue on `beforeunload` so no data is lost on navigation.
 
