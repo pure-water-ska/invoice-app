@@ -28,8 +28,11 @@ var Sync = {
   _pullIds:       {},                    // { [colName]: Set<id> } IDs seen at _pullAll time — used by listener to distinguish "new this session" vs "deleted on another device"
   _lastPushedIds: {},                    // { [colName]: Set<id> } IDs from the most recent push() call — used to detect same-debounce-window add→delete (where ADD is cancelled and _serverIds never gets the new ID)
   _pushDebounce:  {},                    // { [lsKey]: timeoutId } — debounce rapid collection writes
+  _docDebounce:   {},                    // { [lsKey]: timeoutId } — debounce DOCUMENTS writes (opt ①)
   _pendingWrite:  {},                    // { [lsKey]: boolean } — true while a debounced write is in-flight; listener skips snapshots during this window to avoid overwriting just-modified local data (e.g. cancelled payment)
   _lastFromCache: undefined,             // last known snapshot.metadata.fromCache value — deduplicates sync:connectionstate events
+  _lastDocJson:   {},                    // { [lsKey]: string } — JSON fingerprint of last written DOCUMENT; skip write if unchanged (opt ②)
+  _lastSyncedRecs:{},                    // { [colName]: Map<id,string> } — JSON fingerprint per record; diff to send only changed records (opt ③)
   ARCHIVE_MONTHS:    6,                  // invoices older than this are not fetched on page load (date-filtered _pullAll)
   _persistedSidsKey: 'wt_sync_sids',    // localStorage key for per-collection Set<id> that survives page reloads — enables tombstone-deletion of archived invoices outside the pull window
 
@@ -359,10 +362,22 @@ var Sync = {
     // debounce timeout and the record never reaches Firestore.  The queue is
     // flushed by _flushQueueNow() on the NEXT page before _pullAll() runs.
     window.addEventListener('beforeunload', () => {
+      // Flush pending COLLECTIONS debounce timers
       for (const [key, timerId] of Object.entries(this._pushDebounce)) {
         if (timerId != null) {
           clearTimeout(timerId);
           delete this._pushDebounce[key];
+          const val = (window.DB && DB._cache[key] !== undefined) ? DB._cache[key] : null;
+          if (val !== null && val !== undefined) {
+            this._enqueue(key, val);
+          }
+        }
+      }
+      // Flush pending DOCUMENTS debounce timers (opt ①)
+      for (const [key, timerId] of Object.entries(this._docDebounce)) {
+        if (timerId != null) {
+          clearTimeout(timerId);
+          delete this._docDebounce[key];
           const val = (window.DB && DB._cache[key] !== undefined) ? DB._cache[key] : null;
           if (val !== null && val !== undefined) {
             this._enqueue(key, val);
@@ -438,11 +453,28 @@ var Sync = {
       }, 600);
       return;
     }
-    this._writeKey(key, val).catch(e => {
-      console.warn('[Sync] push failed, queuing:', key, e.message);
-      this._enqueue(key, val);
-      this._badge('pending');
-    });
+    // ── Opt ①②: Debounce DOCUMENTS writes + skip if content unchanged ──────────
+    // Mirrors the COLLECTION debounce: collapses rapid saves into one Firestore write.
+    // At fire time we also compare a JSON fingerprint — if nothing changed since the
+    // last successful write (e.g. a settings re-render that didn't touch relevant keys,
+    // or a page navigation that re-saves the same data) we skip the round-trip entirely.
+    clearTimeout(this._docDebounce[key]);
+    this._docDebounce[key] = setTimeout(() => {
+      this._docDebounce[key] = null;
+      const fresh     = window.DB ? (DB._cache[key] !== undefined ? DB._cache[key] : val) : val;
+      const freshJson = JSON.stringify(fresh);
+      if (freshJson === this._lastDocJson[key]) {
+        console.log('[Sync] Doc unchanged, skip write:', this.DOCUMENTS[key]);
+        return;
+      }
+      this._writeKey(key, fresh)
+        .then(() => { this._lastDocJson[key] = freshJson; })
+        .catch(e => {
+          console.warn('[Sync] push failed, queuing:', key, e.message);
+          this._enqueue(key, fresh);
+          this._badge('pending');
+        });
+    }, 600);
   },
 
   // ── Write one key to Firestore ─────────────────────────────────────────────
@@ -514,6 +546,21 @@ var Sync = {
         this._serverIds[colName] = new Set(localIds);
       }
 
+      // ── Opt ③: diff against last-synced fingerprints — only write changed/new records ──
+      // _lastSyncedRecs[colName] is a Map<id, jsonFingerprint> seeded by _pullAll() and
+      // updated after every write.  If a record's content matches what was last written to
+      // Firestore we skip its batch.set() entirely.
+      // Records absent from the map (e.g. first write on a fresh page load that used the
+      // delta-skip path) are treated as new and always written — same as current behaviour.
+      const lastRecs  = this._lastSyncedRecs[colName] || new Map();
+      const toUpsert  = arr.filter(r => {
+        if (!r.id) return false;
+        const prev = lastRecs.get(r.id);
+        if (prev === undefined) return true;                // not yet seen → write
+        const { _by, _ts, ...rClean } = r;
+        return JSON.stringify(rClean) !== prev;             // content changed → write
+      });
+
       // ── ② Upsert + delete in ONE atomic batch ────────────────────────────
       // Deletions are in the same batch as upserts so Firestore transitions
       // to the correct state atomically.  The old two-step approach (upsert
@@ -526,8 +573,7 @@ var Sync = {
       let ops   = 0;
       const commit = async () => { await batch.commit(); batch = this._db.batch(); ops = 0; };
 
-      for (const record of arr) {
-        if (!record.id) continue;
+      for (const record of toUpsert) {
         batch.set(colRef.doc(record.id), {
           ...record,
           _by: this._deviceId,   // per-device ID so remote devices can detect this isn't their own echo
@@ -550,6 +596,21 @@ var Sync = {
         // Tombstones served their purpose — Firestore now reflects the
         // deletion, so clear them to avoid false-blocking future restores.
         if (syncDeletedIds.length > 0) this._clearTombstones(colName, syncDeletedIds);
+      }
+
+      // Update fingerprint map for ALL current records so the NEXT push() can diff correctly.
+      // Done unconditionally (even if ops === 0) so unchanged records also get seeded into
+      // the map — without this, they'd be treated as new on every subsequent write.
+      if (!this._lastSyncedRecs[colName]) this._lastSyncedRecs[colName] = new Map();
+      const recFpMap = this._lastSyncedRecs[colName];
+      for (const r of arr) {
+        if (!r.id) continue;
+        const { _by, _ts, ...rClean } = r;
+        recFpMap.set(r.id, JSON.stringify(rClean));
+      }
+      for (const id of syncDeletedIds) recFpMap.delete(id);
+      if (toUpsert.length > 0 || syncDeletedIds.length > 0) {
+        console.log(`[Sync] ${colName}: ${toUpsert.length} upserted, ${syncDeletedIds.length} deleted, ${arr.length - toUpsert.length} unchanged (skipped)`);
       }
     }
 
@@ -616,6 +677,7 @@ var Sync = {
                   await this._writeKey(lsKey, merged);
                   localStorage.setItem(lsKey, JSON.stringify(merged));
                   if (window.DB) DB.invalidate(lsKey);
+                  this._lastDocJson[lsKey] = JSON.stringify(merged); // opt ②: seed fingerprint
                   return; // skip plain fsVal write below
                 }
               }
@@ -624,6 +686,7 @@ var Sync = {
           // Write plain JSON — _lzRead first-char guard handles this on next read
           localStorage.setItem(lsKey, JSON.stringify(fsVal));
           if (window.DB) DB.invalidate(lsKey);
+          this._lastDocJson[lsKey] = JSON.stringify(fsVal); // opt ②: seed fingerprint so a re-save of pulled data is skipped
         } else {
           // Firestore doc missing → bootstrap: push local data up
           try {
@@ -738,12 +801,24 @@ var Sync = {
                 const merged = [...fsArr, ...toSync, ...toKeepLocal];
                 localStorage.setItem(lsKey, JSON.stringify(merged));
                 if (window.DB) DB.invalidate(lsKey);
+                // opt ③: seed fingerprints from merged result
+                if (!this._lastSyncedRecs[colName]) this._lastSyncedRecs[colName] = new Map();
+                for (const r of merged) {
+                  if (r.id) { const { _by, _ts, ...rc } = r; this._lastSyncedRecs[colName].set(r.id, JSON.stringify(rc)); }
+                }
                 return; // skip the plain fsArr write below
               }
             }
           } catch {}
           localStorage.setItem(lsKey, JSON.stringify(fsArr));
           if (window.DB) DB.invalidate(lsKey);
+          // opt ③: seed fingerprints from pulled Firestore records so the first write
+          // after page load only sends records that actually changed locally.
+          if (!this._lastSyncedRecs[colName]) this._lastSyncedRecs[colName] = new Map();
+          for (const d of snap.docs) {
+            const { _by, _ts, ...rec } = d.data();
+            this._lastSyncedRecs[colName].set(d.id, JSON.stringify(rec));
+          }
         } else {
           // Firestore empty → bootstrap: push local data up to Firestore
           // BUG-FIX: must use _localRead() — localStorage may contain LZString-compressed data
