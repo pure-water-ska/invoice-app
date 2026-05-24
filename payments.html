@@ -781,9 +781,9 @@ window.addEventListener('sync:updated', (e) => {
   if (['wt_payments', 'wt_invoices', 'wt_customers'].includes(e.detail?.key)) render();
 });
 window.addEventListener('DOMContentLoaded', () => {
+  // Init modals and date pickers first (sync, no data needed)
   payModal              = new bootstrap.Modal(document.getElementById('payModal'));
   overpayModal          = new bootstrap.Modal(document.getElementById('overpayModal'));
-  // backdrop:false lets this sub-modal open on top of payModal without conflict
   transferAccountModal  = new bootstrap.Modal(document.getElementById('transferAccountModal'), { backdrop: false });
   cancelPayModal        = new bootstrap.Modal(document.getElementById('cancelPayModal'));
   dateConfirmModal      = new bootstrap.Modal(document.getElementById('dateConfirmModal'));
@@ -791,33 +791,36 @@ window.addEventListener('DOMContentLoaded', () => {
   multiPayModal         = new bootstrap.Modal(document.getElementById('multiPayModal'));
   _fpMultiTransfer      = BEDate.byId('multiTransferDate');
   _fpMultiCheque        = BEDate.byId('multiChequeDate');
-
-  document.getElementById('bankDatalist').innerHTML = Utils.bankDatalistOptions();
-
-  DB.getCustomers().sort((a,b) => a.name.localeCompare(b.name,'th')).forEach(c => {
-    document.getElementById('custNameDatalist').innerHTML +=
-      `<option value="${c.name}">`;
-  });
-
-  const params = new URLSearchParams(location.search);
-  if (params.get('inv'))  document.getElementById('searchInv').value = params.get('inv');
-  if (params.get('cust')) {
-    const custId = params.get('cust');
-    const cust = DB.getCustomerById(custId);
-    if (cust) document.getElementById('filterCustomer').value = cust.name;
-  }
-
-  document.getElementById('filterStatus').addEventListener('input', render);
-  ['filterDestAcct','filterDestBank','filterSourceBank'].forEach(id =>
-    document.getElementById(id).addEventListener('change', render));
-  ['searchInv','filterCustomer'].forEach(id =>
-    document.getElementById(id).addEventListener('input', Utils.debounce(render, 200)));
-  BEDate.byId('filterFrom', { onChange: render });
-  BEDate.byId('filterTo',   { onChange: render });
   _fpPayDate      = BEDate.byId('payDate',          { onChange: checkPayDate });
   _fpCheqDate     = BEDate.byId('payChequeDate');
   _fpTransferDate = BEDate.byId('payTransferDateBE');
-  render();
+
+  // Wait for IDB-overflow data before rendering data-dependent UI
+  DB.ready.then(() => {
+    document.getElementById('bankDatalist').innerHTML = Utils.bankDatalistOptions();
+
+    DB.getCustomers().sort((a,b) => a.name.localeCompare(b.name,'th')).forEach(c => {
+      document.getElementById('custNameDatalist').innerHTML +=
+        `<option value="${c.name}">`;
+    });
+
+    const params = new URLSearchParams(location.search);
+    if (params.get('inv'))  document.getElementById('searchInv').value = params.get('inv');
+    if (params.get('cust')) {
+      const custId = params.get('cust');
+      const cust = DB.getCustomerById(custId);
+      if (cust) document.getElementById('filterCustomer').value = cust.name;
+    }
+
+    document.getElementById('filterStatus').addEventListener('input', render);
+    ['filterDestAcct','filterDestBank','filterSourceBank'].forEach(id =>
+      document.getElementById(id).addEventListener('change', render));
+    ['searchInv','filterCustomer'].forEach(id =>
+      document.getElementById(id).addEventListener('input', Utils.debounce(render, 200)));
+    BEDate.byId('filterFrom', { onChange: render });
+    BEDate.byId('filterTo',   { onChange: render });
+    render();
+  });
 });
 
 let _fpPayDate, _fpCheqDate, _fpTransferDate;

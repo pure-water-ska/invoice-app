@@ -666,12 +666,53 @@ var Sync = {
     localStorage.setItem(this._lastSyncKey, new Date().toISOString());
   },
 
-  // ── Safe local read — handles LZString-compressed data ────────────────────
+  // ── Safe local read — handles LZString-compressed data + IDB overflow ──────
   // sync.js must NEVER read localStorage directly via JSON.parse(localStorage.getItem())
-  // because DB._set() now compresses values with LZString.  Always use this helper.
+  // because DB._set() compresses values with LZString.  Always use this helper.
+  // For IDB-overflow keys the value lives in DB._cache (loaded by preloadFromIDB).
   _localRead(lsKey) {
-    if (window.DB) return DB._lzRead(lsKey);          // decompresses if needed
+    if (window.DB) {
+      // IDB-overflow keys have no localStorage copy — read from _cache
+      if (DB._idbKeys && DB._idbKeys.has(lsKey)) {
+        const v = DB._cache[lsKey];
+        return (v !== null && v !== undefined) ? JSON.stringify(v) : null;
+      }
+      return DB._lzRead(lsKey);                       // decompresses if needed
+    }
     return localStorage.getItem(lsKey);               // fallback (no DB yet)
+  },
+
+  // ── Safe local write — writes app data to localStorage (or IDB on overflow) ─
+  // All sync.js writes of wt_* data must go through this helper so that
+  // IDB-overflow keys stay in IDB and DB._cache stays current.
+  _lsWrite(lsKey, data) {
+    // Always keep DB._cache current — reads within this tick see new data.
+    // DB.invalidate() will be a no-op for IDB keys (they don't have a localStorage
+    // copy to re-read from), so the cache set here is the lasting reference.
+    if (window.DB) DB._cache[lsKey] = data;
+
+    // Key already overflowed to IDB — write there, skip localStorage
+    if (window.DB && DB._idbKeys && DB._idbKeys.has(lsKey)) {
+      if (window.IDB) IDB.data.set(lsKey, data).catch(e => console.error('[Sync] IDB write failed', lsKey, e));
+      return;
+    }
+
+    // Write plain JSON (DB._lzRead's first-char guard handles this on next read)
+    try {
+      localStorage.setItem(lsKey, JSON.stringify(data));
+    } catch (e) {
+      if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
+        console.warn('[Sync] localStorage full — overflowing', lsKey, '→ IndexedDB');
+        if (window.DB) {
+          DB._idbKeys.add(lsKey);
+          DB._persistIdbKeys();
+          DB._notifyIdbOverflow(lsKey);
+        }
+        if (window.IDB) IDB.data.set(lsKey, data).catch(err => console.error('[Sync] IDB write failed', lsKey, err));
+      } else {
+        throw e;
+      }
+    }
   },
 
   // ── Pull ALL data from Firestore → localStorage (initial load) ─────────────
@@ -725,7 +766,7 @@ var Sync = {
                   // Push local-only records into the Firestore doc immediately
                   const merged = [...fsVal, ...localOnly];
                   await this._writeKey(lsKey, merged);
-                  localStorage.setItem(lsKey, JSON.stringify(merged));
+                  this._lsWrite(lsKey, merged);
                   if (window.DB) DB.invalidate(lsKey);
                   this._lastDocJson[lsKey] = JSON.stringify(merged); // opt ②: seed fingerprint
                   return; // skip plain fsVal write below
@@ -733,8 +774,8 @@ var Sync = {
               }
             } catch {}
           }
-          // Write plain JSON — _lzRead first-char guard handles this on next read
-          localStorage.setItem(lsKey, JSON.stringify(fsVal));
+          // Write via _lsWrite — handles IDB overflow transparently
+          this._lsWrite(lsKey, fsVal);
           if (window.DB) DB.invalidate(lsKey);
           this._lastDocJson[lsKey] = JSON.stringify(fsVal); // opt ②: seed fingerprint so a re-save of pulled data is skipped
         } else {
@@ -849,7 +890,7 @@ var Sync = {
                   try { await base.collection(colName).doc(rec.id).set({ ...rec, _by: this._deviceId, _ts: Date.now() }); } catch {}
                 }
                 const merged = [...fsArr, ...toSync, ...toKeepLocal];
-                localStorage.setItem(lsKey, JSON.stringify(merged));
+                this._lsWrite(lsKey, merged);
                 if (window.DB) DB.invalidate(lsKey);
                 // opt ③: seed fingerprints from merged result
                 if (!this._lastSyncedRecs[colName]) this._lastSyncedRecs[colName] = new Map();
@@ -860,7 +901,7 @@ var Sync = {
               }
             }
           } catch {}
-          localStorage.setItem(lsKey, JSON.stringify(fsArr));
+          this._lsWrite(lsKey, fsArr);
           if (window.DB) DB.invalidate(lsKey);
           // opt ③: seed fingerprints from pulled Firestore records so the first write
           // after page load only sends records that actually changed locally.
@@ -966,7 +1007,7 @@ var Sync = {
                     // Local has entries not yet in this Firestore snapshot — merge them in
                     // and push the merged array back so Firestore stays canonical.
                     const merged = [...fsVal, ...localOnly];
-                    localStorage.setItem(lsKey, JSON.stringify(merged));
+                    this._lsWrite(lsKey, merged);
                     if (window.DB) DB.invalidate(lsKey);
                     this._notifyUpdate(lsKey);
                     // Push the merged array back to Firestore so all devices agree
@@ -979,7 +1020,7 @@ var Sync = {
               } catch {}
             }
 
-            localStorage.setItem(lsKey, JSON.stringify(fsVal));
+            this._lsWrite(lsKey, fsVal);
             if (window.DB) DB.invalidate(lsKey);
             this._notifyUpdate(lsKey);
           },
@@ -1071,7 +1112,7 @@ var Sync = {
               }
             }
           } catch {}
-          localStorage.setItem(lsKey, JSON.stringify(finalArr));
+          this._lsWrite(lsKey, finalArr);
           if (window.DB) DB.invalidate(lsKey);
           if (snap.docChanges().length > 0) this._notifyUpdate(lsKey);
         },
@@ -1250,7 +1291,7 @@ var Sync = {
 
     if (newRecords.length > 0) {
       const merged = [...existing, ...newRecords];
-      localStorage.setItem(lsKey, JSON.stringify(merged));
+      this._lsWrite(lsKey, merged);
       if (window.DB) DB.invalidate(lsKey);
     }
 

@@ -204,8 +204,7 @@ window.addEventListener('DOMContentLoaded', () => {
   BEDate.byId('filterFrom', { onChange: render });
   BEDate.byId('filterTo',   { onChange: render });
   if (Auth.can('return_add')) document.getElementById('btnAdd').style.display = '';
-  populateFilters();
-  render();
+  DB.ready.then(() => { populateFilters(); render(); });
 });
 
 function populateFilters() {

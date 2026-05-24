@@ -28,6 +28,17 @@ const DB = {
   // Firestore/Drive updates localStorage directly).
   _cache: {},
 
+  // ── IndexedDB overflow tracking ───────────────────────────────────────────
+  // When localStorage hits QuotaExceededError, large keys are moved to IDB.
+  // _idbKeys  : Set of keys currently stored in IndexedDB (not localStorage).
+  // _IDB_KEYS_LS : tiny localStorage entry that persists the set across reloads.
+  // ready     : Promise that resolves once IDB-overflow data is in _cache.
+  //             Pages that use heavy data should wait: DB.ready.then(render).
+  _idbKeys: new Set(),
+  _IDB_KEYS_LS: 'wt_idb_keys',
+  _idbReady: false,
+  ready: Promise.resolve(),
+
   // ── LZ-string helpers: read raw localStorage and try to decompress ──────
   _lzRead(key) {
     const raw = localStorage.getItem(key);
@@ -54,6 +65,8 @@ const DB = {
 
   _get(key) {
     if (!Object.prototype.hasOwnProperty.call(this._cache, key)) {
+      // IDB-overflow keys are not in localStorage — wait for preloadFromIDB()
+      if (this._idbKeys.has(key)) return [];
       try { this._cache[key] = JSON.parse(this._lzRead(key)) || []; }
       catch { this._cache[key] = []; }
     }
@@ -61,6 +74,8 @@ const DB = {
   },
   _getObj(key, def) {
     if (!Object.prototype.hasOwnProperty.call(this._cache, key)) {
+      // IDB-overflow keys are not in localStorage — wait for preloadFromIDB()
+      if (this._idbKeys.has(key)) return def;
       try { const v = this._lzRead(key); this._cache[key] = v ? JSON.parse(v) : def; }
       catch { this._cache[key] = def; }
     }
@@ -68,31 +83,49 @@ const DB = {
   },
   _set(key, val) {
     this._cache[key] = val;                      // update cache immediately
-    const json = JSON.stringify(val);
-    // Compress with LZString if available; plain JSON fallback keeps sync.js happy
-    const stored = (typeof LZString !== 'undefined')
-      ? LZString.compressToUTF16(json)
-      : json;
-    try {
-      localStorage.setItem(key, stored);
-    } catch (e) {
-      // QuotaExceededError: localStorage is full — data stays in cache (in-memory for
-      // this session) but is NOT persisted.  Show a sticky banner so the user knows,
-      // and record it in the error log using a raw write (avoids re-entering _set).
-      if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
-        console.error('[DB] localStorage full — could not persist', key);
-        this._warnQuota(key);
-        try {
-          const raw  = localStorage.getItem(this.K.ERRORS);
-          const errs = raw ? JSON.parse(raw) : [];
-          errs.unshift({ type: 'QUOTA_EXCEEDED', message: `localStorage full — could not save ${key}`, ts: new Date().toISOString() });
-          if (errs.length > 200) errs.length = 200;
-          localStorage.setItem(this.K.ERRORS, JSON.stringify(errs));
-        } catch {}  // if error log write also fails, silently drop — don't loop
-      } else {
-        throw e;   // unexpected error — let it surface normally
+
+    let writeToIdb = this._idbKeys.has(key);     // already overflowed — skip localStorage
+
+    if (!writeToIdb) {
+      // Compress with LZString if available; plain JSON fallback keeps sync.js happy
+      const json   = JSON.stringify(val);
+      const stored = (typeof LZString !== 'undefined')
+        ? LZString.compressToUTF16(json)
+        : json;
+      try {
+        localStorage.setItem(key, stored);
+      } catch (e) {
+        if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
+          // localStorage is full — overflow this key to IndexedDB so data is
+          // persisted across reloads without losing it.
+          console.warn('[DB] localStorage full — overflowing', key, '→ IndexedDB');
+          this._idbKeys.add(key);
+          localStorage.removeItem(key);          // remove any partial write
+          writeToIdb = true;
+          this._persistIdbKeys();
+          this._notifyIdbOverflow(key);
+          // Record in error log (plain write, avoids re-entering _set)
+          try {
+            const raw  = localStorage.getItem(this.K.ERRORS);
+            const errs = raw ? JSON.parse(raw) : [];
+            errs.unshift({ type: 'IDB_OVERFLOW', message: `localStorage full — ${key} moved to IndexedDB`, ts: new Date().toISOString() });
+            if (errs.length > 200) errs.length = 200;
+            localStorage.setItem(this.K.ERRORS, JSON.stringify(errs));
+          } catch {}
+        } else {
+          throw e;   // unexpected error — let it surface normally
+        }
       }
     }
+
+    // Write to IndexedDB if this key lives there
+    if (writeToIdb && window.IDB) {
+      IDB.data.set(key, val).catch(err => {
+        console.error('[DB] IDB write failed for', key, err);
+        this._warnQuota(key);  // fall back to red banner if IDB also fails
+      });
+    }
+
     // Push to Firestore sync if available (sync.js loaded + ready, or queue if not yet ready)
     if (window.Sync) {
       if (Sync.ready) Sync.push(key, val);
@@ -122,10 +155,87 @@ const DB = {
     const attach = () => document.body.appendChild(banner);
     document.body ? attach() : document.addEventListener('DOMContentLoaded', attach);
   },
-  // Called by sync.js when Firestore/Drive writes localStorage directly
+  // ── Persist the _idbKeys set so it survives page reloads ─────────────────
+  _persistIdbKeys() {
+    const json = JSON.stringify([...this._idbKeys]);
+    try {
+      localStorage.setItem(this._IDB_KEYS_LS, json);
+    } catch {
+      // localStorage is completely full — store the key list in IDB itself
+      if (window.IDB) IDB.data.set(this._IDB_KEYS_LS, [...this._idbKeys]).catch(() => {});
+    }
+  },
+
+  // ── Soft info banner when a key overflows to IDB (yellow, not red) ────────
+  _notifyIdbOverflow(key) {
+    const id = 'wt-idb-overflow-banner';
+    if (document.getElementById(id)) return;
+    const banner = document.createElement('div');
+    banner.id = id;
+    banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:99999;' +
+      'background:#856404;color:#fff;padding:10px 16px;font-size:13px;' +
+      'display:flex;align-items:center;gap:8px;';
+    banner.innerHTML =
+      '<i class="bi bi-info-circle-fill" aria-hidden="true"></i>' +
+      '<strong>localStorage เต็ม</strong> — ย้าย ' +
+      '<code style="background:rgba(0,0,0,.2);padding:1px 5px;border-radius:3px;">' + key + '</code>' +
+      ' ไปจัดเก็บใน <strong>IndexedDB</strong> แทน (ฮาร์ดดิสก์) ข้อมูลจะยังคงอยู่หลังรีโหลด' +
+      '<button onclick="this.parentElement.remove()" style="margin-left:auto;background:none;' +
+      'border:1px solid rgba(255,255,255,.5);color:#fff;padding:3px 10px;' +
+      'border-radius:4px;cursor:pointer;font-size:13px;">ปิด</button>';
+    const attach = () => document.body.appendChild(banner);
+    document.body ? attach() : document.addEventListener('DOMContentLoaded', attach);
+  },
+
+  // ── Async IDB preload — must complete before first render on pages with ───
+  // heavy data (invoices, payments, etc.).  Call DB.ready.then(render).
+  preloadFromIDB() {
+    return (async () => {
+      // Step 1: restore _idbKeys from localStorage (tiny JSON — always fits)
+      const stored = localStorage.getItem(this._IDB_KEYS_LS);
+      if (stored) {
+        try { JSON.parse(stored).forEach(k => this._idbKeys.add(k)); }
+        catch (e) { console.warn('[DB] Could not parse _idbKeys list', e); }
+      } else if (window.IDB) {
+        // Fallback: key list was itself stored in IDB (localStorage was 100% full)
+        try {
+          const idbList = await IDB.data.get(this._IDB_KEYS_LS);
+          if (Array.isArray(idbList)) idbList.forEach(k => this._idbKeys.add(k));
+        } catch {}
+      }
+
+      // Step 2: load all IDB-overflow data into _cache
+      if (this._idbKeys.size > 0 && window.IDB) {
+        try {
+          const all = await IDB.data.getAll();
+          for (const [k, v] of Object.entries(all)) {
+            if (k === this._IDB_KEYS_LS) continue;  // skip the key list itself
+            this._cache[k] = v;
+            this._idbKeys.add(k);                   // ensure set is complete
+          }
+          console.log(`[DB] Loaded ${this._idbKeys.size} key(s) from IndexedDB:`, [...this._idbKeys].join(', '));
+        } catch (e) {
+          console.error('[DB] Failed to preload from IndexedDB', e);
+        }
+      }
+
+      this._idbReady = true;
+      window.dispatchEvent(new CustomEvent('db:ready'));
+    })();
+  },
+
+  // Called by sync.js when Firestore/Drive writes data directly to localStorage.
+  // IDB-overflow keys are NOT cleared — their cache entry IS the truth
+  // (there is no localStorage copy to fall back to for those keys).
   invalidate(key) {
-    if (key) delete this._cache[key];
-    else this._cache = {};
+    if (key) {
+      if (!this._idbKeys.has(key)) delete this._cache[key];
+    } else {
+      // Full clear: preserve IDB-overflow entries
+      for (const k of Object.keys(this._cache)) {
+        if (!this._idbKeys.has(k)) delete this._cache[k];
+      }
+    }
   },
 
   // ─── SETTINGS ────────────────────────────────────────────────────────────────
@@ -538,6 +648,11 @@ const DB = {
     if (!cfg.autoBackup) {
       this.saveSettings({ ...cfg, autoBackup: { enabled: true, interval: 'daily', lastBackupAt: null } });
     }
+
+    // ── Kick off async IDB preload ────────────────────────────────────────────
+    // Resolves almost instantly when no keys have overflowed.
+    // Pages that render heavy data should await: DB.ready.then(render)
+    this.ready = this.preloadFromIDB();
   },
 
   _seedProducts() {

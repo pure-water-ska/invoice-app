@@ -276,26 +276,30 @@ window.addEventListener('sync:updated', (e) => {
   }
 });
 window.addEventListener('DOMContentLoaded', () => {
-  // Show select-mode button for users with delete permission
-  if (Auth.can('invoice_delete')) {
-    document.getElementById('selModeBtn').classList.remove('d-none');
-  }
+  // Wait for IDB-overflow data to load into DB._cache before first render.
+  // DB.ready resolves immediately when no keys have overflowed (the common case).
+  DB.ready.then(() => {
+    // Show select-mode button for users with delete permission
+    if (Auth.can('invoice_delete')) {
+      document.getElementById('selModeBtn').classList.remove('d-none');
+    }
 
-  const customers = DB.getCustomers();
-  const custSel = document.getElementById('filterCustomer');
-  custSel.innerHTML = '<option value="">— ลูกค้าทั้งหมด —</option>' +
-    customers.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+    const customers = DB.getCustomers();
+    const custSel = document.getElementById('filterCustomer');
+    custSel.innerHTML = '<option value="">— ลูกค้าทั้งหมด —</option>' +
+      customers.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
 
-  const params = new URLSearchParams(location.search);
-  if (params.get('cust')) custSel.value = params.get('cust');
-  if (params.get('num')) document.getElementById('searchInput').value = params.get('num');
+    const params = new URLSearchParams(location.search);
+    if (params.get('cust')) custSel.value = params.get('cust');
+    if (params.get('num')) document.getElementById('searchInput').value = params.get('num');
 
-  ['searchInput','filterCustomer','filterStatus'].forEach(id =>
-    document.getElementById(id).addEventListener('change', () => { _invPage = 1; render(); }));
-  document.getElementById('searchInput').addEventListener('input', Utils.debounce(() => { _invPage = 1; render(); }, 200));
-  BEDate.byId('filterFrom', { onChange: () => { _invPage = 1; render(); } });
-  BEDate.byId('filterTo',   { onChange: () => { _invPage = 1; render(); } });
-  render();
+    ['searchInput','filterCustomer','filterStatus'].forEach(id =>
+      document.getElementById(id).addEventListener('change', () => { _invPage = 1; render(); }));
+    document.getElementById('searchInput').addEventListener('input', Utils.debounce(() => { _invPage = 1; render(); }, 200));
+    BEDate.byId('filterFrom', { onChange: () => { _invPage = 1; render(); } });
+    BEDate.byId('filterTo',   { onChange: () => { _invPage = 1; render(); } });
+    render();
+  });
 });
 
 const INV_PAGE_SIZE = 30;
