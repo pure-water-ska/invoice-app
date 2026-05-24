@@ -229,30 +229,26 @@ var Sync = {
       this._orgId = FIREBASE_CONFIG.orgId || 'main';
 
       // ── Enable IndexedDB offline persistence ─────────────────────────────
-      // Firebase SDK v8/v9-compat: call enableIndexedDbPersistence.
-      // Firebase SDK v10+: persistence is configured at initializeFirestore time;
-      //   enableIndexedDbPersistence no longer exists on the instance — skip it.
       // synchronizeTabs:false avoids the multi-tab primary-lock that blocked a
-      // second device from connecting (both share the same Firebase team account).
-      if (typeof this._db.enableIndexedDbPersistence === 'function') {
-        try {
-          await this._db.enableIndexedDbPersistence({ synchronizeTabs: false });
-          console.log('[Sync] IndexedDB persistence enabled (v8/v9-compat API)');
-        } catch (e) {
-          // failed-precondition = another tab owns the lock (harmless here)
-          // unimplemented       = browser doesn't support it (Safari private mode)
-          const known = ['failed-precondition', 'unimplemented'];
-          if (known.includes(e.code)) {
-            console.log('[Sync] Persistence:', e.code === 'unimplemented'
-              ? 'not supported by this browser'
-              : 'lock conflict (another tab) — each tab uses its own cache');
-          } else {
-            console.warn('[Sync] Persistence error:', e.code, e.message);
-          }
+      // second device from connecting (both devices share the same Firebase team
+      // account and both tried to claim the single-primary-tab IndexedDB lock).
+      // With synchronizeTabs:false each tab/device keeps its own independent cache.
+      // This makes onSnapshot() serve its initial snapshot from IndexedDB (free,
+      // fromCache:true) instead of always fetching from the server.
+      try {
+        await this._db.enableIndexedDbPersistence({ synchronizeTabs: false });
+        console.log('[Sync] IndexedDB persistence enabled');
+      } catch (e) {
+        // failed-precondition = another tab owns the lock (harmless with synchronizeTabs:false)
+        // unimplemented       = browser doesn't support IndexedDB (Safari private mode, etc.)
+        const known = ['failed-precondition', 'unimplemented'];
+        if (known.includes(e.code)) {
+          console.log('[Sync] Persistence:', e.code === 'unimplemented'
+            ? 'not supported by this browser — running without cache'
+            : 'lock conflict (another tab) — running without cache');
+        } else {
+          console.warn('[Sync] Persistence error:', e.code, e.message);
         }
-      } else {
-        // Firebase v10+ — persistence is handled by the SDK internally
-        console.log('[Sync] IndexedDB persistence: using SDK v10 built-in cache');
       }
 
       // ── Listen for Background Sync wake-up from the Service Worker ───────

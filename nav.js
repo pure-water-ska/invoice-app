@@ -160,7 +160,11 @@
     tryShow();
   }
 
-  const FB_VER = '10.7.1';
+  // v9.23.0 = last v9 release — use compat packages which include
+  // enableIndexedDbPersistence().  Firebase v10 removed this API from the compat
+  // layer, breaking offline cache and causing every onSnapshot() to hit the server
+  // for its initial snapshot (very expensive for large invoice collections).
+  const FB_VER = '9.23.0';
   const FB_BASE = `https://www.gstatic.com/firebasejs/${FB_VER}`;
 
   // Hide badge helper (for when Firebase is not configured)
