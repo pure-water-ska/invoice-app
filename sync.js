@@ -229,26 +229,30 @@ var Sync = {
       this._orgId = FIREBASE_CONFIG.orgId || 'main';
 
       // ── Enable IndexedDB offline persistence ─────────────────────────────
-      // synchronizeTabs:false avoids the multi-tab primary-lock that previously
-      // blocked a second device from connecting (both devices share the same Firebase
-      // team account and both tried to claim the single-primary-tab IndexedDB lock).
-      // With synchronizeTabs:false each tab/device keeps its own independent cache —
-      // no lock contention, multi-device safe.
-      // This enables Firestore's built-in offline write queue and fromCache metadata.
-      try {
-        await this._db.enableIndexedDbPersistence({ synchronizeTabs: false });
-        console.log('[Sync] IndexedDB persistence enabled');
-      } catch (e) {
-        // failed-precondition = another tab already owns the lock (harmless with synchronizeTabs:false — shouldn't happen, but defensive)
-        // unimplemented       = browser doesn't support IndexedDB persistence (Safari private mode, etc.)
-        const known = ['failed-precondition', 'unimplemented'];
-        if (known.includes(e.code)) {
-          console.log('[Sync] Persistence:', e.code === 'unimplemented'
-            ? 'not supported by this browser — running without cache'
-            : 'lock conflict (another tab) — running without cache');
-        } else {
-          console.warn('[Sync] Persistence error:', e.code, e.message);
+      // Firebase SDK v8/v9-compat: call enableIndexedDbPersistence.
+      // Firebase SDK v10+: persistence is configured at initializeFirestore time;
+      //   enableIndexedDbPersistence no longer exists on the instance — skip it.
+      // synchronizeTabs:false avoids the multi-tab primary-lock that blocked a
+      // second device from connecting (both share the same Firebase team account).
+      if (typeof this._db.enableIndexedDbPersistence === 'function') {
+        try {
+          await this._db.enableIndexedDbPersistence({ synchronizeTabs: false });
+          console.log('[Sync] IndexedDB persistence enabled (v8/v9-compat API)');
+        } catch (e) {
+          // failed-precondition = another tab owns the lock (harmless here)
+          // unimplemented       = browser doesn't support it (Safari private mode)
+          const known = ['failed-precondition', 'unimplemented'];
+          if (known.includes(e.code)) {
+            console.log('[Sync] Persistence:', e.code === 'unimplemented'
+              ? 'not supported by this browser'
+              : 'lock conflict (another tab) — each tab uses its own cache');
+          } else {
+            console.warn('[Sync] Persistence error:', e.code, e.message);
+          }
         }
+      } else {
+        // Firebase v10+ — persistence is handled by the SDK internally
+        console.log('[Sync] IndexedDB persistence: using SDK v10 built-in cache');
       }
 
       // ── Listen for Background Sync wake-up from the Service Worker ───────
@@ -666,6 +670,38 @@ var Sync = {
     localStorage.setItem(this._lastSyncKey, new Date().toISOString());
   },
 
+  // ── Seed _serverIds / _pullIds from localStorage without Firestore reads ────
+  // Called by the session-guard skip in _pullAll() so the listener and _writeKey()
+  // can still detect deletions correctly on this page.
+  _seedStateFromLocalStorage() {
+    for (const [lsKey, colName] of Object.entries(this.COLLECTIONS)) {
+      try {
+        const raw = this._localRead(lsKey);
+        const localArr = JSON.parse(raw || '[]');
+        if (Array.isArray(localArr)) {
+          const ids = new Set(localArr.filter(r => r.id).map(r => r.id));
+          if (colName === 'invoices') {
+            const persisted = this._loadSavedServerIds(colName);
+            ids.forEach(id => persisted.add(id));
+            this._serverIds[colName] = persisted;
+          } else {
+            this._serverIds[colName] = new Set(ids);
+          }
+          this._pullIds[colName] = new Set(ids);
+        }
+      } catch {}
+    }
+    // Seed _lastDocJson fingerprints so the first save on this page doesn't
+    // re-push data that's already identical to what's in Firestore.
+    for (const [lsKey] of Object.entries(this.DOCUMENTS)) {
+      if (this.NO_SYNC.has(lsKey)) continue;
+      try {
+        const raw = this._localRead(lsKey);
+        if (raw && !this._lastDocJson[lsKey]) this._lastDocJson[lsKey] = raw;
+      } catch {}
+    }
+  },
+
   // ── Safe local read — handles LZString-compressed data + IDB overflow ──────
   // sync.js must NEVER read localStorage directly via JSON.parse(localStorage.getItem())
   // because DB._set() compresses values with LZString.  Always use this helper.
@@ -719,36 +755,66 @@ var Sync = {
   async _pullAll() {
     const base = this._orgRef();
 
-    // ── Delta pull optimisation ──────────────────────────────────────────────
-    // Avoid redundant Firestore reads on every page navigation.
+    // ── Session-level guard ─────────────────────────────────────────────────
+    // This is a multi-page app — every page navigation is a full page reload and
+    // Sync.init() calls _pullAll() from scratch.  Without a session guard that
+    // means a full Firestore read on EVERY page (14 doc reads + 1000+ collection
+    // reads per navigation = quota exhausted in minutes for busy businesses).
     //
-    // DOCUMENTS: each Firestore doc carries a server `ts` field.  If that ts
-    // is clearly before our last pull we already have the latest — skip the write.
-    //
-    // COLLECTIONS (invoices, payments): a partial query can't detect deletions,
-    // so we keep doing a full read — BUT if we pulled very recently (< 30 s) we
-    // trust the real-time listener to have caught any remote changes and skip the
-    // round-trip entirely.  We still populate _serverIds/_pullIds from localStorage
-    // so deletion tombstoning in _writeKey() keeps working correctly.
+    // Fix: after the first successful _pullAll() in a browser session, store a
+    // flag in sessionStorage (survives page navigations but clears on tab close
+    // or browser restart).  Subsequent calls skip the Firestore reads entirely and
+    // just seed state from localStorage — the real-time listeners already catch any
+    // remote changes that happened between pages.
+    const SESSION_PULLED_KEY = 'wt_sync_session_pulled';
+    const sessionPulledAt = sessionStorage.getItem(SESSION_PULLED_KEY);
+    if (sessionPulledAt) {
+      console.log('[Sync] Session guard: skipping _pullAll() — already pulled this session, listeners are live');
+      // Still need to seed _serverIds / _pullIds so the listener and _writeKey()
+      // can detect deletions correctly on this page.
+      this._seedStateFromLocalStorage();
+      // Fire sync:pulled so pages listening for fresh data get their re-render.
+      window.dispatchEvent(new CustomEvent('sync:pulled'));
+      return;
+    }
+
+    // ── Delta pull timing ────────────────────────────────────────────────────
+    // For DOCUMENTS: skip the Firestore .get() entirely if the doc hasn't changed
+    // since our last pull (checked via the server ts field stored in _lastDocTs).
+    // For COLLECTIONS: skip if pulled within the last 5 minutes (listeners catch
+    // any remote changes; a full re-fetch is not necessary that frequently).
     const lastPulledAt  = localStorage.getItem(this._lastPulledKey);
     const lastPulledMs  = lastPulledAt ? new Date(lastPulledAt).getTime() : 0;
     const msSincePull   = Date.now() - lastPulledMs;
-    const CLOCK_SKEW_MS = 5  * 1000;   // allow 5 s of server/client clock drift
-    const COL_SKIP_MS   = 30 * 1000;   // skip collection pull if done within last 30 s
+    const CLOCK_SKEW_MS = 5  * 1000;     // allow 5 s of server/client clock drift
+    const COL_SKIP_MS   = 5  * 60 * 1000; // skip collection pull if done within last 5 min
+    // Per-doc last-known server timestamps — loaded from localStorage so we can
+    // skip the .get() call entirely when a doc hasn't changed since last pull.
+    const _lastDocTs = JSON.parse(localStorage.getItem('wt_sync_doc_ts') || '{}');
 
-    // Documents
+    // Documents — skip .get() entirely for docs whose server ts predates last pull
     const docPromises = Object.entries(this.DOCUMENTS).map(async ([lsKey, docName]) => {
       if (this.NO_SYNC.has(lsKey)) return; // excluded from sync
       try {
+        // Delta: if we have a cached server ts for this doc and it's before our
+        // last pull time, skip the Firestore .get() — we already have the latest data.
+        const cachedDocTs = _lastDocTs[docName] || 0;
+        if (lastPulledMs > 0 && cachedDocTs > 0 && cachedDocTs < lastPulledMs - CLOCK_SKEW_MS) {
+          console.log(`[Sync] Delta: skip .get() for ${docName} (cached ts ${new Date(cachedDocTs).toISOString()} ≤ last pull)`);
+          return;   // 0 Firestore reads for this doc
+        }
         const doc = await base.collection('data').doc(docName).get();
         if (doc.exists && doc.data().d !== undefined) {
-          // Delta: skip write if the Firestore document hasn't changed since last pull.
-          // doc.data().ts is a Firestore server Timestamp — compare against lastPulledMs.
-          // A 5 s clock-skew buffer ensures we never skip a doc that was written right
-          // before our last pull on a server whose clock drifts slightly ahead.
+          // Save server ts so we can skip this doc on the next page load
           const docTs = doc.data().ts?.toDate?.()?.getTime?.() ?? 0;
+          if (docTs > 0) {
+            _lastDocTs[docName] = docTs;
+            try { localStorage.setItem('wt_sync_doc_ts', JSON.stringify(_lastDocTs)); } catch {}
+          }
+          // Delta: nothing changed — skip the write (we already paid for the read
+          // above because the cached ts was absent/stale, but next time we can skip)
           if (lastPulledMs > 0 && docTs > 0 && docTs < lastPulledMs - CLOCK_SKEW_MS) {
-            console.log(`[Sync] Delta: skip unchanged doc ${docName} (doc ts ${new Date(docTs).toISOString()} ≤ last pull)`);
+            console.log(`[Sync] Delta: skip write for ${docName} (doc ts ≤ last pull)`);
             return;
           }
           const fsVal = doc.data().d;
@@ -928,6 +994,8 @@ var Sync = {
     await Promise.all([...docPromises, ...colPromises]);
     // Record timestamp of this successful pull — used by delta optimisation on the next page load
     try { localStorage.setItem(this._lastPulledKey, new Date().toISOString()); } catch {}
+    // Mark session as pulled — subsequent page loads in this tab skip _pullAll() entirely
+    try { sessionStorage.setItem(SESSION_PULLED_KEY, Date.now().toString()); } catch {}
     // Notify pages that fresh data is available so they can re-render
     window.dispatchEvent(new CustomEvent('sync:pulled'));
     console.log('[Sync] Initial pull complete');
