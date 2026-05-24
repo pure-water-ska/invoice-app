@@ -211,14 +211,23 @@
     loadScript(`${FB_BASE}/firebase-app-compat.js`, function() {
       loadScript(`${FB_BASE}/firebase-auth-compat.js`, function() {
         loadScript(`${FB_BASE}/firebase-firestore-compat.js`, function() {
-          // Load connection-status.js first (no Firebase dependency — just event listener)
-          // then sync.js which starts Sync.init() and begins dispatching connectionstate events
-          loadScript('./connection-status.js', function() {
-            loadScript('./sync.js', null, onSDKError);
-          }, function() {
-            // connection-status.js failed to load — still start sync
-            loadScript('./sync.js', null, onSDKError);
-          });
+          // Ensure idb.js is available — some pages include it as a static <script>,
+          // others don't.  sync.js and db.js both rely on IDB for device-ID storage
+          // and localStorage-overflow data.  Load it here if not already present.
+          function loadSyncStack() {
+            // Load connection-status.js first (no Firebase dependency — just event listener)
+            // then sync.js which starts Sync.init() and begins dispatching connectionstate events
+            loadScript('./connection-status.js', function() {
+              loadScript('./sync.js', null, onSDKError);
+            }, function() {
+              loadScript('./sync.js', null, onSDKError);
+            });
+          }
+          if (typeof IDB === 'undefined') {
+            loadScript('./idb.js', loadSyncStack, loadSyncStack);
+          } else {
+            loadSyncStack();
+          }
         }, onSDKError);
       }, onSDKError);
     }, onSDKError);

@@ -177,6 +177,7 @@ var Sync = {
     const IDB_KEY = 'sync_device_id';
     const LS_KEY  = 'wt_sync_device_id';
     try {
+      if (typeof IDB === 'undefined') throw new Error('IDB not loaded');
       // 1. Primary source: IndexedDB (durable across localStorage.clear())
       let id = await IDB.get(IDB_KEY);
       if (!id) {
@@ -194,8 +195,10 @@ var Sync = {
       this._deviceId = id;
       console.log('[Sync] Device ID ready (IDB):', id);
     } catch (e) {
-      // IDB unavailable (e.g. private browsing with strict settings) — fall back
-      console.warn('[Sync] IDB unavailable for device ID, using localStorage fallback:', e.message);
+      // IDB unavailable (private browsing with strict settings, or idb.js not yet loaded)
+      if (e.message !== 'IDB not loaded') {
+        console.warn('[Sync] IDB unavailable for device ID, using localStorage fallback:', e.message);
+      }
       let id = localStorage.getItem(LS_KEY);
       if (!id) {
         id = 'dev_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
