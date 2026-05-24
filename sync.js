@@ -59,9 +59,28 @@ var Sync = {
     'wt_cap_deductions':  'cap_deductions',
     'wt_price_history':   'price_history',
     'wt_inv_counter':     'inv_counter',
-    'wt_activity':        'activity_log',   // activity log — shared across devices
-    'wt_logins':          'login_log',      // login history — shared across devices
+    'wt_activity':        'activity_log',   // activity log — local-only (see NO_SYNC)
+    'wt_logins':          'login_log',      // login history — local-only (see NO_SYNC)
   },
+
+  // ── Keys excluded from Firestore sync ─────────────────────────────────────
+  // These stay in localStorage only — never pushed or pulled from Firestore.
+  //
+  // Rationale:
+  //   wt_activity / wt_logins — append-only logs that grow without bound.
+  //     Storing them as DOCUMENTS means every new log entry rewrites the ENTIRE
+  //     growing array to Firestore.  After 3 months the payload can be 2,000+
+  //     records per write.  No device needs to see another device's activity
+  //     feed in real time, so the sync provides zero value.
+  //   wt_errors — local debug log; no value syncing it.
+  //
+  // To re-enable sync for any key, remove it from this Set and add it back to
+  // DOCUMENTS (and the corresponding Firestore doc comment).
+  NO_SYNC: new Set([
+    'wt_activity',
+    'wt_logins',
+    'wt_errors',
+  ]),
 
   // ── Tombstones: persist deleted record IDs so _pullAll + listener won't restore them ──
   _getTombstones(colName) {
@@ -390,6 +409,7 @@ var Sync = {
   // ── Called by db._set() ────────────────────────────────────────────────────
   push(key, val) {
     if (!this.COLLECTIONS[key] && !this.DOCUMENTS[key]) return; // key not synced
+    if (this.NO_SYNC.has(key)) return; // explicitly excluded from Firestore sync
     // Reset the ignore window for THIS key only so the listener won't echo our own write
     this._ignoreUntil[key] = Date.now() + this._skipInitialMs;
     if (!this.ready || !this._online) {
@@ -677,6 +697,7 @@ var Sync = {
 
     // Documents
     const docPromises = Object.entries(this.DOCUMENTS).map(async ([lsKey, docName]) => {
+      if (this.NO_SYNC.has(lsKey)) return; // excluded from sync
       try {
         const doc = await base.collection('data').doc(docName).get();
         if (doc.exists && doc.data().d !== undefined) {
@@ -913,6 +934,7 @@ var Sync = {
 
     // Listen to document keys
     for (const [lsKey, docName] of Object.entries(this.DOCUMENTS)) {
+      if (this.NO_SYNC.has(lsKey)) continue; // excluded from sync
       const unsub = base.collection('data').doc(docName)
         .onSnapshot(
           { includeMetadataChanges: true },   // fires on fromCache transitions too
