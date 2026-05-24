@@ -238,20 +238,29 @@ var Sync = {
       // With synchronizeTabs:false each tab/device keeps its own independent cache.
       // This makes onSnapshot() serve its initial snapshot from IndexedDB (free,
       // fromCache:true) instead of always fetching from the server.
-      try {
-        await this._db.enableIndexedDbPersistence({ synchronizeTabs: false });
-        console.log('[Sync] IndexedDB persistence enabled');
-      } catch (e) {
-        // failed-precondition = another tab owns the lock (harmless with synchronizeTabs:false)
-        // unimplemented       = browser doesn't support IndexedDB (Safari private mode, etc.)
-        const known = ['failed-precondition', 'unimplemented'];
-        if (known.includes(e.code)) {
-          console.log('[Sync] Persistence:', e.code === 'unimplemented'
-            ? 'not supported by this browser — running without cache'
-            : 'lock conflict (another tab) — running without cache');
-        } else {
-          console.warn('[Sync] Persistence error:', e.code, e.message);
+      //
+      // enableIndexedDbPersistence exists in Firebase v8 and v9-compat.
+      // Firebase v10 removed it (persistence is on by default there).
+      // Guard with typeof so the app runs cleanly on any SDK version.
+      if (typeof this._db.enableIndexedDbPersistence === 'function') {
+        try {
+          await this._db.enableIndexedDbPersistence({ synchronizeTabs: false });
+          console.log('[Sync] IndexedDB persistence enabled');
+        } catch (e) {
+          // failed-precondition = another tab owns the lock (harmless with synchronizeTabs:false)
+          // unimplemented       = browser doesn't support IndexedDB (Safari private mode, etc.)
+          const known = ['failed-precondition', 'unimplemented'];
+          if (known.includes(e.code)) {
+            console.log('[Sync] Persistence:', e.code === 'unimplemented'
+              ? 'not supported by this browser — running without cache'
+              : 'lock conflict (another tab) — running without cache');
+          } else {
+            console.warn('[Sync] Persistence error:', e.code, e.message);
+          }
         }
+      } else {
+        // Firebase v10+: IndexedDB persistence is built-in, no explicit call needed.
+        console.log('[Sync] IndexedDB persistence: SDK manages cache automatically');
       }
 
       // ── Listen for Background Sync wake-up from the Service Worker ───────
