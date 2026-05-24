@@ -928,8 +928,8 @@ var Sync = {
     }
 
     // Only block snapshots during the initial page-load window or right after a local write.
-    // We do NOT filter on fromCache or hasPendingWrites: filtering fromCache breaks secondary
-    // Firestore tabs (synchronizeTabs:true) where every snapshot arrives fromCache:true.
+    // Note: synchronizeTabs:false means secondary tabs don't use fromCache, so both
+    // DOCUMENTS and COLLECTIONS listeners can safely guard on fromCache (see below).
     const shouldSkip = (lsKey) => Date.now() < (this._ignoreUntil[lsKey] || 0);
 
     // Listen to document keys
@@ -1014,6 +1014,18 @@ var Sync = {
           // _ignoreUntil window but before our debounced batch.commit() landed).
           if (this._pendingWrite[lsKey]) {
             console.log(`[Sync] Listener skip: pending local write for ${lsKey}`);
+            return;
+          }
+          // Skip fromCache snapshots — Firestore IndexedDB cache may be stale or incomplete
+          // after a reconnect.  When this fires after the 800 ms _ignoreUntil window, a stale
+          // cache can deliver fewer docs than localStorage.  Because _pullIds is fully seeded
+          // by _pullAll(), any "missing" IDs don't make it into localOnly and get silently
+          // removed — causing the invoice list to briefly go blank until the server snapshot
+          // arrives.  _pullAll() already handled the initial IndexedDB read, so skipping
+          // fromCache here is safe.  With synchronizeTabs:false, updates from other devices
+          // always arrive fromCache:false, so no real-time changes are lost.
+          if (!snap.metadata.hasPendingWrites && snap.metadata.fromCache) {
+            console.log(`[Sync] Col listener skip: fromCache snapshot for ${colName} (stale cache guard)`);
             return;
           }
           // Skip delayed echo: all changed docs were written by this device.
