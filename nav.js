@@ -215,13 +215,21 @@
           // others don't.  sync.js and db.js both rely on IDB for device-ID storage
           // and localStorage-overflow data.  Load it here if not already present.
           function loadSyncStack() {
-            // Load connection-status.js first (no Firebase dependency — just event listener)
-            // then sync.js which starts Sync.init() and begins dispatching connectionstate events
-            loadScript('./connection-status.js', function() {
-              loadScript('./sync.js', null, onSDKError);
-            }, function() {
-              loadScript('./sync.js', null, onSDKError);
-            });
+            // Load local-folder-sync.js (IDB is guaranteed loaded at this point)
+            // then connection-status.js, then sync.js
+            function afterFolderSync() {
+              if (window.LocalFolderSync) LocalFolderSync.init();
+              loadScript('./connection-status.js', function() {
+                loadScript('./sync.js', null, onSDKError);
+              }, function() {
+                loadScript('./sync.js', null, onSDKError);
+              });
+            }
+            if (!window.LocalFolderSync) {
+              loadScript('./local-folder-sync.js', afterFolderSync, afterFolderSync);
+            } else {
+              afterFolderSync();
+            }
           }
           if (typeof IDB === 'undefined') {
             loadScript('./idb.js', loadSyncStack, loadSyncStack);
@@ -235,6 +243,45 @@
   }, function() {
     hideSyncBadge(); // firebase-config.js not found — local-only mode, hide badge
   });
+})();
+
+// ── Load Local Folder Sync (also active without Firebase) ────────────────────
+// When Firebase IS configured, local-folder-sync.js is loaded by the Firebase
+// sync stack above (after idb.js is guaranteed ready).
+// When Firebase is NOT configured (offline-only mode), this block loads both
+// idb.js and local-folder-sync.js independently so the feature still works.
+(function loadLocalFolderSyncFallback() {
+  // Guard: if the Firebase chain already loaded it, do nothing
+  if (window.LocalFolderSync) return;
+
+  function loadScript(src, cb, errCb) {
+    const s = document.createElement('script');
+    s.src = src; s.onload = cb || function(){}; s.onerror = errCb || function(){};
+    document.head.appendChild(s);
+  }
+
+  function loadLFS() {
+    if (window.LocalFolderSync) { LocalFolderSync.init(); return; }
+    loadScript('./local-folder-sync.js', function() {
+      if (window.LocalFolderSync) LocalFolderSync.init();
+    });
+  }
+
+  // Wait up to 2 s to see if the Firebase chain loads it first; if not, load
+  // idb.js + local-folder-sync.js ourselves.
+  var waited = 0;
+  var iv = setInterval(function() {
+    waited += 200;
+    if (window.LocalFolderSync) { clearInterval(iv); return; } // Firebase chain beat us
+    if (waited >= 2000) {
+      clearInterval(iv);
+      if (typeof IDB !== 'undefined') {
+        loadLFS();
+      } else {
+        loadScript('./idb.js', loadLFS, function() {});
+      }
+    }
+  }, 200);
 })();
 
 // ── Load Google Drive store on every page (only if drive-config.js exists) ───

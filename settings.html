@@ -232,6 +232,62 @@
     </div>
   </div>
 
+  <!-- ── Local Folder Sync ────────────────────────────────────────────── -->
+  <div class="card mb-4 admin-only" id="localFolderSyncCard">
+    <div class="card-header bg-info text-white fw-semibold py-2 d-flex justify-content-between align-items-center">
+      <span><i class="bi bi-hdd-fill me-1"></i>Local Folder Sync — สำรองข้อมูลลงเครื่อง (Real-time)</span>
+      <span id="lfsBadge" class="badge bg-white text-dark" style="font-size:11px">กำลังโหลด...</span>
+    </div>
+    <div class="card-body">
+      <!-- API not supported -->
+      <div id="lfsNoApiAlert" class="alert alert-warning d-none mb-3 py-2" role="alert">
+        <i class="bi bi-exclamation-triangle me-1"></i>
+        เบราว์เซอร์นี้ไม่รองรับ File System Access API — กรุณาใช้ <strong>Chrome</strong> หรือ <strong>Edge</strong>
+      </div>
+
+      <div id="lfsBody">
+        <p class="text-muted small mb-3">
+          เลือกโฟลเดอร์ในเครื่องเพื่อเก็บสำเนาข้อมูลแบบ Real-time ทุกครั้งที่มีการบันทึก
+          ไฟล์แต่ละ key จะถูกบันทึกเป็น <code>.json</code> แยกไว้ในโฟลเดอร์ที่เลือก
+          สามารถใช้ Restore เพื่อนำข้อมูลกลับเข้าระบบในกรณีฉุกเฉิน
+        </p>
+
+        <!-- Current folder display -->
+        <div class="mb-3">
+          <label class="fw-semibold mb-1 d-block">
+            <i class="bi bi-folder2-open text-info me-1"></i>โฟลเดอร์ที่เชื่อมต่ออยู่
+          </label>
+          <div class="input-group input-group-sm">
+            <span class="input-group-text bg-light"><i class="bi bi-hdd"></i></span>
+            <input type="text" id="lfsFolderName" class="form-control" readonly
+                   placeholder="ยังไม่ได้เลือกโฟลเดอร์" style="background:#f8f9fa">
+            <button class="btn btn-info text-white" id="btnLfsSelect" onclick="lfsSelectFolder()">
+              <i class="bi bi-folder2-open me-1"></i>เลือกโฟลเดอร์
+            </button>
+          </div>
+        </div>
+
+        <!-- Action buttons -->
+        <div class="d-flex gap-2 flex-wrap">
+          <button class="btn btn-outline-info btn-sm d-none" id="btnLfsReconnect" onclick="lfsReconnect()">
+            <i class="bi bi-arrow-clockwise me-1"></i>เชื่อมต่อใหม่ (Reconnect)
+          </button>
+          <button class="btn btn-outline-secondary btn-sm d-none" id="btnLfsWriteAll" onclick="lfsWriteAll()">
+            <i class="bi bi-arrow-down-circle me-1"></i>บันทึกทุก Key ตอนนี้
+          </button>
+          <button class="btn btn-outline-warning btn-sm d-none" id="btnLfsRestore" onclick="lfsRestore()">
+            <i class="bi bi-upload me-1"></i>Restore จากโฟลเดอร์
+          </button>
+          <button class="btn btn-outline-danger btn-sm d-none" id="btnLfsDisconnect" onclick="lfsDisconnect()">
+            <i class="bi bi-x-circle me-1"></i>ยกเลิกการเชื่อมต่อ
+          </button>
+        </div>
+
+        <div id="lfsStatus" class="mt-2 small text-muted"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Auto Backup Settings ──────────────────────────────────────────── -->
   <div class="card mb-4 admin-only">
     <div class="card-header bg-success text-white fw-semibold py-2">

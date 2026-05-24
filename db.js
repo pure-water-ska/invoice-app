@@ -133,6 +133,8 @@ const DB = {
     }
     // Queue upload to Google Drive (debounced, no-op if Drive not connected)
     if (window.DriveDbSync) DriveDbSync.queueUpload(key, val);
+    // Mirror to local folder (debounced, no-op if no folder selected)
+    if (window.LocalFolderSync) LocalFolderSync.queueWrite(key, val);
   },
 
   // ── Sticky banner shown when localStorage is full ─────────────────────────

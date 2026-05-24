@@ -14,6 +14,7 @@ window.addEventListener('DOMContentLoaded', () => {
   loadVersionInfo();
   initFolderSettings();
   initZipSections();
+  renderLocalFolderCard();
   if (Auth.isAdmin()) renderErrorLog();
   renderFsStatus();
   window.addEventListener('sync:error', renderFsStatus);
@@ -84,6 +85,162 @@ async function saveBackupToFolder(content, filename) {
     console.warn('Backup folder save:', e);
     return false;
   }
+}
+
+/* ─── Local Folder Sync ─────────────────────────────────────────────────── */
+
+function renderLocalFolderCard() {
+  const card = document.getElementById('localFolderSyncCard');
+  if (!card) return;
+
+  // If LocalFolderSync isn't loaded yet, wait for it then retry
+  if (!window.LocalFolderSync) {
+    window.addEventListener('localfolder:connected',  renderLocalFolderCard, { once: true });
+    window.addEventListener('localfolder:disconnected', renderLocalFolderCard, { once: true });
+    setTimeout(renderLocalFolderCard, 1500); // fallback retry
+    return;
+  }
+
+  const st = LocalFolderSync.getStatus();
+
+  // No API support
+  if (!st.supported) {
+    document.getElementById('lfsNoApiAlert').classList.remove('d-none');
+    document.getElementById('lfsBody').style.opacity = '0.4';
+    document.getElementById('lfsBody').style.pointerEvents = 'none';
+    document.getElementById('lfsBadge').textContent  = 'ไม่รองรับ';
+    document.getElementById('lfsBadge').className    = 'badge bg-secondary';
+    return;
+  }
+
+  const nameEl        = document.getElementById('lfsFolderName');
+  const badgeEl       = document.getElementById('lfsBadge');
+  const statusEl      = document.getElementById('lfsStatus');
+  const btnReconnect  = document.getElementById('btnLfsReconnect');
+  const btnWriteAll   = document.getElementById('btnLfsWriteAll');
+  const btnRestore    = document.getElementById('btnLfsRestore');
+  const btnDisconnect = document.getElementById('btnLfsDisconnect');
+
+  nameEl.value = st.folderName || '';
+
+  if (st.connected) {
+    badgeEl.textContent = '✓ เชื่อมต่อแล้ว';
+    badgeEl.className   = 'badge bg-success text-white';
+    statusEl.textContent = `กำลังซิงค์ไปยัง: ${st.folderName}`;
+    btnReconnect.classList.add('d-none');
+    btnWriteAll.classList.remove('d-none');
+    btnRestore.classList.remove('d-none');
+    btnDisconnect.classList.remove('d-none');
+  } else if (st.needsPermission) {
+    badgeEl.textContent = '⚠ ต้องการสิทธิ์';
+    badgeEl.className   = 'badge bg-warning text-dark';
+    statusEl.innerHTML  = `โฟลเดอร์ <strong>${st.folderName}</strong> ต้องการสิทธิ์ใหม่ — กด <em>เชื่อมต่อใหม่</em>`;
+    btnReconnect.classList.remove('d-none');
+    btnWriteAll.classList.add('d-none');
+    btnRestore.classList.remove('d-none');
+    btnDisconnect.classList.remove('d-none');
+  } else {
+    badgeEl.textContent = 'ไม่ได้เชื่อมต่อ';
+    badgeEl.className   = 'badge bg-secondary text-white';
+    statusEl.textContent = 'เลือกโฟลเดอร์เพื่อเริ่มซิงค์อัตโนมัติ';
+    btnReconnect.classList.add('d-none');
+    btnWriteAll.classList.add('d-none');
+    btnRestore.classList.add('d-none');
+    btnDisconnect.classList.add('d-none');
+  }
+
+  // Re-render on connection changes
+  window.addEventListener('localfolder:connected',    renderLocalFolderCard, { once: true });
+  window.addEventListener('localfolder:disconnected', renderLocalFolderCard, { once: true });
+  window.addEventListener('localfolder:permissionlost', renderLocalFolderCard, { once: true });
+}
+
+async function lfsSelectFolder() {
+  if (!window.LocalFolderSync) return;
+  try {
+    const name = await LocalFolderSync.selectFolder();
+    Utils.showAlert(`<i class="bi bi-check-circle me-1"></i>เชื่อมต่อโฟลเดอร์ <strong>${name}</strong> สำเร็จ — กำลังบันทึกข้อมูล…`);
+    renderLocalFolderCard();
+  } catch (e) {
+    if (e.name !== 'AbortError') Utils.showAlert('เลือกโฟลเดอร์ล้มเหลว: ' + e.message, 'danger');
+  }
+}
+
+async function lfsReconnect() {
+  if (!window.LocalFolderSync) return;
+  try {
+    const ok = await LocalFolderSync.reconnect();
+    if (ok) Utils.showAlert('<i class="bi bi-check-circle me-1"></i>เชื่อมต่อโฟลเดอร์ใหม่สำเร็จ — กำลังบันทึกข้อมูล…');
+    else    Utils.showAlert('ไม่ได้รับสิทธิ์ — กรุณาลองเลือกโฟลเดอร์ใหม่', 'warning');
+    renderLocalFolderCard();
+  } catch (e) {
+    Utils.showAlert('Reconnect ล้มเหลว: ' + e.message, 'danger');
+  }
+}
+
+async function lfsWriteAll() {
+  if (!window.LocalFolderSync) return;
+  const btn = document.getElementById('btnLfsWriteAll');
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลังบันทึก…';
+  try {
+    await LocalFolderSync.writeAll();
+    Utils.showAlert('<i class="bi bi-check-circle me-1"></i>บันทึกข้อมูลทุก Key ลงโฟลเดอร์สำเร็จ');
+  } catch (e) {
+    Utils.showAlert('บันทึกล้มเหลว: ' + e.message, 'danger');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
+
+async function lfsRestore() {
+  if (!window.LocalFolderSync) return;
+  const confirmed = confirm(
+    'Restore จากโฟลเดอร์?\n\n' +
+    'ข้อมูลทุกอย่างในระบบจะถูกแทนที่ด้วยไฟล์จากโฟลเดอร์ที่เลือก\n' +
+    'แนะนำให้ Export Backup ก่อน!\n\n' +
+    'กด OK เพื่อดำเนินการต่อ'
+  );
+  if (!confirmed) return;
+
+  const btn = document.getElementById('btnLfsRestore');
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลัง Restore…';
+
+  try {
+    const data = await LocalFolderSync.restore();
+    const keys = Object.keys(data);
+    if (keys.length === 0) { Utils.showAlert('ไม่พบไฟล์ .json ในโฟลเดอร์', 'warning'); return; }
+
+    let restored = 0;
+    for (const key of keys) {
+      // Only restore keys that belong to the DB (ignore unknown keys)
+      if (!Object.values(DB.K).includes(key)) continue;
+      DB._set(key, data[key]);
+      restored++;
+    }
+    Utils.showAlert(
+      `<i class="bi bi-check-circle me-1"></i>Restore สำเร็จ — นำเข้า ${restored} keys จากโฟลเดอร์ กรุณา Reload หน้าเพื่อดูข้อมูลล่าสุด`,
+      'success'
+    );
+    DB.logActivity(session.userId, session.username, 'Restore จาก Local Folder', { keys: restored });
+  } catch (e) {
+    Utils.showAlert('Restore ล้มเหลว: ' + e.message, 'danger');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
+
+async function lfsDisconnect() {
+  if (!window.LocalFolderSync) return;
+  if (!confirm('ยกเลิกการเชื่อมต่อโฟลเดอร์?\n\nข้อมูลในโฟลเดอร์จะไม่ถูกลบ แค่หยุดซิงค์เท่านั้น')) return;
+  await LocalFolderSync.disconnect();
+  Utils.showAlert('ยกเลิกการเชื่อมต่อโฟลเดอร์แล้ว', 'info');
+  renderLocalFolderCard();
 }
 
 /* ─── Company Settings ──────────────────────────────────────────────────── */
