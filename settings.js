@@ -8,6 +8,7 @@ window.addEventListener('DOMContentLoaded', () => {
   loadCompanySettings();
   loadAutoBackup();
   renderStorageBar();
+  renderStorageCleanup();
   renderLogCounts();
   loadStats();
   loadVersionInfo();
@@ -221,6 +222,215 @@ function fmtBytes(b) {
   if (b < 1024) return b + ' B';
   if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
   return (b / 1024 / 1024).toFixed(2) + ' MB';
+}
+
+/* ─── Storage Cleanup ────────────────────────────────────────────────────── */
+function _lsKeyBytes(key) {
+  return (localStorage.getItem(key) || '').length * 2; // UTF-16 bytes
+}
+
+function renderStorageCleanup() {
+  const el = document.getElementById('storageCleanupBody');
+  if (!el) return;
+
+  const LOG_KEYS   = [DB.K.ACTIVITY, DB.K.LOGINS, DB.K.ERRORS];
+  const PRICE_KEY  = DB.K.PRICE_HISTORY;
+
+  let logBytes = 0, priceBytes = 0, businessBytes = 0;
+  for (const k in localStorage) {
+    if (!k.startsWith('wt_')) continue;
+    const b = _lsKeyBytes(k);
+    if (LOG_KEYS.includes(k))  logBytes      += b;
+    else if (k === PRICE_KEY)  priceBytes    += b;
+    else                       businessBytes += b;
+  }
+  const totalBytes = logBytes + priceBytes + businessBytes;
+  const limit      = 5 * 1024 * 1024;
+  const pct        = Math.min(100, (totalBytes / limit) * 100);
+  const barColor   = pct > 80 ? 'bg-danger' : pct > 60 ? 'bg-warning' : 'bg-success';
+
+  const fsReady    = !!(window.Sync && Sync.ready && Sync._db);
+  const priceCount = DB.getPriceHistory().length;
+  const logCount   = DB.getActivity().length + DB.getLogins().length + DB.getErrors().length;
+
+  el.innerHTML = `
+    <div class="d-flex justify-content-between text-muted small mb-1">
+      <span><i class="bi bi-hdd me-1"></i>พื้นที่ใช้ทั้งหมด</span>
+      <span>${fmtBytes(totalBytes)} / ~5 MB (${pct.toFixed(1)}%)</span>
+    </div>
+    <div class="progress mb-3" style="height:8px">
+      <div class="progress-bar ${barColor}" style="width:${pct.toFixed(1)}%"></div>
+    </div>
+    <div class="row g-2 mb-3">
+      <div class="col-4">
+        <div class="border rounded p-2 text-center">
+          <div class="small text-muted mb-1">ข้อมูลธุรกิจ</div>
+          <div class="fw-semibold small">${fmtBytes(businessBytes)}</div>
+        </div>
+      </div>
+      <div class="col-4">
+        <div class="border rounded p-2 text-center">
+          <div class="small text-muted mb-1">ประวัติราคา</div>
+          <div class="fw-semibold small">${fmtBytes(priceBytes)}</div>
+        </div>
+      </div>
+      <div class="col-4">
+        <div class="border rounded p-2 text-center">
+          <div class="small text-muted mb-1">ล็อกกิจกรรม</div>
+          <div class="fw-semibold small ${logBytes > 512 * 1024 ? 'text-danger' : ''}">${fmtBytes(logBytes)}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="border rounded mb-3 overflow-hidden">
+      <div class="d-flex align-items-start gap-3 p-3 border-bottom">
+        <input type="checkbox" id="scLogs" class="form-check-input flex-shrink-0" style="margin-top:3px"
+          ${logCount > 0 ? 'checked' : ''} ${logCount === 0 ? 'disabled' : ''} onchange="updateCleanupPreview()">
+        <div>
+          <label for="scLogs" class="fw-semibold small mb-1 d-block" style="cursor:pointer">
+            ล็อกกิจกรรม
+            <span class="badge bg-danger bg-opacity-10 text-danger ms-1 fw-normal">ปลอดภัยล้างได้</span>
+          </label>
+          <div class="text-muted" style="font-size:12px">
+            wt_activity · wt_logins · wt_errors — ไม่ซิงก์กับ Firestore ·
+            ${logCount.toLocaleString('th-TH')} รายการ · ${fmtBytes(logBytes)}
+          </div>
+        </div>
+      </div>
+      <div class="d-flex align-items-start gap-3 p-3 border-bottom">
+        <input type="checkbox" id="scPrice" class="form-check-input flex-shrink-0" style="margin-top:3px"
+          ${priceCount > 500 ? 'checked' : ''} ${priceCount === 0 ? 'disabled' : ''} onchange="updateCleanupPreview()">
+        <div>
+          <label for="scPrice" class="fw-semibold small mb-1 d-block" style="cursor:pointer">
+            ประวัติราคา — เก็บล่าสุด
+            <input type="number" id="scPriceKeep" value="500" min="50" max="9999"
+              class="form-control form-control-sm d-inline-block mx-1"
+              style="width:68px;padding:1px 6px;font-size:12px"
+              oninput="updateCleanupPreview()">
+            รายการ
+            <span class="badge bg-success bg-opacity-10 text-success ms-1 fw-normal">ตัดทิ้งบางส่วน</span>
+          </label>
+          <div class="text-muted" style="font-size:12px">
+            wt_price_history · ${priceCount.toLocaleString('th-TH')} รายการ · ${fmtBytes(priceBytes)}
+          </div>
+        </div>
+      </div>
+      <div class="d-flex align-items-start gap-3 p-3 ${!fsReady ? 'opacity-50' : ''}">
+        <input type="checkbox" class="form-check-input flex-shrink-0" style="margin-top:3px" disabled>
+        <div>
+          <label class="fw-semibold small mb-1 d-block">
+            ข้อมูลธุรกิจ (ใบกำกับ, ลูกค้า, สินค้า …)
+            <span class="badge bg-secondary bg-opacity-25 text-secondary ms-1 fw-normal">
+              ${fsReady ? 'ยังไม่รองรับ' : 'ต้องการ Firestore'}
+            </span>
+          </label>
+          <div class="text-muted" style="font-size:12px">
+            ${fsReady
+              ? 'Firestore พร้อมแล้ว — ฟีเจอร์นี้ยังไม่รองรับในเวอร์ชันนี้'
+              : 'เปิด Firestore Sync ก่อนจึงจะล้างข้อมูลธุรกิจได้'}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="scPreviewAlert" class="d-none mb-3"></div>
+    <div class="d-flex gap-2 justify-content-end">
+      <button class="btn btn-outline-secondary btn-sm" onclick="renderStorageCleanup()">
+        <i class="bi bi-arrow-clockwise me-1"></i>รีเฟรช
+      </button>
+      <button class="btn btn-warning btn-sm" id="btnRunCleanup" onclick="runStorageCleanup()" disabled>
+        <i class="bi bi-trash me-1"></i>ล้างข้อมูลที่เลือก
+      </button>
+    </div>
+  `;
+
+  updateCleanupPreview();
+}
+
+function updateCleanupPreview() {
+  const logsChecked  = document.getElementById('scLogs')?.checked  ?? false;
+  const priceChecked = document.getElementById('scPrice')?.checked ?? false;
+  const keepN        = parseInt(document.getElementById('scPriceKeep')?.value || '500', 10);
+
+  let willFree = 0;
+  if (logsChecked) {
+    [DB.K.ACTIVITY, DB.K.LOGINS, DB.K.ERRORS].forEach(k => willFree += _lsKeyBytes(k));
+  }
+  if (priceChecked) {
+    const priceCount = DB.getPriceHistory().length;
+    if (priceCount > keepN) {
+      const cur = _lsKeyBytes(DB.K.PRICE_HISTORY);
+      willFree += Math.round(cur * (priceCount - keepN) / priceCount);
+    }
+  }
+
+  const alertEl = document.getElementById('scPreviewAlert');
+  const btnEl   = document.getElementById('btnRunCleanup');
+  if (!alertEl) return;
+
+  if (willFree === 0) {
+    alertEl.className = 'alert alert-secondary small py-2 mb-3';
+    alertEl.classList.remove('d-none');
+    alertEl.innerHTML = '<i class="bi bi-info-circle me-1"></i>ไม่มีรายการที่เลือก หรือข้อมูลว่างอยู่แล้ว';
+    if (btnEl) btnEl.disabled = true;
+  } else {
+    let totalBytes = 0;
+    for (const k in localStorage) {
+      if (k.startsWith('wt_')) totalBytes += _lsKeyBytes(k);
+    }
+    const afterPct = Math.min(100, ((totalBytes - willFree) / (5 * 1024 * 1024)) * 100);
+    alertEl.className = 'alert alert-warning small py-2 mb-3';
+    alertEl.classList.remove('d-none');
+    alertEl.innerHTML = `<i class="bi bi-trash me-1"></i>จะล้างประมาณ <strong>${fmtBytes(willFree)}</strong>
+      — คาดว่า localStorage จะเหลือ ~${afterPct.toFixed(0)}% หลังล้าง`;
+    if (btnEl) btnEl.disabled = false;
+  }
+}
+
+function runStorageCleanup() {
+  const logsChecked  = document.getElementById('scLogs')?.checked  ?? false;
+  const priceChecked = document.getElementById('scPrice')?.checked ?? false;
+  if (!logsChecked && !priceChecked) {
+    Utils.showAlert('ไม่มีรายการที่เลือก', 'warning'); return;
+  }
+
+  const lines = [];
+  if (logsChecked)  lines.push('• ล็อกกิจกรรมทั้งหมด (activity, logins, errors)');
+  if (priceChecked) {
+    const keepN = parseInt(document.getElementById('scPriceKeep')?.value || '500', 10);
+    lines.push(`• ประวัติราคา (เก็บล่าสุด ${keepN.toLocaleString('th-TH')} รายการ)`);
+  }
+  if (!confirm(`จะล้างข้อมูลต่อไปนี้:\n\n${lines.join('\n')}\n\nยืนยันหรือไม่?`)) return;
+
+  let freed = 0;
+
+  if (logsChecked) {
+    const before = _lsKeyBytes(DB.K.ACTIVITY) + _lsKeyBytes(DB.K.LOGINS) + _lsKeyBytes(DB.K.ERRORS);
+    DB._set(DB.K.ACTIVITY, []);
+    DB._set(DB.K.LOGINS,   []);
+    DB.clearErrors();
+    freed += before;
+  }
+
+  if (priceChecked) {
+    const keepN   = parseInt(document.getElementById('scPriceKeep')?.value || '500', 10);
+    const before  = _lsKeyBytes(DB.K.PRICE_HISTORY);
+    const history = DB.getPriceHistory();
+    if (history.length > keepN) {
+      DB.savePriceHistory(history.slice(0, keepN)); // newest first (unshift order)
+      freed += Math.max(0, before - _lsKeyBytes(DB.K.PRICE_HISTORY));
+    }
+  }
+
+  DB.logActivity(session.userId, session.username, 'ล้าง localStorage', { freed: fmtBytes(freed) });
+
+  Utils.showAlert(
+    `<i class="bi bi-check-circle me-1"></i>ล้างสำเร็จ — เพิ่มพื้นที่ว่าง ~${fmtBytes(freed)}`,
+    'success'
+  );
+  renderStorageBar();
+  renderLogCounts();
+  renderStorageCleanup();
 }
 
 /* ─── Log Counts ────────────────────────────────────────────────────────── */
