@@ -1174,11 +1174,17 @@ var Sync = {
               const pullIds  = this._pullIds[colName] || new Set();
               const stones   = this._getTombstones(colName);
               const now      = Date.now();
-              const localOnly = localArr.filter(r =>
-                r.id && !fsIds.has(r.id) &&
-                !pullIds.has(r.id) &&   // added AFTER page load — not a remote deletion
-                (!stones[r.id] || now - stones[r.id] > this._tombstoneTTL)
-              );
+              const localOnly = localArr.filter(r => {
+                if (!r.id || fsIds.has(r.id)) return false;
+                if (stones[r.id] && now - stones[r.id] <= this._tombstoneTTL) return false;
+                // Records OUTSIDE the archive window will never appear in this date-filtered
+                // listener query — their absence is not a deletion signal, always keep them.
+                if (listenerCutoffISO && (r.createdAt || '') < listenerCutoffISO) return true;
+                // For records inside the query window: only keep if added THIS session
+                // (not in pullIds).  Records in pullIds that are missing from Firestore
+                // were deleted on another device.
+                return !pullIds.has(r.id);
+              });
               if (localOnly.length > 0) {
                 console.log(`[Sync] Listener merge: keeping ${localOnly.length} new-session ${colName} records (not pushing — next write will sync)`);
                 // Do NOT push back here — pushing is what caused records deleted on
