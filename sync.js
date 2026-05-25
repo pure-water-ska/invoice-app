@@ -1290,16 +1290,18 @@ var Sync = {
     // Only show toast when the current page actually uses this key.
     // Prevents e.g. "คืนสินค้า synced" appearing on the invoices page.
     const page = (location.pathname.split('/').pop() || 'index.html').replace(/\?.*$/, '');
+    // Only show toasts on pages that explicitly list the key.
+    // Any page NOT listed here (login, invoice-create, settings, etc.) gets no toasts.
     const PAGE_KEYS = {
-      'returns.html':   ['wt_returns'],
       'invoices.html':  ['wt_invoices'],
       'payments.html':  ['wt_invoices', 'wt_payments'],
+      'returns.html':   ['wt_returns'],
       'products.html':  ['wt_products', 'wt_pricing'],
       'customers.html': ['wt_customers'],
       'dashboard.html': ['wt_invoices', 'wt_payments'],
     };
     const relevantKeys = PAGE_KEYS[page];
-    const isRelevant   = !relevantKeys || relevantKeys.includes(lsKey);
+    const isRelevant   = !!(relevantKeys && relevantKeys.includes(lsKey));
 
     // Show toast
     if (label && isRelevant) {
