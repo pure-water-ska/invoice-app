@@ -147,6 +147,29 @@ var Sync = {
     } catch { return new Set(); }
   },
 
+  // ── Persisted pull IDs — session-scoped, survive page navigation ─────────────
+  // _pullIds must reflect exactly "IDs confirmed in Firestore at the start of this
+  // session" (from the real _pullAll() Firestore query).  When _seedStateFromLocalStorage()
+  // re-seeds _pullIds on each page navigation it must NOT include local-only records
+  // (created after _pullAll(), not yet pushed) — those would be treated as
+  // "deleted on another device" when the listener fires without them.
+  // Solution: save the authoritative _pullIds to sessionStorage after every real
+  // Firestore pull, and restore from sessionStorage on subsequent page loads.
+  _savePullIds(colName) {
+    try {
+      const all = JSON.parse(sessionStorage.getItem('wt_sync_pull_ids') || '{}');
+      all[colName] = [...(this._pullIds[colName] || new Set())];
+      sessionStorage.setItem('wt_sync_pull_ids', JSON.stringify(all));
+    } catch {}
+  },
+
+  _loadSavedPullIds(colName) {
+    try {
+      const all = JSON.parse(sessionStorage.getItem('wt_sync_pull_ids') || '{}');
+      return new Set(all[colName] || []);
+    } catch { return new Set(); }
+  },
+
   // ── Emit Firestore connection state (fromCache) for the connection banner ──
   // Called by every onSnapshot callback with the snapshot's metadata.fromCache value.
   // Deduplicates: only dispatches when the state actually changes so the banner
@@ -695,7 +718,11 @@ var Sync = {
           } else {
             this._serverIds[colName] = new Set(ids);
           }
-          this._pullIds[colName] = new Set(ids);
+          // CRITICAL: restore _pullIds from sessionStorage (set by the real _pullAll() Firestore
+          // query at session start) — NOT from all local IDs.  Local-only records (created after
+          // _pullAll(), not yet pushed) must not be in _pullIds or the listener will treat their
+          // absence from Firestore as "deleted on another device" and wipe them.
+          this._pullIds[colName] = this._loadSavedPullIds(colName);
         }
       } catch {}
     }
@@ -890,7 +917,10 @@ var Sync = {
             } else {
               this._serverIds[colName] = new Set(ids);   // deletion detection in _writeKey()
             }
-            this._pullIds[colName]   = new Set(ids);   // "new-this-session" guard in listener
+            // Restore _pullIds from sessionStorage — same logic as _seedStateFromLocalStorage().
+            // Must NOT use local `ids` here: local-only records not yet in Firestore would be
+            // treated as "deleted on another device" if they appear in _pullIds but not in the listener.
+            this._pullIds[colName] = this._loadSavedPullIds(colName);
           }
         } catch {}
         return;
@@ -923,8 +953,12 @@ var Sync = {
           } else {
             this._serverIds[colName] = new Set(snap.docs.map(d => d.id));
           }
-          // Cache pull IDs — used by listener to tell "new this session" from "deleted on another device"
+          // Cache pull IDs — used by listener to tell "new this session" from "deleted on another device".
+          // Also persist to sessionStorage so _seedStateFromLocalStorage() can restore the exact same set
+          // on subsequent page navigations (instead of re-computing from all local IDs, which would
+          // incorrectly include local-only records not yet pushed to Firestore).
           this._pullIds[colName] = new Set(snap.docs.map(d => d.id));
+          this._savePullIds(colName);
           // Apply tombstones so recently-deleted records aren't restored on page reload
           const fsArr = this._applyTombstones(colName, snap.docs).map(d => {
             const { _by, _ts, ...rec } = d.data();
