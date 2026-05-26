@@ -1099,6 +1099,20 @@ var Sync = {
             if (doc.data()?.by === this._deviceId) return;
             if (!doc.exists || doc.data()?.d === undefined) return;
 
+            // Update cached server timestamp so the delta skip in the next _pullAll()
+            // stays accurate.  Without this, _lastDocTs holds the ts from the last
+            // .get() call — if another device updated the document in the meantime the
+            // listener would update localStorage but _lastDocTs would remain stale,
+            // causing the next page-load's _pullAll() to incorrectly skip the document.
+            const _listenerDocTs = doc.data().ts?.toDate?.()?.getTime?.() ?? 0;
+            if (_listenerDocTs > 0) {
+              try {
+                const _allDocTs = JSON.parse(localStorage.getItem('wt_sync_doc_ts') || '{}');
+                _allDocTs[docName] = _listenerDocTs;
+                localStorage.setItem('wt_sync_doc_ts', JSON.stringify(_allDocTs));
+              } catch {}
+            }
+
             const fsVal = doc.data().d;
 
             // For array documents (activity log, login log, users, etc.) MERGE

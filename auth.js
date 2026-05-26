@@ -123,6 +123,17 @@ const Auth = {
       try { DB.runAutoBackup(s.username); } catch {}
     }
     sessionStorage.removeItem(this.KEY);
+    // Clear the sync session guard so the login page always does a fresh _pullAll()
+    // and picks up any users added on another device while this session was active.
+    sessionStorage.removeItem('wt_sync_session_pulled');
+    // Invalidate the users_cfg delta timestamp so _pullAll() never skips fetching
+    // wt_users on the next load — stale timestamps would cause the delta optimisation
+    // to think the document is unchanged even when another device added a new user.
+    try {
+      var _docTs = JSON.parse(localStorage.getItem('wt_sync_doc_ts') || '{}');
+      delete _docTs['users_cfg'];
+      localStorage.setItem('wt_sync_doc_ts', JSON.stringify(_docTs));
+    } catch {}
     localStorage.removeItem('mustChangePw');
     // Sign out of Firebase if sync is active
     try { if (window.firebase && firebase.apps.length) firebase.auth().signOut(); } catch {}
