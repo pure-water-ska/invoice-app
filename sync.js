@@ -908,9 +908,9 @@ var Sync = {
           const localArr = JSON.parse(raw || '[]');
           if (Array.isArray(localArr)) {
             const ids = new Set(localArr.filter(r => r.id).map(r => r.id));
-            if (colName === 'invoices') {
-              // Invoices: merge local IDs into the full persisted server-ID set so
-              // _writeKey() can tombstone-delete archived records outside the pull window.
+            if (colName === 'invoices' || colName === 'payments') {
+              // Archive collections: merge local IDs into the full persisted server-ID set so
+              // _writeKey() can tombstone-delete records outside the archive window.
               const persisted = this._loadSavedServerIds(colName);
               ids.forEach(id => persisted.add(id));
               this._serverIds[colName] = persisted;
@@ -925,17 +925,17 @@ var Sync = {
         } catch {}
         return;
       }
-      // ── Invoice archive: seed _serverIds from persisted IDs before querying ──
-      // _pullAll() only fetches the last ARCHIVE_MONTHS of invoices. Loading the
-      // persisted set first ensures _writeKey() can tombstone-delete archived
-      // invoices even though they won't appear in this page's date-filtered snapshot.
-      if (colName === 'invoices') {
+      // ── Archive collections: seed _serverIds from persisted IDs before querying ──
+      // _pullAll() only fetches the last ARCHIVE_MONTHS for invoices and payments.
+      // Loading the persisted set first ensures _writeKey() can tombstone-delete
+      // archived records even though they won't appear in the date-filtered snapshot.
+      if (colName === 'invoices' || colName === 'payments') {
         this._serverIds[colName] = this._loadSavedServerIds(colName);
       }
-      // ── Date-filtered Firestore query for invoices (archive window) ───────────
-      // Regular collections are fetched in full; invoices are filtered to the last
-      // ARCHIVE_MONTHS to stay within Firestore read quotas and page-load budgets.
-      const cutoffISO = colName === 'invoices'
+      // ── Date-filtered Firestore query for archive collections ─────────────────
+      // Both invoices and payments are filtered to the last ARCHIVE_MONTHS to stay
+      // within Firestore read quotas and page-load budgets.
+      const cutoffISO = (colName === 'invoices' || colName === 'payments')
         ? new Date(Date.now() - this.ARCHIVE_MONTHS * 30.44 * 24 * 3600 * 1000).toISOString()
         : null;
       const colQuery = cutoffISO
@@ -945,9 +945,9 @@ var Sync = {
         const snap = await colQuery.get();
         if (!snap.empty) {
           // Cache server IDs — used by _writeKey() to tombstone deletions synchronously.
-          // Invoices: MERGE fetched IDs into the seeded persisted set (not replace) so
-          // archived records outside the 6-month window remain tombstone-trackable.
-          if (colName === 'invoices') {
+          // Archive collections: MERGE fetched IDs into the seeded persisted set (not replace)
+          // so archived records outside the window remain tombstone-trackable.
+          if (colName === 'invoices' || colName === 'payments') {
             snap.docs.forEach(d => this._serverIds[colName].add(d.id));
             this._saveServerIds(colName);
           } else {
@@ -1155,11 +1155,11 @@ var Sync = {
 
     // Listen to collection keys
     for (const [lsKey, colName] of Object.entries(this.COLLECTIONS)) {
-      // ── Invoice archive: apply the same ARCHIVE_MONTHS window used in _pullAll() ──
-      // Without this, the very first live snapshot delivers ALL historical invoices and
+      // ── Archive collections: apply the same ARCHIVE_MONTHS window used in _pullAll() ──
+      // Without this, the very first live snapshot delivers ALL historical records and
       // overwrites localStorage — completely bypassing the date-filtered _pullAll().
       // Both the pull query and the listener must use the same cutoff so they stay in sync.
-      const listenerCutoffISO = colName === 'invoices'
+      const listenerCutoffISO = (colName === 'invoices' || colName === 'payments')
         ? new Date(Date.now() - this.ARCHIVE_MONTHS * 30.44 * 24 * 3600 * 1000).toISOString()
         : null;
       const colRef = listenerCutoffISO

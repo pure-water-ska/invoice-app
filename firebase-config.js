@@ -13,6 +13,6 @@ const FIREBASE_CONFIG = {
   appId:             "1:1057822150566:web:33f43cea74219eac914967",
 
   orgId:        "main",
-  teamEmail:    "pure.water.ska@gmail.com",
-  teamPassword: "", // ← injected by CI (FIREBASE_TEAM_PASSWORD secret) or firebase-credentials.js
+  teamEmail:    "team@main.wt.local",
+  teamPassword: "",  // injected by CI
 };

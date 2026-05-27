@@ -20,7 +20,8 @@ window.DriveDbSync = {
   SYNC_KEYS: [
     'wt_users', 'wt_customers', 'wt_products', 'wt_pricing',
     'wt_invoices', 'wt_payments', 'wt_inv_counter', 'wt_settings',
-    'wt_versions', 'wt_pay_methods', 'wt_cap_colors', 'wt_cap_receipts',
+    'wt_versions', 'wt_pay_methods', 'wt_transfer_accounts',
+    'wt_cap_colors', 'wt_cap_receipts',
     'wt_cap_deductions', 'wt_price_history', 'wt_returns',
     'wt_activity', 'wt_logins',
   ],

@@ -71,6 +71,10 @@ Open `index.html` (login page). The app works fully offline without Firebase or 
 
 **In-memory cache:** `DB._cache` holds the last parsed value per key. Invalidated by `DB._set()` and by `DB.invalidate(key)` (called from `sync.js` after Firestore writes localStorage directly).
 
+**IndexedDB overflow:** When `localStorage.setItem()` throws `QuotaExceededError`, `DB._set()` automatically moves the key to IndexedDB (`wt_data_v1` store via `idb.js`). The set of overflowed keys is tracked in `DB._idbKeys` (a `Set`) and persisted to `localStorage['wt_idb_keys']` (and also mirrored to IDB) so it survives page reloads. `DB._get()` / `DB._getArray()` transparently read from IDB when `_idbKeys.has(key)`. `sync.js` `_localRead()` / `_lsWrite()` also respect `_idbKeys`. The user sees a toast notification when a key first overflows.
+
+**`DB.addBrandToCustomer(custId, brand)`** — idempotent helper that appends `brand` to a customer's `brands[]` array (migrating from the legacy scalar `brand` field if needed). Always use this instead of calling `DB.updateCustomer()` directly for brand registration, to avoid race-condition side-effects and accidental field overwrites.
+
 ### Sync Engine (`sync.js`)
 
 Firestore bidirectional sync. Two categories of data with different Firestore layouts:
@@ -81,6 +85,12 @@ Firestore bidirectional sync. Two categories of data with different Firestore la
 
 **DOCUMENTS** — entire array/object stored in one Firestore document:
 - All other keys (`wt_customers`, `wt_products`, `wt_transfer_accounts`, etc.)
+
+**NO_SYNC list** — keys explicitly excluded from Firestore sync (local-only):
+```javascript
+Sync.NO_SYNC = new Set(['wt_activity', 'wt_logins', 'wt_errors'])
+```
+These keys are still saved to localStorage/IDB normally; they are just never pushed to or pulled from Firestore. Add a key here when it should remain device-local (audit logs, error logs, etc.).
 
 #### Write path optimisations (all three active)
 
@@ -100,10 +110,20 @@ Console output: `[Sync] invoices: 1 upserted, 0 deleted, 299 unchanged (skipped)
 
 #### Pull path
 
-`_pullAll()` runs on page load:
-- **DOCUMENTS:** fetches each doc; skips if server `ts` < last pull timestamp (delta optimisation).
-- **COLLECTIONS:** skips the round-trip entirely if pulled within the last 30 s (trusts the real-time listener); otherwise runs a date-filtered query (invoices: last `ARCHIVE_MONTHS = 6` months).
+`_pullAll()` runs on page load with a **session guard** (`sessionStorage['wt_sync_session_pulled']`). The full Firestore pull only runs once per browser session (first page load after login). Subsequent page navigations skip the pull and call `_seedStateFromLocalStorage()` instead to restore in-memory caches from local data:
+
+- **DOCUMENTS:** fetches each doc; skips if server `ts` ≤ `_lastDocTs[docName]` (delta optimisation). `_lastDocTs` is persisted in `localStorage['wt_sync_doc_ts']` and is updated both by `_pullAll()` and by the real-time DOCUMENT listener — keeping the delta skip accurate even after a remote change arrives between page navigations.
+- **COLLECTIONS:** skips the round-trip entirely if pulled within the last 30 s (trusts the real-time listener); otherwise runs a date-filtered query (invoices and payments: last `ARCHIVE_MONTHS = 6` months).
 - After pulling, both DOCUMENTS and COLLECTIONS seed their fingerprint caches (`_lastDocJson`, `_lastSyncedRecs`) so the first write only sends genuine changes.
+
+#### `_pullIds` — new-session invoice guard
+
+`_pullIds[colName]` is a `Set` of every invoice/payment ID that was present in Firestore at the time of the full session pull. The real-time COLLECTIONS listener uses this set to distinguish:
+
+- **ID in `_pullIds`** — record existed in Firestore at session start; a Firestore delete should remove it locally.
+- **ID not in `_pullIds`** — record was created locally this session and not yet confirmed by Firestore; the listener must NOT treat it as deleted.
+
+`_pullIds` is persisted to `sessionStorage['wt_sync_pull_ids']` (via `_savePullIds()`) immediately after `_pullAll()` fills it, and restored from there (via `_loadSavedPullIds()`) on subsequent page navigations and on the COL_SKIP path. This prevents the bug where navigating between pages caused all un-synced local invoices to disappear from the list.
 
 #### Invoice archive & PDF import
 
@@ -142,6 +162,8 @@ Session stored in sessionStorage (clears on tab close). SHA-256 hashed passwords
 if (!Auth.can('invoice_delete')) { /* deny */ }
 ```
 
+**`Auth.logout()`** clears both `sessionStorage[AUTH_KEY]` and `sessionStorage['wt_sync_session_pulled']` (forcing a full Firestore pull on the next login) and also deletes `_lastDocTs['users_cfg']` from `localStorage['wt_sync_doc_ts']` (forcing `users_cfg` to be re-fetched even if the server timestamp hasn't changed). This ensures that a newly-created user account on one device is visible to other devices immediately after their next login.
+
 ### Pages
 
 `index.html` (login) → `dashboard.html` → feature pages. Every page must include this shell:
@@ -166,23 +188,66 @@ Network-First for HTML; Cache-First for assets. `nav.js`, `sync.js`, `connection
 
 Google Drive OAuth token stored in sessionStorage; cached in IndexedDB (`idb.js`). DB key writes are debounced at 5 s and uploaded to Drive.
 
+### Local Folder Sync (`local-folder-sync.js`)
+
+Optional mirror of all DB keys to a user-selected local directory via the **File System Access API**. Each key is saved as a separate JSON file (e.g. `wt_invoices.json`). The directory handle is persisted in IndexedDB so it survives page reloads (browser may re-prompt once per session after restart — browser security requirement).
+
+Public API (all async unless noted):
+
+| Method | Description |
+|---|---|
+| `LocalFolderSync.init()` | Load handle + attach events — called by `nav.js` |
+| `LocalFolderSync.selectFolder()` | `showDirectoryPicker()` then `writeAll()` |
+| `LocalFolderSync.reconnect()` | Re-request permission (requires user gesture) |
+| `LocalFolderSync.disconnect()` | Forget folder, clear IDB handle |
+| `LocalFolderSync.writeAll()` | Flush every DB key to folder immediately |
+| `LocalFolderSync.queueWrite(key, val)` | Debounced write (3 s) — called by `DB._set()` |
+| `LocalFolderSync.restore()` | Read folder, return map of key → parsed value |
+| `LocalFolderSync.getStatus()` | Returns `{ connected, folderName, … }` (sync) |
+
+Window events: `localfolder:connected`, `localfolder:disconnected`, `localfolder:permissionlost`.
+
+Guarded with `if (!window.LocalFolderSync)` so it is safe to load twice.
+
+### Image Compression (`utils.js`)
+
+**`Utils.compressImage(file, maxPx=1200, quality=0.82)`** — Promise-based canvas downscale utility. Accepts a `File` object, scales it down to fit within `maxPx × maxPx` while preserving aspect ratio, and resolves with a JPEG `data:` URL. All image inputs in the app (`versions.html`, `returns.html`, `cap-stock.html`, `payments.html`) use this before building base64 strings. Always `await` it and wrap the call in `try/catch` so a single bad file doesn't abort a multi-file loop.
+
+```javascript
+// Default (1200 px, 0.82 quality)
+const b64 = await Utils.compressImage(file);
+
+// Custom
+const b64 = await Utils.compressImage(file, 900, 0.70);
+```
+
 ## Key Conventions
 
 - **No reactivity:** The DOM is not auto-synced to data. After writing to DB, call render functions explicitly.
-- **New localStorage key:** Define in `DB.K.*` in `db.js`, add to the snapshot key list in `DB.snapshot()`, and add to `Sync.DOCUMENTS` (or `COLLECTIONS`) in `sync.js`.
+- **New localStorage key:** Define in `DB.K.*` in `db.js`, add to the snapshot key list in `DB.snapshot()`, and add to `Sync.DOCUMENTS` (or `COLLECTIONS`) in `sync.js`. If it should never sync to Firestore, add it to `Sync.NO_SYNC` instead.
 - **New permission:** Add to `Auth.PERMS` in `auth.js`, check with `Auth.can('key')`.
 - **Storing objects vs arrays:** Object sub-keys inside a DOCUMENT are silently clobbered when another device syncs. Give any independently-managed data its own top-level `wt_*` key (see `wt_transfer_accounts`).
-- **Never read localStorage directly in sync.js:** Always use `this._localRead(lsKey)` — it handles LZString decompression.
+- **Never read localStorage directly in sync.js:** Always use `this._localRead(lsKey)` — it handles LZString decompression and IDB overflow transparently.
+- **Customer brand registration:** Always call `DB.addBrandToCustomer(custId, brand)` — never write `brands[]` directly via `DB.updateCustomer()`, which would clobber other fields on the customer object.
+- **Date validation:** `Utils.parseBEToISO(str)` returns `''` (falsy) on failure. After calling it, check the return value and call `Utils.showAlert(...)` if empty — never silently fall back to today's date.
 - **Error logging:** Uncaught errors go to `DB.logError()` → `wt_errors`; visible in Settings → Troubleshoot.
 - **Print layout:** A5 invoice format defined with `@media print` rules in `style.css`.
 - **Date filtering:** Invoice list and sync pull use Buddhist Era dates (BE = CE + 543) via `bedate.js`. Use `Utils.parseBEToISO()` / `Utils.formatDateTH()`.
 
+## sessionStorage keys used by sync
+
+| Key | Purpose |
+|---|---|
+| `wt_sync_session_pulled` | Session guard — set after first `_pullAll()`; cleared by `Auth.logout()` |
+| `wt_sync_pull_ids` | JSON map of `colName → [id, …]`; persisted `_pullIds` for listener guard |
+
 ## Git Note
 
-The sandbox cannot remove Windows `.git/HEAD.lock` files. If a commit fails with `cannot lock ref 'HEAD'`, run in a local terminal:
+The sandbox cannot remove Windows `.git/HEAD.lock` or `.git/index.lock` files. If a commit or checkout fails with a lock error, run in a local terminal:
 
 ```bash
 del "C:\Users\APINUN_JP\Downloads\web app\.git\HEAD.lock"
+del "C:\Users\APINUN_JP\Downloads\web app\.git\index.lock"
 cd "C:\Users\APINUN_JP\Downloads\web app"
 git add <files>
 git commit -m "..."

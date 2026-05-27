@@ -4,10 +4,20 @@ service cloud.firestore {
 
     // ── Per-org data ────────────────────────────────────────────────────────
     // Only Firebase accounts whose email domain matches the org ID can access
-    // that org's data.  Both per-user accounts (Phase 3: username@{orgId}.wt.local)
-    // and the shared team/service account (team@{orgId}.wt.local) must use the
-    // {orgId}.wt.local email domain.  This binds every Firebase Auth identity to
-    // a single organisation and prevents cross-org data leakage.
+    // that org's data.
+    //
+    // ⚠️  DEPLOYMENT REQUIREMENT:
+    //   ALL Firebase Auth accounts used by this app — including the shared team /
+    //   service account — MUST have an email in the form  *@{orgId}.wt.local.
+    //
+    //   Concretely, Netlify env var FIREBASE_TEAM_EMAIL must be set to:
+    //     team@{orgId}.wt.local   (where {orgId} matches FIREBASE_ORG_ID)
+    //
+    //   Per-user accounts (Phase 3) are provisioned as  username@{orgId}.wt.local
+    //   automatically by users.html — those already satisfy this rule.
+    //
+    //   If FIREBASE_TEAM_EMAIL is an external address (e.g. Gmail), the login-page
+    //   sync will fail immediately with PERMISSION_DENIED once these rules are deployed.
     //
     // Deploy with:  firebase deploy --only firestore:rules
     match /orgs/{orgId}/{document=**} {
