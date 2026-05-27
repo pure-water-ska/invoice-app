@@ -394,13 +394,15 @@ function saveVersion() {
   const custId = document.getElementById('vCust').value;
   const brand  = document.getElementById('vBrand').value.trim();
   const size   = document.getElementById('vSize').value.trim();
-  const date   = Utils.parseBEToISO(document.getElementById('vDate').value) || Utils.todayInputValue();
+  const rawDate   = document.getElementById('vDate').value.trim();
+  const date      = Utils.parseBEToISO(rawDate);
   const colorName = document.getElementById('vColorName').value.trim();
-  if (!custId)    { Utils.showAlert('กรุณาเลือกลูกค้า',    'warning','modalAlert'); return; }
-  if (!brand)     { Utils.showAlert('กรุณาระบุยี่ห้อ',     'warning','modalAlert'); return; }
-  if (!size)      { Utils.showAlert('กรุณาระบุขนาด/สินค้า','warning','modalAlert'); return; }
-  if (!colorName) { Utils.showAlert('กรุณาระบุชื่อสี',     'warning','modalAlert'); return; }
-  if (!date)      { Utils.showAlert('กรุณาระบุวันที่',      'warning','modalAlert'); return; }
+  if (!custId)    { Utils.showAlert('กรุณาเลือกลูกค้า',       'warning','modalAlert'); return; }
+  if (!brand)     { Utils.showAlert('กรุณาระบุยี่ห้อ',        'warning','modalAlert'); return; }
+  if (!size)      { Utils.showAlert('กรุณาระบุขนาด/สินค้า',   'warning','modalAlert'); return; }
+  if (!colorName) { Utils.showAlert('กรุณาระบุชื่อสี',        'warning','modalAlert'); return; }
+  if (!rawDate)   { Utils.showAlert('กรุณาระบุวันที่',         'warning','modalAlert'); return; }
+  if (!date)      { Utils.showAlert('รูปแบบวันที่ไม่ถูกต้อง (ใช้ วว/ดด/ปปปป เช่น 01/06/2568)', 'warning','modalAlert'); return; }
 
   const id   = document.getElementById('verId').value;
   const cust = DB.getCustomerById(custId);
