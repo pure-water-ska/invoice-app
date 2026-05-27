@@ -451,21 +451,22 @@ function addCustomReason() {
   renderReasonChips(v);
 }
 
-function previewImages(input) {
+async function previewImages(input) {
   const files = [...input.files];
   const row   = document.getElementById('imagePreviewRow');
-  files.forEach(f => {
-    const reader = new FileReader();
-    reader.onload = e => {
-      _pendingImages.push(e.target.result);
+  for (const f of files) {
+    try {
+      const b64 = await Utils.compressImage(f, 1200, 0.82);
+      _pendingImages.push(b64);
       const i = _pendingImages.length - 1;
       row.innerHTML += `<div class="position-relative" id="imgwrap${i}">
-        <img src="${e.target.result}" style="height:80px;border-radius:6px;object-fit:cover">
+        <img src="${b64}" style="height:80px;border-radius:6px;object-fit:cover">
         <button class="btn btn-danger btn-sm position-absolute top-0 end-0 p-0 px-1" onclick="removeImg(${i})" style="font-size:10px">×</button>
       </div>`;
-    };
-    reader.readAsDataURL(f);
-  });
+    } catch (e) {
+      console.warn('[previewImages] compression failed for', f.name, e.message);
+    }
+  }
 }
 
 function removeImg(i) {

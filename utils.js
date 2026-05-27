@@ -502,3 +502,41 @@ const Utils = {
            `${msg}${extra}</td></tr>`;
   },
 };
+
+// ── Image compression utility ─────────────────────────────────────────────────
+// Downscale and JPEG-compress a File via an off-screen canvas before converting
+// to base64.  Returns a Promise that resolves with the compressed data URL.
+//
+// Parameters:
+//   file    — File object from an <input type="file">
+//   maxPx   — maximum side length in pixels (default 1200).
+//             Landscape or portrait photos are scaled down proportionally so
+//             neither dimension exceeds maxPx.  Images already smaller are
+//             never upscaled (scale is capped at 1).
+//   quality — JPEG quality 0–1 (default 0.82; use 0.55 for thumbnail-only previews)
+//
+// Usage:
+//   const b64 = await Utils.compressImage(file);
+//   const b64 = await Utils.compressImage(file, 900, 0.70);
+Utils.compressImage = function(file, maxPx, quality) {
+  maxPx   = (maxPx   !== undefined) ? maxPx   : 1200;
+  quality = (quality !== undefined) ? quality : 0.82;
+  return new Promise(function(resolve, reject) {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('FileReader failed for ' + file.name));
+    reader.onload  = function(e) {
+      const img    = new Image();
+      img.onerror  = () => reject(new Error('Image decode failed for ' + file.name));
+      img.onload   = function() {
+        const scale  = Math.min(1, maxPx / img.width, maxPx / img.height);
+        const canvas = document.createElement('canvas');
+        canvas.width  = Math.round(img.width  * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+};

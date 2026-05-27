@@ -1190,31 +1190,17 @@ function onMethodChange() {
 }
 
 // ── Image loading ─────────────────────────────────────────────────────────────
-function loadPayImage(input, previewId) {
+async function loadPayImage(input, previewId) {
   const file = input.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = e => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      const MAX = 1200;
-      const scale = Math.min(1, MAX / img.width, MAX / img.height);
-      canvas.width  = Math.round(img.width  * scale);
-      canvas.height = Math.round(img.height * scale);
-      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-      const b64 = canvas.toDataURL('image/jpeg', 0.55);
-      if (previewId === 'transferImagePreview') payImages.transfer = b64;
-      else if (previewId === 'chequeImagePreview')  payImages.cheque  = b64;
-      else if (previewId === 'signedImagePreview')  payImages.signed  = b64;
-      document.getElementById(previewId).innerHTML =
-        `<img src="${b64}" class="img-thumb" onclick="openLightboxSrc('${previewId}')">
-         <button class="btn btn-sm btn-outline-danger align-self-start"
-                 onclick="clearPayImage('${previewId}','${input.id}')"><i class="bi bi-x-lg"></i></button>`;
-    };
-    img.src = e.target.result;
-  };
-  reader.readAsDataURL(file);
+  const b64 = await Utils.compressImage(file, 1200, 0.82);
+  if (previewId === 'transferImagePreview') payImages.transfer = b64;
+  else if (previewId === 'chequeImagePreview')  payImages.cheque  = b64;
+  else if (previewId === 'signedImagePreview')  payImages.signed  = b64;
+  document.getElementById(previewId).innerHTML =
+    `<img src="${b64}" class="img-thumb" onclick="openLightboxSrc('${previewId}')">
+     <button class="btn btn-sm btn-outline-danger align-self-start"
+             onclick="clearPayImage('${previewId}','${input.id}')"><i class="bi bi-x-lg"></i></button>`;
 }
 
 function clearPayImage(previewId, inputId) {
@@ -1386,26 +1372,12 @@ function openImageUpdateModal(payId, invNum) {
   imgUpdateModal.show();
 }
 
-function previewImgUpdate(input) {
+async function previewImgUpdate(input) {
   const file = input.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = e => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      const MAX = 1200;
-      const scale = Math.min(1, MAX / img.width, MAX / img.height);
-      canvas.width  = Math.round(img.width  * scale);
-      canvas.height = Math.round(img.height * scale);
-      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-      _imgUpdateB64 = canvas.toDataURL('image/jpeg', 0.55);
-      document.getElementById('imgUpdatePreview').innerHTML =
-        `<img src="${_imgUpdateB64}" class="img-thumb">`;
-    };
-    img.src = e.target.result;
-  };
-  reader.readAsDataURL(file);
+  _imgUpdateB64 = await Utils.compressImage(file, 1200, 0.82);
+  document.getElementById('imgUpdatePreview').innerHTML =
+    `<img src="${_imgUpdateB64}" class="img-thumb">`;
 }
 
 async function confirmImageUpdate() {
@@ -2247,30 +2219,16 @@ function onMultiChequeAcctChange() {
   _multiAcctName = a ? (a.name  || '') : '';
 }
 
-function loadMultiPayImage(input, type) {
+async function loadMultiPayImage(input, type) {
   const file = input.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = e => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      const MAX = 1200;
-      const scale = Math.min(1, MAX / img.width, MAX / img.height);
-      canvas.width  = Math.round(img.width  * scale);
-      canvas.height = Math.round(img.height * scale);
-      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-      const b64 = canvas.toDataURL('image/jpeg', 0.55);
-      _multiImages[type] = b64;
-      const previewId = type === 'transfer' ? 'multiTransferImgPreview' : 'multiChequeImgPreview';
-      document.getElementById(previewId).innerHTML =
-        `<img src="${b64}" class="img-thumb" onclick="openLightboxSrc('${previewId}')">
-         <button class="btn btn-sm btn-outline-danger align-self-start"
-                 onclick="_clearMultiImg('${type}','${input.id}','${previewId}')"><i class="bi bi-x-lg"></i></button>`;
-    };
-    img.src = e.target.result;
-  };
-  reader.readAsDataURL(file);
+  const b64 = await Utils.compressImage(file, 1200, 0.82);
+  _multiImages[type] = b64;
+  const previewId = type === 'transfer' ? 'multiTransferImgPreview' : 'multiChequeImgPreview';
+  document.getElementById(previewId).innerHTML =
+    `<img src="${b64}" class="img-thumb" onclick="openLightboxSrc('${previewId}')">
+     <button class="btn btn-sm btn-outline-danger align-self-start"
+             onclick="_clearMultiImg('${type}','${input.id}','${previewId}')"><i class="bi bi-x-lg"></i></button>`;
 }
 
 function _clearMultiImg(type, inputId, previewId) {
