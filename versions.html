@@ -424,15 +424,10 @@ function saveVersion() {
     DB.addVersion({ id: Utils.uuid(), ...data, createdAt: new Date().toISOString() });
   }
 
-  // Sync brand → customer brands list (shared data)
-  if (cust) {
-    const existing = Array.isArray(cust.brands) && cust.brands.length
-      ? cust.brands : cust.brand ? [cust.brand] : [];
-    if (!existing.includes(brand)) {
-      const updated = [...existing, brand];
-      DB.updateCustomer(custId, { brands: updated, brand: updated[0] });
-    }
-  }
+  // Register the brand against the customer through the centralised DB method.
+  // Direct mutation of the customer record from here is avoided — all merging
+  // and idempotency logic lives in DB.addBrandToCustomer().
+  DB.addBrandToCustomer(custId, brand);
 
   DB.logActivity(session.userId, session.username, id ? 'แก้ไขฉลากขวด' : 'เพิ่มฉลากขวด',
     { customer: cust?.name, brand, size });
@@ -469,8 +464,11 @@ async function loadVerImage(input) {
 }
 
 function imgPreviewHtml(src) {
+  // Pass `this.src` so openLightbox() always receives the exact full URL from
+  // the element that was clicked — no truncation, no global DOM query that
+  // would break when multiple image previews exist on the same page.
   return `<div class="d-flex align-items-start gap-2">
-    <img src="${src}" class="img-thumbnail" style="max-height:160px;cursor:zoom-in" onclick="openLightbox('${src.substring(0,30)}')">
+    <img src="${src}" class="img-thumbnail" style="max-height:160px;cursor:zoom-in" onclick="openLightbox(this.src)">
     <button class="btn btn-sm btn-outline-danger" onclick="clearVerImage()"><i class="bi bi-x-lg"></i></button>
   </div>`;
 }
@@ -481,10 +479,7 @@ function clearVerImage() {
   document.getElementById('vImagePreview').innerHTML = '';
 }
 
-function openLightbox(src) {
-  // src might be truncated key — get full from preview img
-  const previewImg = document.querySelector('#vImagePreview img');
-  const fullSrc = previewImg ? previewImg.src : src;
+function openLightbox(fullSrc) {
   document.getElementById('lightboxImg').src = fullSrc;
   document.getElementById('lightbox').style.display = 'flex';
 }

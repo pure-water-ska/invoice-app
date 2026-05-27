@@ -311,6 +311,22 @@ const DB = {
   },
   deleteCustomer(id) { this.saveCustomers(this.getCustomers().filter(c => c.id !== id)); },
 
+  // Register a brand name against a customer record, keeping the brands array
+  // and the legacy scalar brand field in sync.  Idempotent — safe to call even
+  // if the brand is already present.  Centralises what was previously inline
+  // mutation logic scattered across saveVersion() and similar callers.
+  addBrandToCustomer(custId, brand) {
+    if (!custId || !brand) return;
+    const cust = this.getCustomerById(custId);
+    if (!cust) return;
+    const existing = Array.isArray(cust.brands) && cust.brands.length
+      ? cust.brands
+      : cust.brand ? [cust.brand] : [];
+    if (existing.includes(brand)) return;          // already registered — no-op
+    const updated = [...existing, brand];
+    this.updateCustomer(custId, { brands: updated, brand: updated[0] });
+  },
+
   // ─── BRAND/SIZE VERSIONS ─────────────────────────────────────────────────────
   getVersions()      { return this._get(this.K.VERSIONS); },
   saveVersions(v)    { this._set(this.K.VERSIONS, v); },
