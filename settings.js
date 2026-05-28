@@ -763,7 +763,7 @@ function exportLoginLog(fmt) {
 }
 
 /* ─── Import / Restore ──────────────────────────────────────────────────── */
-function importData(input, mode) {
+async function importData(input, mode) {
   const file = input.files[0];
   if (!file) return;
   const modeLabel = mode === 'overwrite' ? 'เขียนทับข้อมูลทั้งหมด ⚠️' : 'เพิ่มข้อมูลใหม่ (Merge)';
@@ -774,88 +774,106 @@ function importData(input, mode) {
     input.value = ''; return;
   }
 
-  const reader = new FileReader();
-  reader.onload = e => {
-    try {
-      // ── JSON structure validation ──────────────────────────────────────────
-      let data;
-      try { data = JSON.parse(e.target.result); } catch(pe) {
-        throw new Error('ไฟล์ JSON ไม่ถูกต้อง (parse error): ' + pe.message);
-      }
-      if (!data || typeof data !== 'object' || Array.isArray(data))
-        throw new Error('ไฟล์ไม่ใช่ JSON object ที่ถูกต้อง');
-      const knownKeys = ['customers','invoices','products','payments','versions','settings','users'];
-      if (!knownKeys.some(k => data[k])) throw new Error('ไฟล์ไม่มีข้อมูลที่รู้จัก (ไม่พบ customers/invoices/products ฯลฯ)');
-      if (mode === 'overwrite') {
-        const totalRec = (data.customers?.length||0)+(data.invoices?.length||0)+(data.products?.length||0)+(data.payments?.length||0);
-        if (totalRec === 0) throw new Error('ไฟล์มีข้อมูลว่างเปล่า ไม่สามารถ Overwrite ได้');
-      }
+  // Disable buttons to prevent double-trigger during processing
+  const btns = document.querySelectorAll('#jsonImportSection button');
+  btns.forEach(b => { b.disabled = true; });
 
-      // ── Snapshot counts BEFORE import ─────────────────────────────────────
-      const before = {
-        customers: DB.getCustomers().length,
-        products:  DB.getProducts().length,
-        invoices:  DB.getInvoices().length,
-        payments:  DB.getPayments().length,
-      };
+  try {
+    // ── Read & parse JSON ────────────────────────────────────────────────────
+    Utils.showProgress('อ่านไฟล์...', 5);
+    await new Promise(r => setTimeout(r, 0));
 
-      // Settings & config (always merge/update, never blank out)
-      if (data.settings)   DB.saveSettings({ ...DB.getSettings(), ...data.settings });
-      if (data.payMethods) DB.savePayMethods(data.payMethods);
-      if (data.pricing)    DB.savePricing(data.pricing);
-
-      const importCol = (arr, getAll, saveAll, addOne) => {
-        if (!arr) return 0;
-        if (mode === 'overwrite') { saveAll(arr); return arr.length; }
-        const ids = new Set(getAll().map(x => x.id));
-        let n = 0;
-        arr.forEach(item => { if (!ids.has(item.id)) { addOne(item); n++; } });
-        return n;
-      };
-
-      const c = {
-        customers: importCol(data.customers, () => DB.getCustomers(), DB.saveCustomers.bind(DB), DB.addCustomer.bind(DB)),
-        products:  importCol(data.products,  () => DB.getProducts(),  DB.saveProducts.bind(DB),  DB.addProduct.bind(DB)),
-        invoices:  importCol(data.invoices,  () => DB.getInvoices(),  DB.saveInvoices.bind(DB),  DB.addInvoice.bind(DB)),
-        payments:  importCol(data.payments,  () => DB.getPayments(),  DB.savePayments.bind(DB),  DB.addPayment.bind(DB)),
-        versions:  importCol(data.versions,  () => DB.getVersions(),  DB.saveVersions.bind(DB),  DB.addVersion.bind(DB)),
-      };
-
-      // ── Snapshot counts AFTER import + integrity check ─────────────────────
-      const after = {
-        customers: DB.getCustomers().length,
-        products:  DB.getProducts().length,
-        invoices:  DB.getInvoices().length,
-        payments:  DB.getPayments().length,
-      };
-      const losses = [];
-      if (after.customers < before.customers) losses.push(`ลูกค้า ${before.customers}→${after.customers}`);
-      if (after.products  < before.products)  losses.push(`สินค้า ${before.products}→${after.products}`);
-      if (after.invoices  < before.invoices)  losses.push(`ใบกำกับ ${before.invoices}→${after.invoices}`);
-      if (after.payments  < before.payments)  losses.push(`ชำระ ${before.payments}→${after.payments}`);
-
-      DB.logActivity(session.userId, session.username, 'Import ข้อมูล', { file: file.name, mode, before, after });
-      const modeText = mode === 'overwrite' ? 'Overwrite' : 'Merge';
-      Utils.showAlert(
-        `Import สำเร็จ [${modeText}] — ` +
-        `ลูกค้า: ${c.customers}, สินค้า: ${c.products}, ` +
-        `ใบกำกับ: ${c.invoices}, ชำระ: ${c.payments}, ฉลาก: ${c.versions}`
-      );
-      if (losses.length) {
-        setTimeout(() => Utils.showAlert(
-          `<i class="bi bi-exclamation-triangle-fill me-1"></i><strong>ตรวจพบข้อมูลลดลงหลัง Import</strong> — ${losses.join(', ')} — กรุณาตรวจสอบ`, 'warning'
-        ), 200);
-      }
-      loadCompanySettings();
-      loadStats();
-      renderStorageBar();
-      renderLogCounts();
-    } catch (err) {
-      Utils.showAlert('<i class="bi bi-x-circle me-1"></i>ไม่สามารถ Import ได้: ' + err.message, 'danger');
+    let data;
+    try { data = JSON.parse(await file.text()); } catch(pe) {
+      throw new Error('ไฟล์ JSON ไม่ถูกต้อง (parse error): ' + pe.message);
     }
-  };
-  reader.readAsText(file);
-  input.value = '';
+    if (!data || typeof data !== 'object' || Array.isArray(data))
+      throw new Error('ไฟล์ไม่ใช่ JSON object ที่ถูกต้อง');
+    const knownKeys = ['customers','invoices','products','payments','versions','settings','users'];
+    if (!knownKeys.some(k => data[k])) throw new Error('ไฟล์ไม่มีข้อมูลที่รู้จัก (ไม่พบ customers/invoices/products ฯลฯ)');
+    if (mode === 'overwrite') {
+      const totalRec = (data.customers?.length||0)+(data.invoices?.length||0)+(data.products?.length||0)+(data.payments?.length||0);
+      if (totalRec === 0) throw new Error('ไฟล์มีข้อมูลว่างเปล่า ไม่สามารถ Overwrite ได้');
+    }
+
+    // ── Snapshot counts BEFORE import ────────────────────────────────────────
+    const before = {
+      customers: DB.getCustomers().length,
+      products:  DB.getProducts().length,
+      invoices:  DB.getInvoices().length,
+      payments:  DB.getPayments().length,
+    };
+
+    // ── Settings & config ────────────────────────────────────────────────────
+    Utils.showProgress('นำเข้าการตั้งค่า...', 10);
+    await new Promise(r => setTimeout(r, 0));
+    if (data.settings)   DB.saveSettings({ ...DB.getSettings(), ...data.settings });
+    if (data.payMethods) DB.savePayMethods(data.payMethods);
+    if (data.pricing)    DB.savePricing(data.pricing);
+
+    // ── Bulk-merge helper — O(n) not O(n²) ───────────────────────────────────
+    // Reads existing array once, filters new IDs in one pass, writes once.
+    // The old approach called addOne() per item: N reads + N LZString compresses + N writes.
+    // This approach: 1 read + 1 compress + 1 write regardless of how many items.
+    const importCol = async (arr, getAll, saveAll, labelTH, pct) => {
+      if (!arr || arr.length === 0) return 0;
+      Utils.showProgress(`นำเข้า ${labelTH}... (${arr.length} รายการ)`, pct);
+      await new Promise(r => setTimeout(r, 0)); // yield so the progress bar renders
+      if (mode === 'overwrite') { saveAll(arr); return arr.length; }
+      const existing = getAll();
+      const ids = new Set(existing.filter(x => x.id).map(x => x.id));
+      const newItems = arr.filter(item => item.id && !ids.has(item.id));
+      if (newItems.length > 0) saveAll([...existing, ...newItems]); // 1 write
+      return newItems.length;
+    };
+
+    const c = {
+      customers: await importCol(data.customers, () => DB.getCustomers(), DB.saveCustomers.bind(DB), 'ลูกค้า',    20),
+      products:  await importCol(data.products,  () => DB.getProducts(),  DB.saveProducts.bind(DB),  'สินค้า',    35),
+      invoices:  await importCol(data.invoices,  () => DB.getInvoices(),  DB.saveInvoices.bind(DB),  'ใบกำกับ',  55),
+      payments:  await importCol(data.payments,  () => DB.getPayments(),  DB.savePayments.bind(DB),  'การชำระ',  75),
+      versions:  await importCol(data.versions,  () => DB.getVersions(),  DB.saveVersions.bind(DB),  'เวอร์ชัน', 90),
+    };
+
+    // ── Integrity check ──────────────────────────────────────────────────────
+    Utils.showProgress('ตรวจสอบข้อมูล...', 97);
+    await new Promise(r => setTimeout(r, 0));
+    const after = {
+      customers: DB.getCustomers().length,
+      products:  DB.getProducts().length,
+      invoices:  DB.getInvoices().length,
+      payments:  DB.getPayments().length,
+    };
+    const losses = [];
+    if (after.customers < before.customers) losses.push(`ลูกค้า ${before.customers}→${after.customers}`);
+    if (after.products  < before.products)  losses.push(`สินค้า ${before.products}→${after.products}`);
+    if (after.invoices  < before.invoices)  losses.push(`ใบกำกับ ${before.invoices}→${after.invoices}`);
+    if (after.payments  < before.payments)  losses.push(`ชำระ ${before.payments}→${after.payments}`);
+
+    Utils.hideProgress();
+    DB.logActivity(session.userId, session.username, 'Import ข้อมูล', { file: file.name, mode, before, after });
+    const modeText = mode === 'overwrite' ? 'Overwrite' : 'Merge';
+    Utils.showAlert(
+      `<i class="bi bi-check-circle me-1"></i>Import สำเร็จ [${modeText}] — ` +
+      `ลูกค้า: ${c.customers}, สินค้า: ${c.products}, ` +
+      `ใบกำกับ: ${c.invoices}, ชำระ: ${c.payments}, ฉลาก: ${c.versions}`
+    );
+    if (losses.length) {
+      setTimeout(() => Utils.showAlert(
+        `<i class="bi bi-exclamation-triangle-fill me-1"></i><strong>ตรวจพบข้อมูลลดลงหลัง Import</strong> — ${losses.join(', ')} — กรุณาตรวจสอบ`, 'warning'
+      ), 200);
+    }
+    loadCompanySettings();
+    loadStats();
+    renderStorageBar();
+    renderLogCounts();
+  } catch (err) {
+    Utils.hideProgress();
+    Utils.showAlert('<i class="bi bi-x-circle me-1"></i>ไม่สามารถ Import ได้: ' + err.message, 'danger');
+  } finally {
+    btns.forEach(b => { b.disabled = false; });
+    input.value = '';
+  }
 }
 
 /* ─── Backup / Import Card Visibility ───────────────────────────────────── */
@@ -1497,20 +1515,23 @@ async function importZip(input, mode) {
     if (data.payMethods) DB.savePayMethods(data.payMethods);
     if (data.pricing)    DB.savePricing(data.pricing);
 
-    const importCol = (arr, getAll, saveAll, addOne) => {
-      if (!arr) return 0;
+    // Bulk-merge: read once, filter, write once (same O(n) approach as importData)
+    const importCol = (arr, getAll, saveAll, labelTH) => {
+      if (!arr || arr.length === 0) return 0;
       if (mode === 'overwrite') { saveAll(arr); return arr.length; }
-      const ids = new Set(getAll().map(x => x.id));
-      let n = 0;
-      arr.forEach(item => { if (!ids.has(item.id)) { addOne(item); n++; } });
-      return n;
+      const existing = getAll();
+      const ids = new Set(existing.filter(x => x.id).map(x => x.id));
+      const newItems = arr.filter(item => item.id && !ids.has(item.id));
+      if (newItems.length > 0) saveAll([...existing, ...newItems]);
+      return newItems.length;
     };
+    Utils.showProgress('นำเข้าข้อมูล...', 35);
     const c = {
-      customers: importCol(data.customers, () => DB.getCustomers(), DB.saveCustomers.bind(DB), DB.addCustomer.bind(DB)),
-      products:  importCol(data.products,  () => DB.getProducts(),  DB.saveProducts.bind(DB),  DB.addProduct.bind(DB)),
-      invoices:  importCol(data.invoices,  () => DB.getInvoices(),  DB.saveInvoices.bind(DB),  DB.addInvoice.bind(DB)),
-      payments:  importCol(data.payments,  () => DB.getPayments(),  DB.savePayments.bind(DB),  DB.addPayment.bind(DB)),
-      versions:  importCol(data.versions,  () => DB.getVersions(),  DB.saveVersions.bind(DB),  DB.addVersion.bind(DB)),
+      customers: importCol(data.customers, () => DB.getCustomers(), DB.saveCustomers.bind(DB), 'ลูกค้า'),
+      products:  importCol(data.products,  () => DB.getProducts(),  DB.saveProducts.bind(DB),  'สินค้า'),
+      invoices:  importCol(data.invoices,  () => DB.getInvoices(),  DB.saveInvoices.bind(DB),  'ใบกำกับ'),
+      payments:  importCol(data.payments,  () => DB.getPayments(),  DB.savePayments.bind(DB),  'การชำระ'),
+      versions:  importCol(data.versions,  () => DB.getVersions(),  DB.saveVersions.bind(DB),  'เวอร์ชัน'),
     };
 
     // ── Import PDF files ──
