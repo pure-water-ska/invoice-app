@@ -58,20 +58,22 @@ const DB = {
         this.dataDir = await join(base, 'data');
         await createDir(this.dataDir, { recursive: true });
         const files = await readDir(this.dataDir);
+        let loaded = 0;
         for (const f of files) {
           if (!f.name?.startsWith('wt_') || !f.name.endsWith('.json')) continue;
           const key = f.name.slice(0, -5);   // strip .json → e.g. wt_invoices
           try {
             const json = await readTextFile(f.path);
-            // Re-compress into localStorage so the existing LZ read path works
-            const stored = typeof LZString !== 'undefined'
-              ? LZString.compressToUTF16(json) : json;
-            localStorage.setItem(key, stored);
+            // Load directly into in-memory cache — do NOT write to localStorage.
+            // localStorage is not used at all in Tauri; cache is the only fast
+            // read layer and HDD files are the durable source of truth.
+            DB._cache[key] = JSON.parse(json);
+            loaded++;
           } catch (e) {
             console.warn('[DB][Tauri] Could not load', f.name, e);
           }
         }
-        console.log('[DB][Tauri] HDD storage loaded →', this.dataDir);
+        console.log(`[DB][Tauri] HDD storage loaded → ${this.dataDir} (${loaded} keys)`);
       } catch (e) {
         console.error('[DB][Tauri] HDD init failed', e);
       }
@@ -131,6 +133,16 @@ const DB = {
   _set(key, val) {
     this._cache[key] = val;                      // update cache immediately
 
+    // ── Tauri desktop: localStorage is never used — HDD is the only store ────
+    // Cache (above) is the fast read layer; HDD JSON files are durable storage.
+    // Skip all localStorage / IDB paths entirely to keep localStorage empty and
+    // avoid any storage-full warnings.
+    if (location.protocol === 'tauri:') {
+      if (this._tauri.dataDir) this._tauri.write(key, val);
+      if (window.LocalFolderSync) LocalFolderSync.queueWrite(key, val);
+      return;
+    }
+
     let writeToIdb = this._idbKeys.has(key);     // already overflowed — skip localStorage
 
     if (!writeToIdb) {
@@ -182,8 +194,6 @@ const DB = {
     if (window.DriveDbSync) DriveDbSync.queueUpload(key, val);
     // Mirror to local folder (debounced, no-op if no folder selected)
     if (window.LocalFolderSync) LocalFolderSync.queueWrite(key, val);
-    // Persist to HDD when running in Tauri desktop app (fire-and-forget)
-    if (location.protocol === 'tauri:' && this._tauri.dataDir) this._tauri.write(key, val);
   },
 
   // ── Sticky banner: IDB also full — critical, red ─────────────────────────
@@ -252,7 +262,8 @@ const DB = {
   // heavy data (invoices, payments, etc.).  Call DB.ready.then(render).
   preloadFromIDB() {
     return (async () => {
-      // Step 0: in Tauri, restore all HDD files → localStorage before anything else
+      // Step 0: in Tauri, restore all HDD files → memory cache before anything else
+      // (localStorage is never written in Tauri — HDD + cache are the storage stack)
       if (location.protocol === 'tauri:') await this._tauri.init();
 
       // Step 1: restore _idbKeys from localStorage (tiny JSON — always fits)

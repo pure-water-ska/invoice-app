@@ -864,6 +864,7 @@ function _showConnectionModal() {
 }
 
 function _checkStorageAlert() {
+  if (location.protocol === 'tauri:') return;
   try {
     let used = 0;
     for (const k in localStorage) {
