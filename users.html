@@ -13,6 +13,21 @@
 <link rel="stylesheet" href="./vendor/bootstrap-icons.min.css">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<style>
+.role-chip {
+  display:inline-flex; align-items:center; gap:.35rem;
+  padding:.3rem .7rem; border-radius:999px;
+  font-size:.8rem; font-weight:600; cursor:pointer;
+  border:2px solid transparent; transition:all .15s;
+  user-select:none;
+}
+.role-chip:hover { filter:brightness(.92); }
+.role-chip.active { outline:2px solid currentColor; filter:brightness(.88); }
+.role-chip-viewer  { background:#e8f4fd; color:#0d6efd; border-color:#0d6efd44; }
+.role-chip-staff   { background:#e8f8ed; color:#198754; border-color:#19875444; }
+.role-chip-manager { background:#fff3e0; color:#fd7e14; border-color:#fd7e1444; }
+.role-chip-none    { background:#f0f0f0; color:#555;    border-color:#ccc; }
+</style>
 </head>
 <body>
 <div id="navContainer"></div>
@@ -101,6 +116,28 @@
           <i class="bi bi-info-circle me-1"></i>
           ผู้ดูแลระบบ (Admin) มีสิทธิ์เต็มทุกอย่างโดยอัตโนมัติ สิทธิ์นี้ใช้สำหรับผู้ใช้ทั่วไปเท่านั้น
         </p>
+        <!-- Preset role chips -->
+        <div class="mb-3 p-3 rounded-3 bg-light border">
+          <div class="d-flex align-items-center flex-wrap gap-2">
+            <span class="text-muted small fw-semibold me-1" style="white-space:nowrap">
+              <i class="bi bi-lightning-charge me-1 text-warning"></i>เลือกสิทธิ์ตามบทบาท:
+            </span>
+            <span class="role-chip role-chip-viewer" onclick="applyRolePreset('viewer',this)" title="ดูข้อมูลได้อย่างเดียว — ไม่มีสิทธิ์แก้ไขหรือลบ">
+              <i class="bi bi-eye"></i> Viewer (อ่านอย่างเดียว)
+            </span>
+            <span class="role-chip role-chip-staff" onclick="applyRolePreset('staff',this)" title="งานประจำวัน — สร้างใบกำกับ บันทึกชำระ เพิ่มลูกค้า">
+              <i class="bi bi-person-badge"></i> Staff (พนักงาน)
+            </span>
+            <span class="role-chip role-chip-manager" onclick="applyRolePreset('manager',this)" title="เต็มสิทธิ์ทุกอย่างยกเว้น Backup และจัดการผู้ใช้">
+              <i class="bi bi-briefcase"></i> Manager (ผู้จัดการ)
+            </span>
+            <span class="role-chip role-chip-none" onclick="applyRolePreset('none',this)" title="ล้างสิทธิ์ทั้งหมด">
+              <i class="bi bi-slash-circle"></i> ไม่มีสิทธิ์
+            </span>
+          </div>
+          <div id="rolePresetDesc" class="mt-2 small text-muted" style="display:none"></div>
+        </div>
+
         <div id="permCheckboxes"></div>
         <div class="d-flex gap-2 mt-3 pt-3 border-top">
           <button class="btn btn-sm btn-outline-primary" onclick="selectAllPerms(true)">
@@ -422,11 +459,59 @@ function openPermModal(userId) {
   });
 
   document.getElementById('permCheckboxes').innerHTML = html;
+  // Reset preset chip highlights
+  document.querySelectorAll('.role-chip').forEach(c => c.classList.remove('active'));
+  document.getElementById('rolePresetDesc').style.display = 'none';
   permModal.show();
+}
+
+const ROLE_PRESETS = {
+  viewer: {
+    keys: ['dashboard','invoices','payments','customers','products','pricing','reports','versions','cap_stock','returns'],
+    desc: '👁 <strong>Viewer</strong> — ดูข้อมูลได้ทุกหน้า แต่<strong>ไม่สามารถสร้าง แก้ไข หรือลบ</strong>ข้อมูลใดได้ เหมาะสำหรับการดูข้อมูลบนมือถือ'
+  },
+  staff: {
+    keys: ['dashboard','invoices','payments','customers','products','pricing','reports','versions',
+           'invoice_create','invoice_print','payment_add','customer_add','version_add',
+           'cap_stock','cap_stock_add','returns','return_add'],
+    desc: '🏷 <strong>Staff</strong> — สร้างใบกำกับ บันทึกชำระเงิน เพิ่มลูกค้า บันทึกรับฝาขวด แต่ไม่สามารถลบข้อมูลสำคัญได้'
+  },
+  manager: {
+    keys: ['dashboard','invoices','payments','customers','products','pricing','reports','versions',
+           'invoice_create','invoice_edit','invoice_delete','invoice_print',
+           'payment_add','payment_edit','payment_delete',
+           'customer_add','customer_edit','customer_delete',
+           'product_add','product_edit','product_delete','pricing_edit',
+           'version_add','version_edit','version_delete',
+           'cap_stock','cap_stock_add','report_export',
+           'returns','return_add','return_edit','return_delete'],
+    desc: '💼 <strong>Manager</strong> — สิทธิ์เต็มทุกฟีเจอร์ยกเว้น Backup/Import ข้อมูลและจัดการผู้ใช้ (เฉพาะ Admin)'
+  },
+  none: {
+    keys: [],
+    desc: '🚫 <strong>ไม่มีสิทธิ์</strong> — ล้างสิทธิ์ทั้งหมด (ผู้ใช้ยังเข้าสู่ระบบได้ แต่จะไม่เห็นหน้าใดเลย)'
+  }
+};
+
+function applyRolePreset(role, el) {
+  const preset = ROLE_PRESETS[role];
+  document.querySelectorAll('.perm-check').forEach(cb => { cb.checked = false; });
+  preset.keys.forEach(k => {
+    const cb = document.querySelector(`.perm-check[value="${k}"]`);
+    if (cb) cb.checked = true;
+  });
+  document.querySelectorAll('.role-chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  const desc = document.getElementById('rolePresetDesc');
+  desc.innerHTML = preset.desc;
+  desc.style.display = '';
 }
 
 function selectAllPerms(checked) {
   document.querySelectorAll('.perm-check').forEach(cb => { cb.checked = checked; });
+  // clear preset highlight when manually selecting all/none
+  document.querySelectorAll('.role-chip').forEach(c => c.classList.remove('active'));
+  document.getElementById('rolePresetDesc').style.display = 'none';
 }
 
 function savePermissions() {

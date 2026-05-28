@@ -1,0 +1,40 @@
+[package]
+name = "wt-invoice"
+version = "1.0.0"
+description = "ระบบใบกำกับสินค้า — Water Tank Invoice PWA"
+authors = ["you"]
+edition = "2021"
+rust-version = "1.70"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[build-dependencies]
+tauri-build = { version = "1.5", features = [] }
+
+[dependencies]
+tauri = { version = "1.7", features = [
+  "dialog-open",
+  "dialog-save",
+  "fs-read-file",
+  "fs-write-file",
+  "fs-read-dir",
+  "fs-create-dir",
+  "path-all",
+  "shell-open",
+  "window-close",
+  "window-hide",
+  "window-show",
+  "window-maximize",
+  "window-minimize",
+  "window-unmaximize",
+  "window-unminimize",
+  "window-start-dragging",
+  "window-set-title"
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+# This feature is used for production builds or when a dev server is not specified.
+# DO NOT REMOVE!!
+custom-protocol = ["tauri/custom-protocol"]
