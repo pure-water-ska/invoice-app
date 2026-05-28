@@ -185,6 +185,11 @@
       return;
     }
 
+    // In Tauri, location.hostname === 'localhost' (tauri://localhost), but Google's
+    // Firebase Auth compat SDK spawns a hidden OAuth iframe which Google rejects for
+    // non-http(s) origins. Skip Firebase entirely — HDD storage covers persistence.
+    if (window.__TAURI__) { hideSyncBadge(); return; }
+
     // Try loading local credentials override (firebase-credentials.js)
     // Gitignored — only exists on local dev machines (localhost / 127.0.0.1).
     // Skip entirely on GitHub Pages / Netlify to avoid a console 404.
