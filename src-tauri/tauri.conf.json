@@ -95,7 +95,7 @@
         "height": 900,
         "resizable": true,
         "title": "ระบบใบกำกับสินค้า",
-        "url": "http://localhost:8000/index.html",
+        "url": "index.html",
         "width": 1400,
         "minWidth": 800,
         "minHeight": 600,
