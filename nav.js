@@ -188,7 +188,7 @@
     // In Tauri, location.hostname === 'localhost' (tauri://localhost), but Google's
     // Firebase Auth compat SDK spawns a hidden OAuth iframe which Google rejects for
     // non-http(s) origins. Skip Firebase entirely — HDD storage covers persistence.
-    if (window.__TAURI__) { hideSyncBadge(); return; }
+    if (location.protocol === 'tauri:') { hideSyncBadge(); return; }
 
     // Try loading local credentials override (firebase-credentials.js)
     // Gitignored — only exists on local dev machines (localhost / 127.0.0.1).
@@ -296,7 +296,7 @@
 // dashboard etc. so the post-login connection modal can show/connect Drive.
 // NOTE: skipped in the Tauri desktop app — Google OAuth rejects tauri:// origins.
 (function loadDriveStoreGlobal() {
-  if (window.__TAURI__) return;   // Drive not available in Tauri desktop app
+  if (location.protocol === 'tauri:') return;   // Drive not available in Tauri desktop app
   function loadScript(src, cb, errCb) {
     const s = document.createElement('script');
     s.src = src;
@@ -433,7 +433,7 @@ const Nav = {
                   if(event.shiftKey){if(confirm('อัปโหลดข้อมูลทั้งหมดจากเครื่องนี้ขึ้น Cloud ใช่หรือไม่?'))Sync.pushAll().then(()=>{if(typeof render==='function')render();});}
                   else{Sync.pull().then(()=>{if(typeof render==='function')render();});}">⏳ Sync</span>
         </li>
-        ${window.__TAURI__ ? '' : `<li class="nav-item me-1" id="driveBadgeItem" style="display:none">
+        ${location.protocol === 'tauri:' ? '' : `<li class="nav-item me-1" id="driveBadgeItem" style="display:none">
           <span id="driveBadge" class="badge bg-secondary ms-1 py-1 px-2" style="font-size:10px;cursor:pointer"
                 onclick="location.href='settings.html'" title="Google Drive — คลิกเพื่อตั้งค่า">☁ Drive</span>
         </li>`}
@@ -565,7 +565,7 @@ function _showChangePwOverlay() {
 // ── Connection modal (shown once per session, right after login) ──────────────
 function _showConnectionModal() {
   if (sessionStorage.getItem('connModalDone')) return;
-  if (window.__TAURI__) { sessionStorage.setItem('connModalDone', '1'); return; } // not needed in Tauri
+  if (location.protocol === 'tauri:') { sessionStorage.setItem('connModalDone', '1'); return; } // not needed in Tauri
 
   var isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
   var bg    = isDark ? '#1c2128' : '#ffffff';

@@ -40,7 +40,7 @@ const DB = {
   ready: Promise.resolve(),
 
   // ── Tauri HDD storage ─────────────────────────────────────────────────────
-  // When running in the Tauri desktop app (window.__TAURI__ defined), all
+  // When running in the Tauri desktop app (location.protocol === 'tauri:'), all
   // wt_* keys are stored as plain JSON files in %APPDATA%\wt-invoice\data\.
   // On startup _tauri.init() reads those files back into localStorage so the
   // rest of db.js works without modification.  _tauri.write() is called by
@@ -50,7 +50,7 @@ const DB = {
   _tauri: {
     dataDir: null,
     async init() {
-      if (!window.__TAURI__) return;
+      if (location.protocol !== 'tauri:') return;
       try {
         const { appDataDir, join } = window.__TAURI__.path;
         const { createDir, readDir, readTextFile } = window.__TAURI__.fs;
@@ -77,7 +77,7 @@ const DB = {
       }
     },
     write(key, val) {
-      if (!this.dataDir || !window.__TAURI__) return;
+      if (!this.dataDir || location.protocol !== 'tauri:') return;
       const { join } = window.__TAURI__.path;
       const { writeTextFile } = window.__TAURI__.fs;
       join(this.dataDir, key + '.json')
@@ -183,12 +183,12 @@ const DB = {
     // Mirror to local folder (debounced, no-op if no folder selected)
     if (window.LocalFolderSync) LocalFolderSync.queueWrite(key, val);
     // Persist to HDD when running in Tauri desktop app (fire-and-forget)
-    if (window.__TAURI__ && this._tauri.dataDir) this._tauri.write(key, val);
+    if (location.protocol === 'tauri:' && this._tauri.dataDir) this._tauri.write(key, val);
   },
 
   // ── Sticky banner: IDB also full — critical, red ─────────────────────────
   _warnQuota(key) {
-    if (window.__TAURI__) return;  // HDD storage is the source of truth — localStorage overflow is irrelevant
+    if (location.protocol === 'tauri:') return;  // HDD storage is the source of truth — localStorage overflow is irrelevant
     const id = 'wt-quota-banner';
     if (document.getElementById(id)) return;
     const banner = document.createElement('div');
@@ -214,7 +214,7 @@ const DB = {
   // Called both when a new key first overflows AND on every subsequent page
   // load while overflow is active, so the user always knows storage is full.
   _notifyIdbOverflow(key) {
-    if (window.__TAURI__) return;  // HDD storage is the source of truth — localStorage overflow is irrelevant
+    if (location.protocol === 'tauri:') return;  // HDD storage is the source of truth — localStorage overflow is irrelevant
     const id = 'wt-idb-overflow-banner';
     if (document.getElementById(id)) return;
     const banner = document.createElement('div');
@@ -253,7 +253,7 @@ const DB = {
   preloadFromIDB() {
     return (async () => {
       // Step 0: in Tauri, restore all HDD files → localStorage before anything else
-      if (window.__TAURI__) await this._tauri.init();
+      if (location.protocol === 'tauri:') await this._tauri.init();
 
       // Step 1: restore _idbKeys from localStorage (tiny JSON — always fits)
       const stored = localStorage.getItem(this._IDB_KEYS_LS);

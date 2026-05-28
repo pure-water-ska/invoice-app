@@ -180,7 +180,7 @@
       }
       // Firebase Auth compat SDK creates a hidden Google OAuth iframe that Google
       // rejects for tauri:// origins. Skip entirely — HDD storage handles persistence.
-      if (window.__TAURI__) { onSyncReady(); return; }
+      if (location.protocol === 'tauri:') { onSyncReady(); return; }
       loadScript('./firebase-credentials.js', startSDK, startSDK);
       function startSDK() {
         loadScript(`${FB_BASE}/firebase-app-compat.js`, function() {
@@ -211,7 +211,7 @@
       // / sign-in round-trip.  Non-fatal: sync.js handles any residual mismatch.
       // Skipped in Tauri — Firebase not loaded (HDD storage handles persistence).
       try {
-        if (!window.__TAURI__ && window.firebase &&
+        if (location.protocol !== 'tauri:' && window.firebase &&
             typeof FIREBASE_CONFIG !== 'undefined' &&
             FIREBASE_CONFIG.apiKey &&
             !FIREBASE_CONFIG.apiKey.startsWith('AIzaSy...')) {
