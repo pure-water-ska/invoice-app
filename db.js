@@ -39,6 +39,53 @@ const DB = {
   _idbReady: false,
   ready: Promise.resolve(),
 
+  // ── Tauri HDD storage ─────────────────────────────────────────────────────
+  // When running in the Tauri desktop app (window.__TAURI__ defined), all
+  // wt_* keys are stored as plain JSON files in %APPDATA%\wt-invoice\data\.
+  // On startup _tauri.init() reads those files back into localStorage so the
+  // rest of db.js works without modification.  _tauri.write() is called by
+  // _set() on every write to keep HDD files in sync (fire-and-forget async).
+  // localStorage is still used as the fast in-session cache; HDD files are
+  // the durable source of truth — data survives even if WebView2 profile is reset.
+  _tauri: {
+    dataDir: null,
+    async init() {
+      if (!window.__TAURI__) return;
+      try {
+        const { appDataDir, join } = window.__TAURI__.path;
+        const { createDir, readDir, readTextFile } = window.__TAURI__.fs;
+        const base = await appDataDir();
+        this.dataDir = await join(base, 'data');
+        await createDir(this.dataDir, { recursive: true });
+        const files = await readDir(this.dataDir);
+        for (const f of files) {
+          if (!f.name?.startsWith('wt_') || !f.name.endsWith('.json')) continue;
+          const key = f.name.slice(0, -5);   // strip .json → e.g. wt_invoices
+          try {
+            const json = await readTextFile(f.path);
+            // Re-compress into localStorage so the existing LZ read path works
+            const stored = typeof LZString !== 'undefined'
+              ? LZString.compressToUTF16(json) : json;
+            localStorage.setItem(key, stored);
+          } catch (e) {
+            console.warn('[DB][Tauri] Could not load', f.name, e);
+          }
+        }
+        console.log('[DB][Tauri] HDD storage loaded →', this.dataDir);
+      } catch (e) {
+        console.error('[DB][Tauri] HDD init failed', e);
+      }
+    },
+    write(key, val) {
+      if (!this.dataDir || !window.__TAURI__) return;
+      const { join } = window.__TAURI__.path;
+      const { writeTextFile } = window.__TAURI__.fs;
+      join(this.dataDir, key + '.json')
+        .then(p => writeTextFile(p, JSON.stringify(val)))
+        .catch(e => console.warn('[DB][Tauri] Write failed', key, e));
+    },
+  },
+
   // ── LZ-string helpers: read raw localStorage and try to decompress ──────
   _lzRead(key) {
     const raw = localStorage.getItem(key);
@@ -135,6 +182,8 @@ const DB = {
     if (window.DriveDbSync) DriveDbSync.queueUpload(key, val);
     // Mirror to local folder (debounced, no-op if no folder selected)
     if (window.LocalFolderSync) LocalFolderSync.queueWrite(key, val);
+    // Persist to HDD when running in Tauri desktop app (fire-and-forget)
+    if (window.__TAURI__ && this._tauri.dataDir) this._tauri.write(key, val);
   },
 
   // ── Sticky banner: IDB also full — critical, red ─────────────────────────
@@ -201,6 +250,9 @@ const DB = {
   // heavy data (invoices, payments, etc.).  Call DB.ready.then(render).
   preloadFromIDB() {
     return (async () => {
+      // Step 0: in Tauri, restore all HDD files → localStorage before anything else
+      if (window.__TAURI__) await this._tauri.init();
+
       // Step 1: restore _idbKeys from localStorage (tiny JSON — always fits)
       const stored = localStorage.getItem(this._IDB_KEYS_LS);
       if (stored) {
@@ -257,6 +309,7 @@ const DB = {
       taxId: '0992000796640',
       logoText: '',
       showHeader: true,
+      sessionTimeoutMin: 30,   // idle auto-logout (minutes). 0 = disabled
     });
   },
   saveSettings(s) { this._set(this.K.SETTINGS, s); },

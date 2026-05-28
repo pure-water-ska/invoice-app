@@ -460,6 +460,7 @@ const Nav = {
 
     _checkOverdueAlert();
     _checkStorageAlert();
+    _startIdleTimer();
 
     // Force password change for first-time users (set by users.html on creation)
     if (sessionStorage.getItem('mustChangePw') === '1') {
@@ -957,6 +958,73 @@ function _checkOverdueAlert() {
     try { new bootstrap.Modal(document.getElementById(modalId)).show(); } catch(e) {}
   }, 600);
 }
+
+// ── Idle session timeout ──────────────────────────────────────────────────────
+// Auto-logout after N minutes of inactivity (default 30, 0 = disabled).
+// Configured via DB.getSettings().sessionTimeoutMin.
+// Shows a yellow warning banner 2 minutes before expiry; any user activity resets the timer.
+;(function() {
+  var _active  = false;
+  var _warnEl  = null;
+  var _lastAct = Date.now();
+  var _timeoutMs = 0;
+
+  function _reset() {
+    _lastAct = Date.now();
+    if (_warnEl) { _warnEl.remove(); _warnEl = null; }
+  }
+
+  function _logout() {
+    if (_warnEl) { _warnEl.remove(); _warnEl = null; }
+    if (window.Auth) Auth.logout();
+    window.location.href = 'index.html';
+  }
+
+  function _warn(minsLeft) {
+    if (_warnEl || !document.body) return;
+    var isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+    _warnEl = document.createElement('div');
+    _warnEl.style.cssText =
+      'position:fixed;bottom:70px;left:50%;transform:translateX(-50%);z-index:99990;' +
+      'background:' + (isDark ? '#332900' : '#fff3cd') + ';color:' + (isDark ? '#ffc' : '#664d03') + ';' +
+      'border:1px solid #ffc107;border-radius:12px;padding:13px 20px;' +
+      'box-shadow:0 4px 20px rgba(0,0,0,.25);font-size:14px;font-family:Sarabun,sans-serif;' +
+      'display:flex;align-items:center;gap:12px;max-width:420px;width:90%';
+    _warnEl.innerHTML =
+      '<i class="bi bi-clock-history fs-5"></i>' +
+      '<div><strong>เซสชันจะหมดอายุใน ' + minsLeft + ' นาที</strong><br>' +
+      '<span style="font-size:12px;opacity:.8">เลื่อนเมาส์หรือกดปุ่มใดก็ได้เพื่อต่อเวลา</span></div>' +
+      '<button onclick="this.parentElement.remove()" ' +
+      'style="margin-left:auto;flex-shrink:0;background:none;border:1px solid currentColor;' +
+      'border-radius:8px;padding:4px 10px;cursor:pointer;font-size:12px;color:inherit">OK</button>';
+    document.body.appendChild(_warnEl);
+  }
+
+  function _tick() {
+    if (!window.Auth || !Auth.session()) return;  // logged out elsewhere
+    var elapsed   = Date.now() - _lastAct;
+    var remaining = _timeoutMs - elapsed;
+    if (remaining <= 0)              { _logout(); return; }
+    if (remaining <= 2 * 60 * 1000) { _warn(Math.ceil(remaining / 60000)); }
+    else if (_warnEl)                { _warnEl.remove(); _warnEl = null; }
+    setTimeout(_tick, 15000);        // check every 15 s
+  }
+
+  window._startIdleTimer = function() {
+    if (_active) return;
+    var mins = 30;
+    try { var s = DB.getSettings(); if (s.sessionTimeoutMin !== undefined) mins = s.sessionTimeoutMin; } catch {}
+    if (!mins || mins <= 0) return;   // 0 = disabled
+    _timeoutMs = mins * 60 * 1000;
+    _active    = true;
+    _lastAct   = Date.now();
+    ['mousemove','keydown','mousedown','touchstart','scroll','click']
+      .forEach(function(e) { document.addEventListener(e, _reset, { passive: true }); });
+    setTimeout(_tick, 15000);
+  };
+})();
+
+function _startIdleTimer() { if (typeof window._startIdleTimer === 'function') window._startIdleTimer(); }
 
 // ── Auto restore point: save marker on browser close so login page can offer download ──
 // A full download is not possible in beforeunload (browsers block it).

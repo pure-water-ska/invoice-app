@@ -5,7 +5,7 @@
     "beforeBuildCommand": "node scripts/tauri-copy-dist.js",
     "devPath": "http://localhost:8000",
     "distDir": "../dist",
-    "withGlobalTauri": false
+    "withGlobalTauri": true
   },
   "package": {
     "productName": "ระบบใบกำกับสินค้า",
@@ -84,7 +84,7 @@
       }
     },
     "security": {
-      "csp": "default-src 'self' tauri://localhost; connect-src 'self' tauri://localhost https://*.googleapis.com wss://*.googleapis.com https://*.google.com https://*.firebaseio.com wss://*.firebaseio.com https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://ip-api.com https://ipapi.co https://ipinfo.io https://fonts.gstatic.com https://fonts.googleapis.com; style-src 'self' tauri://localhost 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' tauri://localhost https://fonts.gstatic.com data:; script-src 'self' tauri://localhost 'unsafe-inline' 'unsafe-eval'; img-src 'self' tauri://localhost data: blob: https:; worker-src 'self' blob:; frame-src https://*.firebaseapp.com https://*.firebase.com;"
+      "csp": null
     },
     "updater": {
       "active": false
