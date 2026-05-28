@@ -32,6 +32,10 @@ window.DriveStore = {
 
   // ── Initialize ─────────────────────────────────────────────────────────────
   async init() {
+    // Google Drive OAuth uses web origins (https:// / http://). The Tauri desktop
+    // app runs on tauri://localhost which Google rejects — skip Drive entirely.
+    if (window.__TAURI__) return;
+
     // อ่าน GOOGLE_CLIENT_ID จาก window scope (โหลดจาก drive-config.js)
     const cid = (typeof GOOGLE_CLIENT_ID !== 'undefined') ? GOOGLE_CLIENT_ID : '';
     if (!cid || !cid.includes('.apps.')) {

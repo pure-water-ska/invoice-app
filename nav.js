@@ -289,7 +289,9 @@
 // drive-config.js (window assignment) and drive-store.js (guarded) are safe to
 // load twice. Loading here makes DriveStore + GOOGLE_CLIENT_ID available on
 // dashboard etc. so the post-login connection modal can show/connect Drive.
+// NOTE: skipped in the Tauri desktop app — Google OAuth rejects tauri:// origins.
 (function loadDriveStoreGlobal() {
+  if (window.__TAURI__) return;   // Drive not available in Tauri desktop app
   function loadScript(src, cb, errCb) {
     const s = document.createElement('script');
     s.src = src;
@@ -426,10 +428,10 @@ const Nav = {
                   if(event.shiftKey){if(confirm('อัปโหลดข้อมูลทั้งหมดจากเครื่องนี้ขึ้น Cloud ใช่หรือไม่?'))Sync.pushAll().then(()=>{if(typeof render==='function')render();});}
                   else{Sync.pull().then(()=>{if(typeof render==='function')render();});}">⏳ Sync</span>
         </li>
-        <li class="nav-item me-1" id="driveBadgeItem" style="display:none">
+        ${window.__TAURI__ ? '' : `<li class="nav-item me-1" id="driveBadgeItem" style="display:none">
           <span id="driveBadge" class="badge bg-secondary ms-1 py-1 px-2" style="font-size:10px;cursor:pointer"
                 onclick="location.href='settings.html'" title="Google Drive — คลิกเพื่อตั้งค่า">☁ Drive</span>
-        </li>
+        </li>`}
         <li class="nav-item me-1" id="pwaInstallBtn" style="display:none">
           <button class="btn btn-sm btn-outline-light px-2 py-1" onclick="window._pwaInstall && _pwaInstall()" title="ติดตั้งแอปบนเครื่อง">
             <i class="bi bi-download me-1"></i>ติดตั้งแอป
@@ -558,6 +560,7 @@ function _showChangePwOverlay() {
 // ── Connection modal (shown once per session, right after login) ──────────────
 function _showConnectionModal() {
   if (sessionStorage.getItem('connModalDone')) return;
+  if (window.__TAURI__) { sessionStorage.setItem('connModalDone', '1'); return; } // not needed in Tauri
 
   var isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
   var bg    = isDark ? '#1c2128' : '#ffffff';
