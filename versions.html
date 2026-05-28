@@ -210,17 +210,16 @@ window.addEventListener('DOMContentLoaded', () => {
   _fpVDate = BEDate.byId('vDate');
   BEDate.byId('filterFrom', { onChange: render });
   BEDate.byId('filterTo',   { onChange: render });
-
-  const custs = DB.getCustomers().sort((a,b) => a.name.localeCompare(b.name,'th'));
-  custs.forEach(c => {
-    document.getElementById('filterCust').innerHTML += `<option value="${c.id}">${c.name}</option>`;
-    document.getElementById('vCust').innerHTML      += `<option value="${c.id}">${c.name}</option>`;
+  DB.ready.then(() => {
+    const custs = DB.getCustomers().sort((a,b) => a.name.localeCompare(b.name,'th'));
+    custs.forEach(c => {
+      document.getElementById('filterCust').innerHTML += `<option value="${c.id}">${c.name}</option>`;
+      document.getElementById('vCust').innerHTML      += `<option value="${c.id}">${c.name}</option>`;
+    });
+    document.getElementById('vSizeDatalist').innerHTML =
+      DB.getProducts().map(p => `<option value="${p.name}">`).join('');
+    render();
   });
-
-  document.getElementById('vSizeDatalist').innerHTML =
-    DB.getProducts().map(p => `<option value="${p.name}">`).join('');
-
-  render();
 });
 
 // ── Render ────────────────────────────────────────────────────────────────────

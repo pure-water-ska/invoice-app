@@ -211,7 +211,7 @@ window.addEventListener('DOMContentLoaded', () => {
   if (Auth.isAdmin && Auth.isAdmin()) {
     document.getElementById('adminLabelBar').classList.remove('d-none');
   }
-  load();
+  DB.ready.then(() => load());
 });
 
 function openLabelModal() {

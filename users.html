@@ -166,7 +166,7 @@ window.addEventListener('DOMContentLoaded', () => {
   modal = new bootstrap.Modal(document.getElementById('userModal'));
   pwModal = new bootstrap.Modal(document.getElementById('pwModal'));
   permModal = new bootstrap.Modal(document.getElementById('permModal'));
-  render();
+  DB.ready.then(() => render());
 });
 
 function render() {

@@ -101,8 +101,8 @@ let modal;
 
 window.addEventListener('DOMContentLoaded', () => {
   modal = new bootstrap.Modal(document.getElementById('prodModal'));
-  render();
   document.getElementById('searchInput').addEventListener('input', render);
+  DB.ready.then(() => render());
 });
 
 function render() {

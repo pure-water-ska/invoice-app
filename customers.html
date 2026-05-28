@@ -413,8 +413,8 @@ window.addEventListener('DOMContentLoaded', () => {
   custModal = new bootstrap.Modal(document.getElementById('custModal'));
   noteModal = new bootstrap.Modal(document.getElementById('noteModal'));
   suspendModal = new bootstrap.Modal(document.getElementById('suspendModal'));
-  render();
   document.getElementById('searchInput').addEventListener('input', Utils.debounce(() => { _custPage = 1; render(); }, 200));
+  DB.ready.then(() => render());
 });
 
 // Re-render when a remote device pushes customer/invoice/payment changes

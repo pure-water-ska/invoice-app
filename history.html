@@ -155,23 +155,22 @@ window.addEventListener('sync:updated', (e) => {
 window.addEventListener('sync:pulled', render);
 
 window.addEventListener('DOMContentLoaded', () => {
-  const users = DB.getUsers();
-  const userSel = document.getElementById('filterUser');
-  users.forEach(u => userSel.innerHTML += `<option value="${u.username}">${u.name} (${u.username})</option>`);
-
-  // Populate action filter with unique action values
-  const actions = [...new Set(DB.getActivity().map(a => a.action))].sort();
-  actions.forEach(a => {
-    document.getElementById('filterAction').innerHTML += `<option value="${a}">${a}</option>`;
-  });
-
   ['filterUser','searchText','filterRows','filterAction','filterSuccess'].forEach(id => {
     document.getElementById(id).addEventListener('input', Utils.debounce(renderCurrent, 200));
     document.getElementById(id).addEventListener('change', renderCurrent);
   });
   BEDate.byId('filterFrom', { onChange: renderCurrent });
   BEDate.byId('filterTo',   { onChange: renderCurrent });
-  render();
+  DB.ready.then(() => {
+    const users = DB.getUsers();
+    const userSel = document.getElementById('filterUser');
+    users.forEach(u => userSel.innerHTML += `<option value="${u.username}">${u.name} (${u.username})</option>`);
+    const actions = [...new Set(DB.getActivity().map(a => a.action))].sort();
+    actions.forEach(a => {
+      document.getElementById('filterAction').innerHTML += `<option value="${a}">${a}</option>`;
+    });
+    render();
+  });
 });
 
 function switchTab(tab, el) {

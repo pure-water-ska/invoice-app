@@ -152,7 +152,7 @@ window.addEventListener('DOMContentLoaded', () => {
   _fpRptFrom = BEDate.byId('filterFrom');
   _fpRptTo   = BEDate.byId('filterTo');
   setRange('month');
-  runReport();
+  DB.ready.then(() => runReport());
 });
 
 function setRange(preset) {

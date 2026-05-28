@@ -158,17 +158,18 @@ let modal, histModal, priceChartInstance = null;
 window.addEventListener('DOMContentLoaded', () => {
   modal     = new bootstrap.Modal(document.getElementById('pricingModal'));
   histModal = new bootstrap.Modal(document.getElementById('histModal'));
-  populateSelects();
-  render();
   document.getElementById('filterProduct').addEventListener('change', render);
   document.getElementById('filterCustomer').addEventListener('input', render);
   document.getElementById('filterShipping').addEventListener('change', render);
-  // check URL param
-  const params = new URLSearchParams(location.search);
-  if (params.get('prod')) {
-    document.getElementById('filterProduct').value = params.get('prod');
+  DB.ready.then(() => {
+    populateSelects();
     render();
-  }
+    const params = new URLSearchParams(location.search);
+    if (params.get('prod')) {
+      document.getElementById('filterProduct').value = params.get('prod');
+      render();
+    }
+  });
 });
 
 function populateSelects() {
