@@ -188,6 +188,7 @@ const DB = {
 
   // ── Sticky banner: IDB also full — critical, red ─────────────────────────
   _warnQuota(key) {
+    if (window.__TAURI__) return;  // HDD storage is the source of truth — localStorage overflow is irrelevant
     const id = 'wt-quota-banner';
     if (document.getElementById(id)) return;
     const banner = document.createElement('div');
@@ -213,6 +214,7 @@ const DB = {
   // Called both when a new key first overflows AND on every subsequent page
   // load while overflow is active, so the user always knows storage is full.
   _notifyIdbOverflow(key) {
+    if (window.__TAURI__) return;  // HDD storage is the source of truth — localStorage overflow is irrelevant
     const id = 'wt-idb-overflow-banner';
     if (document.getElementById(id)) return;
     const banner = document.createElement('div');
