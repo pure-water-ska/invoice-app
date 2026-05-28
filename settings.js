@@ -858,30 +858,54 @@ function importData(input, mode) {
   input.value = '';
 }
 
-/* ─── ZIP Section Visibility ────────────────────────────────────────────── */
+/* ─── Backup / Import Card Visibility ───────────────────────────────────── */
 async function initZipSections() {
-  if (!Auth.isAdmin()) {
+  const isAdmin       = Auth.isAdmin();
+  const canExpBackup  = isAdmin || Auth.can('export_backup');
+  const canImpBackup  = isAdmin || Auth.can('import_backup');
+  const canExpZip     = Auth.can('export_zip');
+  const canImpZip     = Auth.can('import_zip');
+
+  // Hide admin-only elements for non-admin users
+  if (!isAdmin) {
     document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'none');
   }
-  if (Auth.can('export_backup')) {
-    document.getElementById('exportBackupCard').style.display = '';
+
+  // ── Unified Backup card ──────────────────────────────────────────────────
+  if (canExpBackup || canExpZip) {
+    document.getElementById('backupCard').style.display = '';
+    if (isAdmin) {
+      document.getElementById('adminExportTiles').style.display = '';
+    } else if (canExpBackup) {
+      document.getElementById('simpleExportSection').style.display = '';
+    }
+    if (canExpZip) {
+      document.getElementById('zipExportSection').style.display = '';
+      const h  = await IDB.get('pdf_dir');
+      const el = document.getElementById('zipPdfFolderInfo');
+      el.innerHTML = h
+        ? `<i class="bi bi-folder2-open me-1 text-warning"></i>PDF Folder: <strong>${h.name}</strong>`
+        : '<i class="bi bi-exclamation-triangle me-1 text-danger"></i>ยังไม่ได้ตั้ง PDF Folder — จะ Export เฉพาะข้อมูล ไม่รวม PDF';
+    }
   }
-  if (Auth.can('import_backup')) {
-    document.getElementById('importBackupCard').style.display = '';
+
+  // ── Unified Import card ──────────────────────────────────────────────────
+  if (canImpBackup || canImpZip) {
+    document.getElementById('importCard').style.display = '';
+    if (canImpBackup) {
+      document.getElementById('jsonImportSection').style.display = '';
+    }
+    if (canImpZip) {
+      document.getElementById('zipImportSection').style.display = '';
+      // Hide the HR divider when no JSON section sits above the ZIP section
+      if (!canImpBackup) {
+        document.getElementById('zipImportHr').style.display = 'none';
+      }
+    }
   }
-  if (Auth.can('export_zip')) {
-    document.getElementById('zipExportCard').style.display = '';
-    const h = await IDB.get('pdf_dir');
-    const el = document.getElementById('zipPdfFolderInfo');
-    el.innerHTML = h
-      ? `<i class="bi bi-folder2-open me-1 text-warning"></i>PDF Folder: <strong>${h.name}</strong>`
-      : '<i class="bi bi-exclamation-triangle me-1 text-danger"></i>ยังไม่ได้ตั้ง PDF Folder — จะ Export เฉพาะข้อมูล ไม่รวม PDF';
-  }
-  if (Auth.can('import_zip')) {
-    document.getElementById('zipImportCard').style.display = '';
-  }
+
   // Google Drive card — show for admin always
-  if (Auth.isAdmin()) {
+  if (isAdmin) {
     document.getElementById('driveCard').style.display = '';
     initDriveCard();
   }

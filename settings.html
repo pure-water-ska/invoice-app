@@ -22,102 +22,6 @@
   <h5 class="mb-4 fw-bold"><i class="bi bi-gear me-2 text-primary"></i>ตั้งค่าระบบ</h5>
   <div id="alertBox" class="mb-3"></div>
 
-  <!-- ── Export JSON (สำหรับ user ที่มีสิทธิ์) ───────────────────────────── -->
-  <div id="exportBackupCard" class="card mb-4" style="display:none">
-    <div class="card-header bg-primary text-white fw-semibold py-2">
-      <i class="bi bi-download me-1"></i>สำรองข้อมูล (Export)
-    </div>
-    <div class="card-body">
-      <div class="d-flex align-items-start gap-3">
-        <i class="bi bi-database-fill-down fs-2 text-primary flex-shrink-0 mt-1"></i>
-        <div class="flex-grow-1">
-          <div class="fw-semibold mb-1">Full Backup</div>
-          <div class="text-muted small mb-3">ข้อมูลทุกอย่าง รวม Log — บันทึกเป็นไฟล์ .json</div>
-          <button class="btn btn-primary btn-sm" onclick="exportFull()">
-            <i class="bi bi-download me-1"></i>Export Full Backup
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── Import JSON (สำหรับ user ที่มีสิทธิ์) ───────────────────────────── -->
-  <div id="importBackupCard" class="card mb-4" style="display:none">
-    <div class="card-header bg-warning fw-semibold py-2">
-      <i class="bi bi-upload me-1"></i>นำเข้าข้อมูล (Import)
-    </div>
-    <div class="card-body">
-      <div class="row g-3">
-        <div class="col-md-6">
-          <div class="border rounded p-3 text-center h-100">
-            <i class="bi bi-plus-circle fs-3 text-success d-block mb-2"></i>
-            <div class="fw-semibold mb-1">Merge (เพิ่มข้อมูลใหม่)</div>
-            <div class="text-muted small mb-3">เพิ่มเฉพาะรายการที่ยังไม่มีในระบบ<br>(ไม่ลบข้อมูลเดิม)</div>
-            <input type="file" id="importFileMergeUser" accept=".json" style="display:none" onchange="importData(this,'merge')">
-            <button class="btn btn-success btn-sm" onclick="document.getElementById('importFileMergeUser').click()">
-              <i class="bi bi-upload me-1"></i>เลือกไฟล์ (Merge)
-            </button>
-          </div>
-        </div>
-        <div class="col-md-6">
-          <div class="border rounded p-3 text-center h-100 border-danger">
-            <i class="bi bi-arrow-repeat fs-3 text-danger d-block mb-2"></i>
-            <div class="fw-semibold mb-1 text-danger">Overwrite (เขียนทับ)</div>
-            <div class="text-muted small mb-3">แทนที่ข้อมูลทั้งหมดด้วยไฟล์ที่นำเข้า<br><strong class="text-danger">ข้อมูลเดิมจะหายทั้งหมด!</strong></div>
-            <input type="file" id="importFileOverwriteUser" accept=".json" style="display:none" onchange="importData(this,'overwrite')">
-            <button class="btn btn-outline-danger btn-sm" onclick="document.getElementById('importFileOverwriteUser').click()">
-              <i class="bi bi-upload me-1"></i>เลือกไฟล์ (Overwrite)
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── ZIP Export (สำหรับ user ที่มีสิทธิ์) ────────────────────────────── -->
-  <div id="zipExportCard" class="card mb-4" style="display:none">
-    <div class="card-header bg-success text-white fw-semibold py-2">
-      <i class="bi bi-file-zip me-1"></i>สำรองข้อมูล ZIP (ข้อมูล + PDF)
-    </div>
-    <div class="card-body">
-      <div class="d-flex align-items-start gap-3">
-        <i class="bi bi-file-earmark-zip fs-2 text-success flex-shrink-0 mt-1"></i>
-        <div class="flex-grow-1">
-          <div class="text-muted small mb-2">รวมข้อมูลทั้งหมด + ไฟล์ PDF ทุกไฟล์จาก PDF Folder ไว้ในไฟล์ .zip เดียว</div>
-          <div id="zipPdfFolderInfo" class="small mb-3"></div>
-          <button class="btn btn-success btn-sm" onclick="exportZip()">
-            <i class="bi bi-file-zip me-1"></i>Export ZIP
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── ZIP Import (สำหรับ user ที่มีสิทธิ์) ────────────────────────────── -->
-  <div id="zipImportCard" class="card mb-4" style="display:none">
-    <div class="card-header bg-success text-white fw-semibold py-2">
-      <i class="bi bi-upload me-1"></i>นำเข้าข้อมูล ZIP (ข้อมูล + PDF)
-    </div>
-    <div class="card-body">
-      <div class="d-flex align-items-start gap-3">
-        <i class="bi bi-file-earmark-zip fs-2 text-success flex-shrink-0 mt-1"></i>
-        <div class="flex-grow-1">
-          <div class="text-muted small mb-3">นำเข้าจากไฟล์ .zip ที่ Export ไว้ — จะนำเข้าข้อมูลและคืนไฟล์ PDF ไปยัง PDF Folder</div>
-          <div class="d-flex gap-2 flex-wrap">
-            <input type="file" id="importZipMerge" accept=".zip" style="display:none" onchange="importZip(this,'merge')">
-            <button class="btn btn-success btn-sm" onclick="document.getElementById('importZipMerge').click()">
-              <i class="bi bi-upload me-1"></i>Import ZIP (Merge)
-            </button>
-            <input type="file" id="importZipOverwrite" accept=".zip" style="display:none" onchange="importZip(this,'overwrite')">
-            <button class="btn btn-outline-danger btn-sm" onclick="document.getElementById('importZipOverwrite').click()">
-              <i class="bi bi-upload me-1"></i>Import ZIP (Overwrite)
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <!-- ── Company Info ───────────────────────────────────────────────────── -->
   <div class="card mb-4 admin-only">
     <div class="card-header bg-primary text-white fw-semibold py-2">
@@ -353,14 +257,17 @@
     </div>
   </div>
 
-  <!-- ── Manual Backup ─────────────────────────────────────────────────── -->
-  <div class="card mb-4 admin-only">
+  <!-- ── Backup / Export ───────────────────────────────────────────────── -->
+  <!-- Shown to: Admin (all tiles) | export_backup (Full only) | export_zip (ZIP section) -->
+  <div class="card mb-4" id="backupCard" style="display:none">
     <div class="card-header bg-primary text-white fw-semibold py-2">
-      <i class="bi bi-download me-1"></i>สำรองข้อมูล (Manual Backup)
+      <i class="bi bi-download me-1"></i>สำรองข้อมูล (Backup)
     </div>
     <div class="card-body">
       <div id="storageBar" class="mb-3"></div>
-      <div class="row g-3">
+
+      <!-- Admin: 4 export type tiles -->
+      <div class="row g-3" id="adminExportTiles" style="display:none">
         <div class="col-6 col-md-3">
           <div class="border rounded p-3 text-center h-100 d-flex flex-column">
             <i class="bi bi-database-fill-down fs-3 text-primary d-block mb-2"></i>
@@ -398,6 +305,36 @@
             <div class="text-muted small mb-auto">ตั้งค่า + ราคาสินค้า + วิธีชำระ</div>
             <button class="btn btn-warning btn-sm mt-2 w-100" onclick="exportConfigOnly()">
               <i class="bi bi-download me-1"></i>Export
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Non-admin with export_backup: Full Backup only -->
+      <div id="simpleExportSection" style="display:none">
+        <div class="d-flex align-items-start gap-3">
+          <i class="bi bi-database-fill-down fs-2 text-primary flex-shrink-0 mt-1"></i>
+          <div class="flex-grow-1">
+            <div class="fw-semibold mb-1">Full Backup</div>
+            <div class="text-muted small mb-3">ข้อมูลทุกอย่าง รวม Log — บันทึกเป็นไฟล์ .json</div>
+            <button class="btn btn-primary btn-sm" onclick="exportFull()">
+              <i class="bi bi-download me-1"></i>Export Full Backup
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ZIP Export (export_zip permission) -->
+      <div id="zipExportSection" style="display:none">
+        <hr class="my-3">
+        <div class="d-flex align-items-start gap-3">
+          <i class="bi bi-file-earmark-zip fs-2 text-success flex-shrink-0 mt-1"></i>
+          <div class="flex-grow-1">
+            <div class="fw-semibold mb-1">Export ZIP <span class="text-muted fw-normal small">(ข้อมูล + PDF)</span></div>
+            <div class="text-muted small mb-2">รวมข้อมูลทั้งหมด + ไฟล์ PDF ทุกไฟล์จาก PDF Folder ไว้ในไฟล์ .zip เดียว</div>
+            <div id="zipPdfFolderInfo" class="small mb-3"></div>
+            <button class="btn btn-success btn-sm" onclick="exportZip()">
+              <i class="bi bi-file-zip me-1"></i>Export ZIP
             </button>
           </div>
         </div>
@@ -498,32 +435,59 @@
   </div>
 
   <!-- ── Import / Restore ──────────────────────────────────────────────── -->
-  <div class="card mb-4 admin-only">
+  <!-- Shown to: Admin | import_backup | import_zip -->
+  <div class="card mb-4" id="importCard" style="display:none">
     <div class="card-header bg-warning fw-semibold py-2">
       <i class="bi bi-upload me-1"></i>นำเข้าข้อมูล / Restore
     </div>
     <div class="card-body">
-      <div class="row g-3">
-        <div class="col-md-6">
-          <div class="border rounded p-3 text-center">
-            <i class="bi bi-plus-circle fs-3 text-success d-block mb-2"></i>
-            <div class="fw-semibold mb-1">Merge (เพิ่มข้อมูลใหม่)</div>
-            <div class="text-muted small mb-3">เพิ่มเฉพาะรายการที่ยังไม่มีในระบบ<br>(ไม่ลบข้อมูลเดิม)</div>
-            <input type="file" id="importFileMerge" accept=".json" style="display:none" onchange="importData(this,'merge')">
-            <button class="btn btn-success btn-sm" onclick="document.getElementById('importFileMerge').click()">
-              <i class="bi bi-upload me-1"></i>เลือกไฟล์ (Merge)
-            </button>
+
+      <!-- JSON Import (admin or import_backup permission) -->
+      <div id="jsonImportSection" style="display:none">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <div class="border rounded p-3 text-center h-100">
+              <i class="bi bi-plus-circle fs-3 text-success d-block mb-2"></i>
+              <div class="fw-semibold mb-1">Merge (เพิ่มข้อมูลใหม่)</div>
+              <div class="text-muted small mb-3">เพิ่มเฉพาะรายการที่ยังไม่มีในระบบ<br>(ไม่ลบข้อมูลเดิม)</div>
+              <input type="file" id="importFileMerge" accept=".json" style="display:none" onchange="importData(this,'merge')">
+              <button class="btn btn-success btn-sm" onclick="document.getElementById('importFileMerge').click()">
+                <i class="bi bi-upload me-1"></i>เลือกไฟล์ (Merge)
+              </button>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="border rounded p-3 text-center h-100 border-danger">
+              <i class="bi bi-arrow-repeat fs-3 text-danger d-block mb-2"></i>
+              <div class="fw-semibold mb-1 text-danger">Overwrite (เขียนทับ)</div>
+              <div class="text-muted small mb-3">แทนที่ข้อมูลทั้งหมดด้วยไฟล์ที่นำเข้า<br><strong class="text-danger">ข้อมูลเดิมจะหายทั้งหมด!</strong></div>
+              <input type="file" id="importFileOverwrite" accept=".json" style="display:none" onchange="importData(this,'overwrite')">
+              <button class="btn btn-outline-danger btn-sm" onclick="document.getElementById('importFileOverwrite').click()">
+                <i class="bi bi-upload me-1"></i>เลือกไฟล์ (Overwrite)
+              </button>
+            </div>
           </div>
         </div>
-        <div class="col-md-6">
-          <div class="border rounded p-3 text-center border-danger">
-            <i class="bi bi-arrow-repeat fs-3 text-danger d-block mb-2"></i>
-            <div class="fw-semibold mb-1 text-danger">Overwrite (เขียนทับ)</div>
-            <div class="text-muted small mb-3">แทนที่ข้อมูลทั้งหมดด้วยไฟล์ที่นำเข้า<br><strong class="text-danger">ข้อมูลเดิมจะหายทั้งหมด!</strong></div>
-            <input type="file" id="importFileOverwrite" accept=".json" style="display:none" onchange="importData(this,'overwrite')">
-            <button class="btn btn-outline-danger btn-sm" onclick="document.getElementById('importFileOverwrite').click()">
-              <i class="bi bi-upload me-1"></i>เลือกไฟล์ (Overwrite)
-            </button>
+      </div>
+
+      <!-- ZIP Import (import_zip permission) -->
+      <div id="zipImportSection" style="display:none">
+        <hr class="my-3" id="zipImportHr">
+        <div class="d-flex align-items-start gap-3">
+          <i class="bi bi-file-earmark-zip fs-2 text-success flex-shrink-0 mt-1"></i>
+          <div class="flex-grow-1">
+            <div class="fw-semibold mb-1">Import ZIP <span class="text-muted fw-normal small">(ข้อมูล + PDF)</span></div>
+            <div class="text-muted small mb-3">นำเข้าจากไฟล์ .zip ที่ Export ไว้ — จะนำเข้าข้อมูลและคืนไฟล์ PDF ไปยัง PDF Folder</div>
+            <div class="d-flex gap-2 flex-wrap">
+              <input type="file" id="importZipMerge" accept=".zip" style="display:none" onchange="importZip(this,'merge')">
+              <button class="btn btn-success btn-sm" onclick="document.getElementById('importZipMerge').click()">
+                <i class="bi bi-upload me-1"></i>Import ZIP (Merge)
+              </button>
+              <input type="file" id="importZipOverwrite" accept=".zip" style="display:none" onchange="importZip(this,'overwrite')">
+              <button class="btn btn-outline-danger btn-sm" onclick="document.getElementById('importZipOverwrite').click()">
+                <i class="bi bi-upload me-1"></i>Import ZIP (Overwrite)
+              </button>
+            </div>
           </div>
         </div>
       </div>
