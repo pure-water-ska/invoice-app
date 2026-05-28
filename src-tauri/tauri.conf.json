@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/schema.json",
   "build": {
     "beforeDevCommand": "python -m http.server 8000",
-    "beforeBuildCommand": "node ../scripts/tauri-copy-dist.js",
+    "beforeBuildCommand": "node scripts/tauri-copy-dist.js",
     "devPath": "http://localhost:8000",
     "distDir": "../dist",
     "withGlobalTauri": false
