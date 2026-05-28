@@ -121,7 +121,25 @@ const Auth = {
       DB.logActivity(s.userId, s.username, 'ออกจากระบบ', {});
       // Auto-download backup on sign-out if daily backup is enabled
       try { DB.runAutoBackup(s.username); } catch {}
+      // Auto restore point download on sign-out
+      try {
+        const cfg = (window.DB ? DB.getSettings() : null) || {};
+        if (cfg.autoRestorePoint?.onLogout !== false) {
+          const now = new Date();
+          const beYear = now.getFullYear() + 543;
+          const pad = n => String(n).padStart(2, '0');
+          const fn = `restore-${beYear}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}.json`;
+          const blob = new Blob([JSON.stringify(DB.buildBackupPayload(), null, 2)], { type: 'application/json' });
+          const url  = URL.createObjectURL(blob);
+          const a    = document.createElement('a');
+          a.href = url; a.download = fn;
+          document.body.appendChild(a); a.click(); document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 3000);
+        }
+      } catch(e) { console.warn('[Auth] auto restore point failed:', e.message); }
     }
+    // Normal logout — no pending restore point needed on next login
+    try { localStorage.removeItem('wt_restore_pending'); } catch {}
     sessionStorage.removeItem(this.KEY);
     // Clear the sync session guard so the login page always does a fresh _pullAll()
     // and picks up any users added on another device while this session was active.

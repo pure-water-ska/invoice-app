@@ -325,6 +325,34 @@
     </div>
   </div>
 
+  <!-- ── Auto Restore Point ───────────────────────────────────────────── -->
+  <div class="card mb-4 admin-only">
+    <div class="card-header bg-warning text-dark fw-semibold py-2">
+      <i class="bi bi-shield-check me-1"></i>Auto Restore Point
+    </div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" id="arpOnLogout" checked>
+            <label class="form-check-label fw-semibold" for="arpOnLogout">ดาวน์โหลดอัตโนมัติเมื่อออกจากระบบ</label>
+          </div>
+          <div class="text-muted small">ดาวน์โหลดไฟล์ <code>restore-ปปปป-ดด-วว_ชช-นน.json</code> ทุกครั้งที่กด "ออกจากระบบ"</div>
+        </div>
+        <div class="col-md-6">
+          <div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" id="arpOnClose" checked>
+            <label class="form-check-label fw-semibold" for="arpOnClose">บันทึกอัตโนมัติเมื่อปิด browser</label>
+          </div>
+          <div class="text-muted small">บันทึก marker ไว้ใน localStorage เมื่อปิด browser — หน้า Login จะแจ้งเตือนและเสนอดาวน์โหลดครั้งถัดไป</div>
+        </div>
+      </div>
+      <button class="btn btn-warning btn-sm mt-3" onclick="saveAutoRestorePointConfig()">
+        <i class="bi bi-save me-1"></i>บันทึกการตั้งค่า
+      </button>
+    </div>
+  </div>
+
   <!-- ── Manual Backup ─────────────────────────────────────────────────── -->
   <div class="card mb-4 admin-only">
     <div class="card-header bg-primary text-white fw-semibold py-2">

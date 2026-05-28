@@ -957,3 +957,23 @@ function _checkOverdueAlert() {
     try { new bootstrap.Modal(document.getElementById(modalId)).show(); } catch(e) {}
   }, 600);
 }
+
+// ── Auto restore point: save marker on browser close so login page can offer download ──
+// A full download is not possible in beforeunload (browsers block it).
+// Instead we save a tiny marker to localStorage; the login page detects it and
+// offers a "ดาวน์โหลดไฟล์สำรอง" button before the user re-enters their password.
+// The marker is removed by Auth.logout() so it only appears after an unclean close.
+(function() {
+  window.addEventListener('beforeunload', function() {
+    if (!window.Auth || !Auth.session()) return;
+    try {
+      const cfg = window.DB ? (DB.getSettings() || {}) : {};
+      if (cfg.autoRestorePoint?.onClose === false) return;
+      const s = Auth.session();
+      localStorage.setItem('wt_restore_pending', JSON.stringify({
+        savedAt: new Date().toISOString(),
+        username: s ? s.username : '',
+      }));
+    } catch(e) {}
+  });
+})();

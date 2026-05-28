@@ -33,6 +33,7 @@ var Sync = {
   _lastFromCache: undefined,             // last known snapshot.metadata.fromCache value — deduplicates sync:connectionstate events
   _lastDocJson:   {},                    // { [lsKey]: string } — JSON fingerprint of last written DOCUMENT; skip write if unchanged (opt ②)
   _lastSyncedRecs:{},                    // { [colName]: Map<id,string> } — JSON fingerprint per record; diff to send only changed records (opt ③)
+  _listenerSeeded:{},                   // { [colName]: boolean } — true after the initial onSnapshot delivery (all docs "added"); toasts suppressed until then
   ARCHIVE_MONTHS:    6,                  // invoices older than this are not fetched on page load (date-filtered _pullAll)
   _persistedSidsKey: 'wt_sync_sids',    // localStorage key for per-collection Set<id> that survives page reloads — enables tombstone-deletion of archived invoices outside the pull window
 
@@ -1144,6 +1145,13 @@ var Sync = {
               } catch {}
             }
 
+            // Skip write and notification if data is identical to what _pullAll() fetched.
+            // Without this, every page load triggers a toast for each document whose
+            // last writer was another device — the listener fires with the same data
+            // _pullAll() already wrote, but there is no fingerprint check here to stop it.
+            const freshDocJson = JSON.stringify(fsVal);
+            if (this._lastDocJson[lsKey] === freshDocJson) return;
+            this._lastDocJson[lsKey] = freshDocJson;
             this._lsWrite(lsKey, fsVal);
             if (window.DB) DB.invalidate(lsKey);
             this._notifyUpdate(lsKey);
@@ -1244,7 +1252,18 @@ var Sync = {
           } catch {}
           this._lsWrite(lsKey, finalArr);
           if (window.DB) DB.invalidate(lsKey);
-          if (snap.docChanges().length > 0) this._notifyUpdate(lsKey);
+          // Suppress the toast on the very first server snapshot after the listener
+          // attaches.  Firestore always reports every existing document as type:"added"
+          // in docChanges() on the initial delivery — so docChanges().length > 0 is
+          // always true even when nothing actually changed.  Only show the toast once
+          // the listener is "seeded" (i.e. after the first snapshot has been processed).
+          if (snap.docChanges().length > 0) {
+            if (!this._listenerSeeded[colName]) {
+              this._listenerSeeded[colName] = true; // mark seeded — next real change will toast
+            } else {
+              this._notifyUpdate(lsKey);
+            }
+          }
         },
           (err) => console.error('[Sync] Col listener error:', colName, err.code, err.message)
         );

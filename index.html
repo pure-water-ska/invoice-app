@@ -27,6 +27,7 @@
           <h4 class="fw-bold mt-2 mb-0">ระบบใบกำกับสินค้า</h4>
           <p class="text-muted small" id="companySubtitle"></p>
         </div>
+        <div id="restorePointBanner"></div>
         <div id="alertBox"></div>
         <form id="loginForm" novalidate>
           <div class="mb-3">
@@ -66,6 +67,59 @@
   DB.init();
   const cfg = DB.getSettings();
   document.getElementById('companySubtitle').textContent = cfg.companyName || '';
+
+  // ── Restore-pending banner: shown after an unclean browser close ─────────────
+  (function() {
+    let _pendingRaw;
+    try { _pendingRaw = localStorage.getItem('wt_restore_pending'); } catch {}
+    if (!_pendingRaw) return;
+    let _pending;
+    try { _pending = JSON.parse(_pendingRaw); } catch { return; }
+    const savedAt = _pending.savedAt ? new Date(_pending.savedAt) : null;
+    if (!savedAt || isNaN(savedAt)) return;
+
+    // Format timestamp as Thai locale + BE year
+    const pad = n => String(n).padStart(2, '0');
+    const beYear = savedAt.getFullYear() + 543;
+    const timeStr = `${pad(savedAt.getDate())}/${pad(savedAt.getMonth()+1)}/${beYear} ${pad(savedAt.getHours())}:${pad(savedAt.getMinutes())}`;
+
+    const banner = document.getElementById('restorePointBanner');
+    banner.innerHTML = `
+      <div class="alert alert-warning d-flex align-items-start gap-2 mb-3 py-2" id="rpBanner">
+        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+        <div class="flex-grow-1">
+          <div class="fw-semibold small">พบ Restore Point จากเซสชันก่อน</div>
+          <div class="text-muted" style="font-size:12px">บันทึกอัตโนมัติเมื่อ <strong>${timeStr}</strong> (ปิด browser โดยไม่ออกจากระบบ)</div>
+          <div class="mt-1 d-flex gap-2 flex-wrap">
+            <button class="btn btn-sm btn-warning fw-semibold" onclick="downloadRestorePoint()">
+              <i class="bi bi-download me-1"></i>ดาวน์โหลดไฟล์สำรอง
+            </button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="dismissRestorePoint()">ไม่สนใจ</button>
+          </div>
+        </div>
+      </div>`;
+
+    window.downloadRestorePoint = function() {
+      try {
+        const now = new Date();
+        const by = savedAt.getFullYear() + 543;
+        const fn = `restore-${by}-${pad(savedAt.getMonth()+1)}-${pad(savedAt.getDate())}_${pad(savedAt.getHours())}-${pad(savedAt.getMinutes())}.json`;
+        const blob = new Blob([JSON.stringify(DB.buildBackupPayload(), null, 2)], { type: 'application/json' });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href = url; a.download = fn;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 3000);
+        localStorage.removeItem('wt_restore_pending');
+        document.getElementById('rpBanner').remove();
+      } catch(e) { alert('ดาวน์โหลดล้มเหลว: ' + e.message); }
+    };
+
+    window.dismissRestorePoint = function() {
+      localStorage.removeItem('wt_restore_pending');
+      document.getElementById('rpBanner').remove();
+    };
+  })();
 
   // Clear any stale localStorage session left from the old localStorage-based auth.
   localStorage.removeItem('wt_session');

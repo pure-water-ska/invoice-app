@@ -7,6 +7,7 @@ Nav.render('settings');
 window.addEventListener('DOMContentLoaded', () => {
   loadCompanySettings();
   loadAutoBackup();
+  loadAutoRestorePoint();
   renderStorageBar();
   renderStorageCleanup();
   renderLogCounts();
@@ -22,6 +23,7 @@ window.addEventListener('DOMContentLoaded', () => {
     renderFsStatus();
     loadCompanySettings();   // reload form fields after Firestore data arrives
     loadAutoBackup();        // reload auto-backup toggle
+    loadAutoRestorePoint();  // reload auto restore point toggles
     loadStats();             // reload invoice/payment counts
   });
 
@@ -30,6 +32,7 @@ window.addEventListener('DOMContentLoaded', () => {
     if (e.detail?.key !== 'wt_settings') return;
     loadCompanySettings();
     loadAutoBackup();
+    loadAutoRestorePoint();
     Utils.showAlert('<i class="bi bi-person-check me-1"></i>ผู้ดูแลระบบอัปเดตการตั้งค่าระบบแล้ว', 'info');
   });
   ['companyName','address','phone'].forEach(id =>
@@ -327,6 +330,22 @@ function saveAutoBackupConfig() {
   DB.logActivity(session.userId, session.username, 'แก้ไขตั้งค่า Auto Backup', cfg.autoBackup);
   Utils.showAlert('บันทึกการตั้งค่า Auto Backup สำเร็จ');
   loadAutoBackup();
+}
+
+function loadAutoRestorePoint() {
+  const arp = (DB.getSettings() || {}).autoRestorePoint || {};
+  document.getElementById('arpOnLogout').checked = arp.onLogout !== false;
+  document.getElementById('arpOnClose').checked  = arp.onClose  !== false;
+}
+
+function saveAutoRestorePointConfig() {
+  const cfg = DB.getSettings();
+  cfg.autoRestorePoint = {
+    onLogout: document.getElementById('arpOnLogout').checked,
+    onClose:  document.getElementById('arpOnClose').checked,
+  };
+  DB.saveSettings(cfg);
+  Utils.showAlert('บันทึกการตั้งค่า Auto Restore Point สำเร็จ');
 }
 
 function isBackupDue() { return DB.isBackupDue(); }
