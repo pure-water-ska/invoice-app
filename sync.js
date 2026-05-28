@@ -814,6 +814,14 @@ var Sync = {
       return;
     }
 
+    // ── First-session guard: clear stale doc timestamps ─────────────────────
+    // _lastDocTs is persisted in localStorage across browser sessions. If another
+    // device updated a doc while this tab was closed, our cached ts is stale and
+    // the delta check below would silently skip that doc. Clearing it at the start
+    // of each new session forces a fresh Firestore .get() for every DOCUMENT this
+    // session — only ~14 extra reads per login, a negligible Firestore cost.
+    try { localStorage.removeItem('wt_sync_doc_ts'); } catch {}
+
     // ── Delta pull timing ────────────────────────────────────────────────────
     // For DOCUMENTS: skip the Firestore .get() entirely if the doc hasn't changed
     // since our last pull (checked via the server ts field stored in _lastDocTs).
@@ -826,6 +834,8 @@ var Sync = {
     const COL_SKIP_MS   = 5  * 60 * 1000; // skip collection pull if done within last 5 min
     // Per-doc last-known server timestamps — loaded from localStorage so we can
     // skip the .get() call entirely when a doc hasn't changed since last pull.
+    // (wt_sync_doc_ts was just cleared above, so this always starts as {} on a
+    // new session; the delta optimisation only applies within the same session.)
     const _lastDocTs = JSON.parse(localStorage.getItem('wt_sync_doc_ts') || '{}');
 
     // Documents — skip .get() entirely for docs whose server ts predates last pull
