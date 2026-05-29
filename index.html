@@ -64,6 +64,16 @@
 <script src="db.js"></script>
 <script src="auth.js"></script>
 <script>
+  // ── Tauri: unregister any old service worker immediately ─────────────────
+  // An old SW from a pre-fix build could serve outdated JS (without Tauri guards).
+  // Unregistering here ensures the fresh bundle files are always used.
+  if (location.protocol === 'tauri:' && 'serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then(regs => {
+      regs.forEach(r => r.unregister());
+      if (regs.length) console.log('[Tauri] Unregistered', regs.length, 'old service worker(s)');
+    });
+  }
+
   DB.init();
   const cfg = DB.getSettings();
   document.getElementById('companySubtitle').textContent = cfg.companyName || '';

@@ -667,6 +667,17 @@ const DB = {
 
   // ─── INIT ────────────────────────────────────────────────────────────────────
   init() {
+    // ── Tauri desktop: clear all wt_* data keys from localStorage ────────────
+    // In Tauri, data lives in HDD files + in-memory cache.  localStorage is never
+    // written by this build, but OLDER builds (before HDD storage was implemented)
+    // may have filled it up.  Remove all data keys now — before the LZ migration
+    // runs — so localStorage stays empty and no storage-full banner can appear.
+    if (location.protocol === 'tauri:') {
+      Object.values(this.K).forEach(k => { try { localStorage.removeItem(k); } catch {} });
+      // Mark migration as done so the loop below doesn't iterate (empty) localStorage
+      try { localStorage.setItem('wt_lz_migrated', '1'); } catch {}
+    }
+
     // ── One-time LZString migration ─────────────────────────────────────────
     // Compresses any plain-JSON wt_* keys written before compression was added.
     // Collect keys first to avoid modifying localStorage while iterating it.

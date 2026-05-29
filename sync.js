@@ -299,20 +299,18 @@ var Sync = {
         });
       }
 
-      // ── Firebase Auth (browser only) ─────────────────────────────────────────
-      // In Tauri: firebase-auth-compat.js is NOT loaded (it creates a hidden
-      // Google OAuth persistence iframe which Google rejects for tauri:// origins).
-      // Firestore security rules use org-path access — no request.auth needed.
-      if (location.protocol !== 'tauri:') {
-        // Each app user gets their own Firebase Auth account provisioned by users.html.
-        // sync.js reads the app session (sessionStorage) → user record → firebaseEmail /
-        // firebasePassword.  Users not yet provisioned fall back to the shared teamEmail.
-        // On the login page itself Auth.session() returns null → teamEmail is used.
-        const _appSession = (window.Auth && Auth.session) ? Auth.session() : null;
-        const _appUser    = (_appSession && window.DB) ? DB.getUserById(_appSession.userId) : null;
-        const _fbEmail    = _appUser?.firebaseEmail    || FIREBASE_CONFIG.teamEmail;
-        const _fbPass     = _appUser?.firebasePassword || FIREBASE_CONFIG.teamPassword;
+      // ── Firebase Auth ─────────────────────────────────────────────────────────
+      // Each app user gets their own Firebase Auth account provisioned by users.html.
+      // sync.js reads the app session (sessionStorage) → user record → firebaseEmail /
+      // firebasePassword.  Users not yet provisioned fall back to the shared teamEmail.
+      // On the login page itself Auth.session() returns null → teamEmail is used.
+      const _appSession = (window.Auth && Auth.session) ? Auth.session() : null;
+      const _appUser    = (_appSession && window.DB) ? DB.getUserById(_appSession.userId) : null;
+      const _fbEmail    = _appUser?.firebaseEmail    || FIREBASE_CONFIG.teamEmail;
+      const _fbPass     = _appUser?.firebasePassword || FIREBASE_CONFIG.teamPassword;
 
+      if (location.protocol !== 'tauri:') {
+        // ── Browser: full Auth with IndexedDB session persistence ──────────────
         // Sign in so Firestore WebChannel has a valid ID token.
         // Firebase Auth persists credentials in IndexedDB across page loads.
         // We wait for the cached state to restore first — if already signed in,
@@ -352,10 +350,27 @@ var Sync = {
         }
         this._uid = firebase.auth().currentUser?.uid || 'anon';
         console.log('[Sync] Step 5a: signIn OK, uid=', this._uid);
+
       } else {
-        // Tauri: no Auth SDK — identify by device ID (already set in _initDeviceId)
-        this._uid = 'tauri-' + (this._deviceId || 'device');
-        console.log('[Sync] Tauri mode: no auth, uid=', this._uid);
+        // ── Tauri: Auth WITHOUT persistence ─────────────────────────────────────
+        // firebase-auth-compat.js IS loaded but we skip IndexedDB persistence.
+        // With NONE persistence, the SDK does NOT create the hidden
+        // [project].firebaseapp.com/__/auth/iframe used for session management —
+        // which is the iframe Google rejects for tauri:// origins.
+        // Sign in fresh each session (REST call, no Google OAuth involved).
+        console.log('[Sync] Tauri: signing in without persistence');
+        try {
+          await firebase.auth().setPersistence(firebase.auth.Auth.Persistence.NONE);
+        } catch (e) {
+          console.warn('[Sync] Tauri setPersistence failed (non-fatal):', e.message);
+        }
+        if (_fbEmail && _fbPass) {
+          await firebase.auth().signInWithEmailAndPassword(_fbEmail, _fbPass);
+        } else {
+          await firebase.auth().signInAnonymously();
+        }
+        this._uid = firebase.auth().currentUser?.uid || 'anon-tauri';
+        console.log('[Sync] Tauri auth OK, uid=', this._uid);
       }
 
       // Flush pending queue BEFORE pulling from Firestore so that any records

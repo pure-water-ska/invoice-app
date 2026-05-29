@@ -236,17 +236,12 @@
       }, onSDKError);
     }
 
+    // firebase-auth-compat.js is loaded on ALL platforms (including Tauri).
+    // In Tauri, sync.js calls setPersistence(NONE) before signing in, which
+    // prevents the SDK from creating the hidden __/auth/iframe session manager
+    // (that iframe is rejected by Google's OAuth policy for tauri:// origins).
     loadScript(`${FB_BASE}/firebase-app-compat.js`, function() {
-      if (location.protocol === 'tauri:') {
-        // In Tauri: skip firebase-auth-compat.js — it creates a hidden Google OAuth
-        // persistence iframe which Google rejects for tauri:// origins.
-        // Firestore works without Auth because security rules use org-path access
-        // (no request.auth check).  sync.js detects Tauri and skips auth() calls.
-        loadFirestoreAndSync();
-      } else {
-        // Browser: load auth-compat so sync.js can sign in with teamEmail/password.
-        loadScript(`${FB_BASE}/firebase-auth-compat.js`, loadFirestoreAndSync, onSDKError);
-      }
+      loadScript(`${FB_BASE}/firebase-auth-compat.js`, loadFirestoreAndSync, onSDKError);
     }, onSDKError);
     } // end startFirebaseSDK
   }, function() {
