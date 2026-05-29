@@ -208,6 +208,10 @@
     // Called directly in Tauri (no auth-compat) or after auth-compat on web.
     function loadFirestoreAndSync() {
       loadScript(`${FB_BASE}/firebase-firestore-compat.js`, function() {
+        // Load Firebase Storage SDK non-blocking — needed for image uploads
+        // (user-triggered action); sync stack does not depend on it.
+        loadScript(`${FB_BASE}/firebase-storage-compat.js`, null, null);
+
         // Ensure idb.js is available — some pages include it as a static <script>,
         // others don't.  sync.js and db.js both rely on IDB for device-ID storage
         // and localStorage-overflow data.  Load it here if not already present.

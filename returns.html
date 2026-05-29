@@ -187,7 +187,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script><script src="bedate.js"></script>
+<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script><script src="bedate.js"></script><script src="storage.js"></script>
 <script>
 const session = Auth.requirePage('returns');
 DB.init();
@@ -457,14 +457,17 @@ async function previewImages(input) {
   for (const f of files) {
     try {
       const b64 = await Utils.compressImage(f, 1200, 0.82);
-      _pendingImages.push(b64);
+      // Upload to Firebase Storage; fall back to base64 if unavailable
+      const stored = window.AppStorage ? await AppStorage.upload('returns', b64) : b64;
+      _pendingImages.push(stored);
       const i = _pendingImages.length - 1;
+      // Preview uses local base64 for instant display (no network round-trip needed)
       row.innerHTML += `<div class="position-relative" id="imgwrap${i}">
         <img src="${b64}" style="height:80px;border-radius:6px;object-fit:cover">
         <button class="btn btn-danger btn-sm position-absolute top-0 end-0 p-0 px-1" onclick="removeImg(${i})" style="font-size:10px">×</button>
       </div>`;
     } catch (e) {
-      console.warn('[previewImages] compression failed for', f.name, e.message);
+      console.warn('[previewImages] failed for', f.name, e.message);
     }
   }
 }
