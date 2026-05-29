@@ -640,7 +640,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script><script src="bedate.js"></script><script src="storage.js"></script>
+<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -728,23 +728,15 @@ function _b64ToBlob(b64) {
 }
 
 async function _drvUpload(b64, filename) {
-  if (!b64) return b64;
-  // ── 1. Firebase Storage (primary) — works on web + Tauri, no OAuth needed ──
-  if (window.AppStorage) {
-    const url = await AppStorage.upload('payments', b64);
-    if (AppStorage.isUrl(url)) return url; // upload succeeded
+  if (!b64 || !window.DriveStore?.ready) return b64;
+  try {
+    const blob = _b64ToBlob(b64);
+    const meta = await DriveStore.upload(blob, filename, {});
+    return `drv|${meta.driveId}|${meta.uploadedAt}`;
+  } catch (e) {
+    console.warn('[_drvUpload]', e.message);
+    return b64;
   }
-  // ── 2. Google Drive (legacy fallback for web users who have Drive connected) ─
-  if (window.DriveStore?.ready && b64.startsWith('data:')) {
-    try {
-      const blob = _b64ToBlob(b64);
-      const meta = await DriveStore.upload(blob, filename, {});
-      return `drv|${meta.driveId}|${meta.uploadedAt}`;
-    } catch (e) {
-      console.warn('[_drvUpload] Drive failed:', e.message);
-    }
-  }
-  return b64; // final fallback: store as base64
 }
 
 function _imgTagHtml(field, cls, title) {

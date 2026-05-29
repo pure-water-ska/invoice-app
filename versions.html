@@ -194,7 +194,7 @@ mark { background:#fff3cd; padding:0 2px; border-radius:2px; }
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script><script src="bedate.js"></script><script src="storage.js"></script>
+<script src="utils.js"></script><script src="db.js"></script><script src="auth.js"></script><script src="nav.js"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -448,19 +448,15 @@ async function loadVerImage(input) {
   const file = input.files[0];
   if (!file) return;
   try {
-    const b64 = await Utils.compressImage(file, 1200, 0.82);
-    // Show local base64 preview immediately (no network wait)
-    document.getElementById('vImagePreview').innerHTML = imgPreviewHtml(b64);
-    // Upload to Firebase Storage; verImageB64 becomes a URL (or stays base64 on failure)
-    verImageB64 = window.AppStorage ? await AppStorage.upload('versions', b64) : b64;
+    verImageB64 = await Utils.compressImage(file, 1200, 0.82);
+    document.getElementById('vImagePreview').innerHTML = imgPreviewHtml(verImageB64);
   } catch (e) {
     // Fallback to raw FileReader if canvas compression is unavailable
     console.warn('[loadVerImage] compression failed:', e.message);
     const reader = new FileReader();
-    reader.onload = async ev => {
-      const b64 = ev.target.result;
-      document.getElementById('vImagePreview').innerHTML = imgPreviewHtml(b64);
-      verImageB64 = window.AppStorage ? await AppStorage.upload('versions', b64) : b64;
+    reader.onload = ev => {
+      verImageB64 = ev.target.result;
+      document.getElementById('vImagePreview').innerHTML = imgPreviewHtml(verImageB64);
     };
     reader.readAsDataURL(file);
   }
