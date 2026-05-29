@@ -473,10 +473,9 @@ const Nav = {
       return; // don't show connection modal yet — will show after pw change
     }
 
-    // Show connection modal once per login session
+    // Connection modal removed — Drive is web-only, sync status visible in navbar badge
     if (sessionStorage.getItem('justLoggedIn')) {
       sessionStorage.removeItem('justLoggedIn');
-      setTimeout(_showConnectionModal, 500);
     }
   }
 };
@@ -546,10 +545,8 @@ function _showChangePwOverlay() {
     overlay.style.opacity = '0';
     setTimeout(function() {
       if (overlay.parentNode) overlay.remove();
-      // After password changed, proceed with connection modal if first login
       if (sessionStorage.getItem('justLoggedIn')) {
         sessionStorage.removeItem('justLoggedIn');
-        setTimeout(_showConnectionModal, 300);
       }
     }, 350);
   });
