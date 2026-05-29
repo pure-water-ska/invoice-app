@@ -6,7 +6,8 @@
     "tauri": "tauri",
     "dev": "tauri dev",
     "build": "tauri build",
-    "serve": "python -m http.server 8000"
+    "serve": "python -m http.server 8000",
+    "bump": "node scripts/bump-version.js"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^1.6.0"
