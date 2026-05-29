@@ -196,54 +196,12 @@ const DB = {
     if (window.LocalFolderSync) LocalFolderSync.queueWrite(key, val);
   },
 
-  // ── Sticky banner: IDB also full — critical, red ─────────────────────────
+  // ── Storage quota handlers (banners removed — overflow handled silently) ────
   _warnQuota(key) {
-    if (location.protocol === 'tauri:') return;  // HDD storage is the source of truth — localStorage overflow is irrelevant
-    const id = 'wt-quota-banner';
-    if (document.getElementById(id)) return;
-    const banner = document.createElement('div');
-    banner.id = id;
-    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;' +
-      'background:#dc3545;color:#fff;padding:10px 16px;font-size:13px;' +
-      'display:flex;align-items:center;gap:8px;box-shadow:0 2px 8px rgba(0,0,0,.4);';
-    banner.innerHTML =
-      '<i class="bi bi-exclamation-triangle-fill fs-5" aria-hidden="true"></i>' +
-      '<div><strong>พื้นที่จัดเก็บเต็มทั้ง localStorage และ IndexedDB</strong> — ' +
-      'ไม่สามารถบันทึกข้อมูลได้ ข้อมูลอาจสูญหาย<br>' +
-      '<span style="opacity:.85;font-size:12px">กรุณาไปที่ ' +
-      '<a href="settings.html" style="color:#fff;text-decoration:underline">ตั้งค่า → ล้าง localStorage</a>' +
-      ' เพื่อเพิ่มพื้นที่ว่างทันที</span></div>' +
-      '<button onclick="this.parentElement.remove()" style="margin-left:auto;flex-shrink:0;background:none;' +
-      'border:1px solid rgba(255,255,255,.5);color:#fff;padding:3px 10px;' +
-      'border-radius:4px;cursor:pointer;font-size:13px;">ปิด</button>';
-    const attach = () => document.body.appendChild(banner);
-    document.body ? attach() : document.addEventListener('DOMContentLoaded', attach);
+    console.warn('[DB] quota: localStorage + IDB both full for key:', key);
   },
-
-  // ── Sticky banner: overflow to IDB active — yellow warning ───────────────
-  // Called both when a new key first overflows AND on every subsequent page
-  // load while overflow is active, so the user always knows storage is full.
   _notifyIdbOverflow(key) {
-    if (location.protocol === 'tauri:') return;  // HDD storage is the source of truth — localStorage overflow is irrelevant
-    const id = 'wt-idb-overflow-banner';
-    if (document.getElementById(id)) return;
-    const banner = document.createElement('div');
-    banner.id = id;
-    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99998;' +
-      'background:#856404;color:#fff;padding:10px 16px;font-size:13px;' +
-      'display:flex;align-items:center;gap:8px;box-shadow:0 2px 8px rgba(0,0,0,.3);';
-    const keyList = [...this._idbKeys].map(k => k.replace('wt_','')).join(', ') || key;
-    banner.innerHTML =
-      '<i class="bi bi-exclamation-circle-fill fs-5" aria-hidden="true"></i>' +
-      '<div><strong>localStorage เต็ม</strong> — ข้อมูลบางส่วน (' + keyList + ') ถูกย้ายไปยัง IndexedDB<br>' +
-      '<span style="opacity:.85;font-size:12px">แนะนำให้ไปที่ ' +
-      '<a href="settings.html" style="color:#fff;text-decoration:underline">ตั้งค่า → ล้าง localStorage</a>' +
-      ' เพื่อป้องกันปัญหาในอนาคต</span></div>' +
-      '<button onclick="this.parentElement.remove()" style="margin-left:auto;flex-shrink:0;background:none;' +
-      'border:1px solid rgba(255,255,255,.5);color:#fff;padding:3px 10px;' +
-      'border-radius:4px;cursor:pointer;font-size:13px;">ปิด</button>';
-    const attach = () => document.body.appendChild(banner);
-    document.body ? attach() : document.addEventListener('DOMContentLoaded', attach);
+    console.info('[DB] localStorage full — key overflowed to IndexedDB:', key || [...this._idbKeys].join(', '));
   },
 
   // ── Persist the _idbKeys set so it survives page reloads ─────────────────

@@ -465,7 +465,6 @@ const Nav = {
     if (el) el.innerHTML = html;
 
     _checkOverdueAlert();
-    _checkStorageAlert();
     _startIdleTimer();
 
     // Force password change for first-time users (set by users.html on creation)
@@ -862,34 +861,6 @@ function _showConnectionModal() {
   }, 500);
 }
 
-function _checkStorageAlert() {
-  if (location.protocol === 'tauri:') return;
-  try {
-    let used = 0;
-    for (const k in localStorage) {
-      if (Object.prototype.hasOwnProperty.call(localStorage, k))
-        used += (localStorage.getItem(k) || '').length * 2;
-    }
-    const pct = Math.min(100, (used / (5 * 1024 * 1024)) * 100);
-    if (pct < 80) return;
-    const id = 'storageAlertBanner';
-    if (document.getElementById(id)) return;
-    const cls = pct >= 95 ? 'danger' : 'warning';
-    const msg = pct >= 95
-      ? '<strong>อันตราย! ควร Export สำรองข้อมูลทันที</strong>'
-      : 'ควรสำรองข้อมูลเร็วๆ นี้';
-    const div = document.createElement('div');
-    div.id = id;
-    div.style.cssText = 'position:fixed;top:58px;left:0;right:0;z-index:1039';
-    div.innerHTML = `<div class="alert alert-${cls} alert-dismissible mb-0 rounded-0 py-2 text-center" style="font-size:13px">
-      <i class="bi bi-hdd-fill me-1"></i>พื้นที่จัดเก็บข้อมูล <strong>${pct.toFixed(1)}%</strong>
-      (${(used/1024/1024).toFixed(2)} MB / ~5 MB) — ${msg}
-      <a href="settings.html" class="btn btn-sm btn-${cls === 'danger' ? 'outline-light' : 'outline-dark'} ms-2 py-0">จัดการ</a>
-      <button type="button" class="btn-close" onclick="document.getElementById('${id}').remove()"></button>
-    </div>`;
-    document.body.appendChild(div);
-  } catch(e) {}
-}
 
 function _checkOverdueAlert() {
   const today = new Date().toISOString().slice(0,10);
