@@ -7,7 +7,7 @@ This file provides guidance to Claude when working with code in this repository.
 **ใบกำกับสินค้า** — a Thai-language invoice management PWA for a water distribution small business. Runs entirely in the browser with no build step. Optional real-time sync via Firestore and backup via Google Drive.
 
 - **Stack:** Vanilla JS + HTML + Bootstrap 5.3.2 — no framework, no bundler
-- **Hosting:** Netlify (static), auto-deployed from GitHub on push to `main`
+- **Hosting:** GitHub Pages (static), auto-deployed from GitHub on push to `main` (`.github/workflows/pages.yml`)
 - **Primary storage:** localStorage (`wt_*` keys), LZString-compressed by `DB._set()`
 - **Offline-first:** Service Worker + localStorage work without any network
 
@@ -182,7 +182,7 @@ Then call `Nav.render('page-name')` in an inline script.
 
 ### Service Worker (`sw.js`)
 
-Network-First for HTML; Cache-First for assets. `nav.js`, `sync.js`, `connection-status.js`, and `settings.js` are always Network-Only so fixes apply immediately without an SW update cycle. Cache version is bumped by `netlify-build.sh` on every deploy. `sw.js` handles the `sync` event (tag `sync-pending-writes`) for Background Sync.
+Network-First for HTML; Cache-First for assets. `nav.js`, `sync.js`, `connection-status.js`, and `settings.js` are always Network-Only so fixes apply immediately without an SW update cycle. Cache version is bumped by `pages.yml` on every deploy. `sw.js` handles the `sync` event (tag `sync-pending-writes`) for Background Sync.
 
 ### Drive Backup (`drive-store.js` + `drive-db-sync.js`)
 
@@ -256,6 +256,12 @@ git push origin main
 
 ## Deployment
 
-Push to `main` → GitHub Actions triggers Netlify build → `netlify-build.sh` injects Firebase/Drive config from env vars and bumps the SW cache version.
+**Web app:** Push to `main` → `.github/workflows/pages.yml` injects `FIREBASE_TEAM_PASSWORD` into `firebase-config.js` and `GOOGLE_CLIENT_ID` into `drive-config.js` from GitHub Secrets, bumps the SW cache version, and deploys to GitHub Pages.
 
-Required Netlify environment variables: `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_PROJECT_ID`, `FIREBASE_STORAGE_BUCKET`, `FIREBASE_MESSAGING_SENDER_ID`, `FIREBASE_APP_ID`, `FIREBASE_ORG_ID`, `FIREBASE_TEAM_EMAIL`, `FIREBASE_TEAM_PASSWORD`, `GOOGLE_CLIENT_ID`.
+Required GitHub Secrets (Repo → Settings → Secrets and variables → Actions): `FIREBASE_TEAM_PASSWORD`, `GOOGLE_CLIENT_ID`.
+
+**Desktop app:** Push a `v*` tag → `.github/workflows/release-desktop.yml` builds the Windows installer, signs it for the auto-updater, and publishes a GitHub Release with `latest.json`. Additional secrets: `TAURI_PRIVATE_KEY`, `TAURI_KEY_PASSWORD`. See "Automatic Updates" below.
+
+## Automatic Updates (Desktop)
+
+The Tauri app checks `releases/latest/download/latest.json` on launch and prompts to install newer signed builds (`tauri.conf.json` → `updater`). To release: bump `version` in both `package.json` and `src-tauri/tauri.conf.json`, commit, then `git tag vX.Y.Z && git push origin main --tags`. The signing public key is embedded in `tauri.conf.json`; the private key lives only in the `TAURI_PRIVATE_KEY` GitHub Secret (and `src-tauri/.updater-private.key`, gitignored — back it up).
