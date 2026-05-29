@@ -138,6 +138,7 @@ const DB = {
     // Skip all localStorage / IDB paths to keep localStorage empty, but STILL
     // push to Firestore so changes made on the desktop app reach other devices.
     if (window.IS_TAURI) {
+      this._cache[key] = val;                      // keep in-memory cache current
       if (this._tauri.dataDir) this._tauri.write(key, val);
       if (window.LocalFolderSync) LocalFolderSync.queueWrite(key, val);
       // Sync to Firestore (queued if sync.js not ready yet — flushed on init)

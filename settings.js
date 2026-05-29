@@ -1880,10 +1880,17 @@ function loadVersionInfo() {
 
   // เครื่องนี้ — real PC name in the desktop app, browser host on the web
   const devEl = document.getElementById('versionDevice');
-  if (window.IS_TAURI && window.__TAURI__?.os?.hostname) {
-    window.__TAURI__.os.hostname()
-      .then(name => { devEl.textContent = name || 'เครื่องเดสก์ท็อป'; })
-      .catch(() => { devEl.textContent = 'เครื่องเดสก์ท็อป'; });
+  if (window.IS_TAURI) {
+    // Tauri 1.x os API has no hostname() — show platform label instead
+    const osApi = window.__TAURI__?.os;
+    if (osApi?.platform) {
+      osApi.platform().then(p => {
+        const label = p === 'win32' ? 'Windows' : p === 'darwin' ? 'macOS' : p || 'Desktop';
+        devEl.textContent = 'เครื่องเดสก์ท็อป (' + label + ')';
+      }).catch(() => { devEl.textContent = 'เครื่องเดสก์ท็อป'; });
+    } else {
+      devEl.textContent = 'เครื่องเดสก์ท็อป';
+    }
   } else {
     devEl.textContent = window.location.hostname || 'localhost';
   }
