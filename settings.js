@@ -1244,7 +1244,7 @@ async function drivePullAll() {
 
 async function driveSignIn() {
   // Google OAuth rejects tauri:// origins — Drive is a web-only feature
-  if (location.protocol === 'tauri:') {
+  if (window.IS_TAURI) {
     Utils.showAlert('Google Drive ไม่รองรับในแอปเดสก์ท็อป (ใช้เว็บเบราว์เซอร์แทน)', 'info');
     return;
   }
@@ -1264,7 +1264,7 @@ async function driveSignIn() {
 }
 
 function driveSignOut() {
-  if (location.protocol === 'tauri:') return;
+  if (window.IS_TAURI) return;
   if (!confirm('ออกจากระบบ Google Drive?\n(ไฟล์ที่อัปโหลดแล้วยังอยู่ใน Drive)')) return;
   DriveStore.signOut();
   updateDriveUI(false);
@@ -1880,7 +1880,7 @@ function loadVersionInfo() {
 
   // เครื่องนี้ — real PC name in the desktop app, browser host on the web
   const devEl = document.getElementById('versionDevice');
-  if (location.protocol === 'tauri:' && window.__TAURI__?.os?.hostname) {
+  if (window.IS_TAURI && window.__TAURI__?.os?.hostname) {
     window.__TAURI__.os.hostname()
       .then(name => { devEl.textContent = name || 'เครื่องเดสก์ท็อป'; })
       .catch(() => { devEl.textContent = 'เครื่องเดสก์ท็อป'; });
@@ -1889,7 +1889,7 @@ function loadVersionInfo() {
   }
 
   // Check-for-update button — desktop app only (web auto-updates on reload)
-  if (location.protocol === 'tauri:') {
+  if (window.IS_TAURI) {
     document.getElementById('updateRow').classList.remove('d-none');
   }
 }
@@ -1897,7 +1897,7 @@ function loadVersionInfo() {
 async function checkForUpdate() {
   const btn = document.getElementById('btnCheckUpdate');
   const st  = document.getElementById('updateStatus');
-  if (location.protocol !== 'tauri:' || !window.__TAURI__?.updater) {
+  if (!window.IS_TAURI || !window.__TAURI__?.updater) {
     st.innerHTML = '<span class="text-muted">ใช้ได้เฉพาะแอปเดสก์ท็อป</span>';
     return;
   }

@@ -309,7 +309,7 @@ var Sync = {
       const _fbEmail    = _appUser?.firebaseEmail    || FIREBASE_CONFIG.teamEmail;
       const _fbPass     = _appUser?.firebasePassword || FIREBASE_CONFIG.teamPassword;
 
-      if (location.protocol !== 'tauri:') {
+      if (!window.IS_TAURI) {
         // ── Browser: full Auth with IndexedDB session persistence ──────────────
         // Sign in so Firestore WebChannel has a valid ID token.
         // Firebase Auth persists credentials in IndexedDB across page loads.
@@ -769,7 +769,7 @@ var Sync = {
   _localRead(lsKey) {
     if (window.DB) {
       // Tauri: data lives in DB._cache (loaded from HDD), not localStorage
-      if (location.protocol === 'tauri:') {
+      if (window.IS_TAURI) {
         const v = DB._cache[lsKey];
         return (v !== null && v !== undefined) ? JSON.stringify(v) : null;
       }
@@ -797,7 +797,7 @@ var Sync = {
     // to localStorage in the desktop app — that refills the ~5 MB budget that
     // DB.init() deliberately wiped, triggering the storage-full banner.
     // DB._cache (above) serves reads; HDD JSON files are the durable store.
-    if (location.protocol === 'tauri:') {
+    if (window.IS_TAURI) {
       if (window.DB && DB._tauri && DB._tauri.dataDir) DB._tauri.write(lsKey, data);
       return;
     }

@@ -1,5 +1,19 @@
 // utils.js - Shared utilities
 
+// ── Reliable cross-platform Tauri detection ─────────────────────────────────
+// The desktop app is served from different origins per OS:
+//   • macOS / Linux → tauri://localhost   (location.protocol === 'tauri:')
+//   • Windows       → https://tauri.localhost (protocol 'https:', host 'tauri.localhost')
+// Checking only protocol === 'tauri:' silently fails on Windows, disabling all
+// desktop-only logic (HDD storage, skip Google OAuth, update button, PC name).
+// IS_TAURI covers both. Evaluated at load (protocol/hostname are available before
+// any script runs) so it's safe for early guards in db.js etc.
+window.IS_TAURI = (
+  location.protocol === 'tauri:' ||           // macOS / Linux
+  location.hostname === 'tauri.localhost' ||  // Windows (https://tauri.localhost)
+  typeof window.__TAURI__ !== 'undefined'     // global injected by withGlobalTauri
+);
+
 // Global error capture — ต้องอยู่บนสุดก่อน script อื่น
 window.addEventListener('error', e => {
   if (typeof DB !== 'undefined') {
@@ -145,9 +159,9 @@ const LZString = (function () {
 // ── End LZString ────────────────────────────────────────────────────────────
 
 const APP_VERSION = {
-  version: '1.0.4',
-  date: '2026-05-29T17:46:50.249Z',
-  label: 'v1.0.4 (30 พ.ค. 2569)',
+  version: '1.0.5',
+  date: '2026-05-29T18:22:07.267Z',
+  label: 'v1.0.5 (30 พ.ค. 2569)',
 };
 
 // Changelog — add new entry here when releasing a new version.

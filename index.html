@@ -67,7 +67,7 @@
   // ── Tauri: unregister any old service worker immediately ─────────────────
   // An old SW from a pre-fix build could serve outdated JS (without Tauri guards).
   // Unregistering here ensures the fresh bundle files are always used.
-  if (location.protocol === 'tauri:' && 'serviceWorker' in navigator) {
+  if (window.IS_TAURI && 'serviceWorker' in navigator) {
     navigator.serviceWorker.getRegistrations().then(regs => {
       regs.forEach(r => r.unregister());
       if (regs.length) console.log('[Tauri] Unregistered', regs.length, 'old service worker(s)');
@@ -224,7 +224,7 @@
       // / sign-in round-trip.  Non-fatal: sync.js handles any residual mismatch.
       // Skipped in Tauri — Firebase not loaded (HDD storage handles persistence).
       try {
-        if (location.protocol !== 'tauri:' && window.firebase &&
+        if (!window.IS_TAURI && window.firebase &&
             typeof FIREBASE_CONFIG !== 'undefined' &&
             FIREBASE_CONFIG.apiKey &&
             !FIREBASE_CONFIG.apiKey.startsWith('AIzaSy...')) {

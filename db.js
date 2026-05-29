@@ -50,7 +50,7 @@ const DB = {
   _tauri: {
     dataDir: null,
     async init() {
-      if (location.protocol !== 'tauri:') return;
+      if (!window.IS_TAURI) return;
       try {
         const { appDataDir, join } = window.__TAURI__.path;
         const { createDir, readDir, readTextFile } = window.__TAURI__.fs;
@@ -79,7 +79,7 @@ const DB = {
       }
     },
     write(key, val) {
-      if (!this.dataDir || location.protocol !== 'tauri:') return;
+      if (!this.dataDir || !window.IS_TAURI) return;
       const { join } = window.__TAURI__.path;
       const { writeTextFile } = window.__TAURI__.fs;
       join(this.dataDir, key + '.json')
@@ -137,7 +137,7 @@ const DB = {
     // Cache (above) is the fast read layer; HDD JSON files are durable storage.
     // Skip all localStorage / IDB paths to keep localStorage empty, but STILL
     // push to Firestore so changes made on the desktop app reach other devices.
-    if (location.protocol === 'tauri:') {
+    if (window.IS_TAURI) {
       if (this._tauri.dataDir) this._tauri.write(key, val);
       if (window.LocalFolderSync) LocalFolderSync.queueWrite(key, val);
       // Sync to Firestore (queued if sync.js not ready yet — flushed on init)
@@ -227,7 +227,7 @@ const DB = {
     return (async () => {
       // Step 0: in Tauri, restore all HDD files → memory cache before anything else
       // (localStorage is never written in Tauri — HDD + cache are the storage stack)
-      if (location.protocol === 'tauri:') await this._tauri.init();
+      if (window.IS_TAURI) await this._tauri.init();
 
       // Step 1: restore _idbKeys from localStorage (tiny JSON — always fits)
       const stored = localStorage.getItem(this._IDB_KEYS_LS);
@@ -271,7 +271,7 @@ const DB = {
     // updated the cache via _lsWrite() before calling invalidate(); deleting the
     // entry here would force _get() to fall back to the (empty) localStorage and
     // return [], blanking the list until the next HDD reload. So: no-op in Tauri.
-    if (location.protocol === 'tauri:') return;
+    if (window.IS_TAURI) return;
     if (key) {
       if (!this._idbKeys.has(key)) delete this._cache[key];
     } else {
@@ -641,7 +641,7 @@ const DB = {
     // this build, but older builds (and sync.js metadata writes) could fill it.
     // Clear everything EXCEPT wt_last_user (login form pre-fill) and
     // wt_restore_pending (unclean-exit banner) before any other code runs.
-    if (location.protocol === 'tauri:') {
+    if (window.IS_TAURI) {
       const _keep = new Set(['wt_last_user', 'wt_restore_pending']);
       const _allLs = [];
       for (let i = 0; i < localStorage.length; i++) {
