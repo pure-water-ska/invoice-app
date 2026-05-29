@@ -1243,6 +1243,11 @@ async function drivePullAll() {
 }
 
 async function driveSignIn() {
+  // Google OAuth rejects tauri:// origins — Drive is a web-only feature
+  if (location.protocol === 'tauri:') {
+    Utils.showAlert('Google Drive ไม่รองรับในแอปเดสก์ท็อป (ใช้เว็บเบราว์เซอร์แทน)', 'info');
+    return;
+  }
   const btn = document.getElementById('driveSignInBtn');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลังเชื่อมต่อ...';
@@ -1259,6 +1264,7 @@ async function driveSignIn() {
 }
 
 function driveSignOut() {
+  if (location.protocol === 'tauri:') return;
   if (!confirm('ออกจากระบบ Google Drive?\n(ไฟล์ที่อัปโหลดแล้วยังอยู่ใน Drive)')) return;
   DriveStore.signOut();
   updateDriveUI(false);
