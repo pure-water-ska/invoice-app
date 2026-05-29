@@ -266,6 +266,12 @@ const DB = {
   // IDB-overflow keys are NOT cleared — their cache entry IS the truth
   // (there is no localStorage copy to fall back to for those keys).
   invalidate(key) {
+    // Tauri: localStorage is never written — the in-memory cache (HDD-backed)
+    // IS the source of truth, exactly like IDB-overflow keys. sync.js already
+    // updated the cache via _lsWrite() before calling invalidate(); deleting the
+    // entry here would force _get() to fall back to the (empty) localStorage and
+    // return [], blanking the list until the next HDD reload. So: no-op in Tauri.
+    if (location.protocol === 'tauri:') return;
     if (key) {
       if (!this._idbKeys.has(key)) delete this._cache[key];
     } else {
