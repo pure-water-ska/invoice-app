@@ -153,8 +153,8 @@ const Auth = {
       localStorage.setItem('wt_sync_doc_ts', JSON.stringify(_docTs));
     } catch {}
     localStorage.removeItem('mustChangePw');
-    // Sign out of Firebase if sync is active
-    try { if (window.firebase && firebase.apps.length) firebase.auth().signOut(); } catch {}
+    // Sign out of Firebase Auth if available (not loaded in Tauri — auth-compat skipped)
+    try { if (window.firebase && firebase.apps.length && typeof firebase.auth === 'function') firebase.auth().signOut(); } catch {}
     window.location.href = 'index.html';
   },
 

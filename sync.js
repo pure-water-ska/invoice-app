@@ -299,55 +299,64 @@ var Sync = {
         });
       }
 
-      // ── Determine which Firebase account to use for this session (Phase 3) ──
-      // Each app user gets their own Firebase Auth account provisioned by users.html.
-      // sync.js reads the app session (sessionStorage) → user record → firebaseEmail /
-      // firebasePassword.  Users not yet provisioned fall back to the shared teamEmail.
-      // On the login page itself Auth.session() returns null → teamEmail is used.
-      const _appSession = (window.Auth && Auth.session) ? Auth.session() : null;
-      const _appUser    = (_appSession && window.DB) ? DB.getUserById(_appSession.userId) : null;
-      const _fbEmail    = _appUser?.firebaseEmail    || FIREBASE_CONFIG.teamEmail;
-      const _fbPass     = _appUser?.firebasePassword || FIREBASE_CONFIG.teamPassword;
+      // ── Firebase Auth (browser only) ─────────────────────────────────────────
+      // In Tauri: firebase-auth-compat.js is NOT loaded (it creates a hidden
+      // Google OAuth persistence iframe which Google rejects for tauri:// origins).
+      // Firestore security rules use org-path access — no request.auth needed.
+      if (location.protocol !== 'tauri:') {
+        // Each app user gets their own Firebase Auth account provisioned by users.html.
+        // sync.js reads the app session (sessionStorage) → user record → firebaseEmail /
+        // firebasePassword.  Users not yet provisioned fall back to the shared teamEmail.
+        // On the login page itself Auth.session() returns null → teamEmail is used.
+        const _appSession = (window.Auth && Auth.session) ? Auth.session() : null;
+        const _appUser    = (_appSession && window.DB) ? DB.getUserById(_appSession.userId) : null;
+        const _fbEmail    = _appUser?.firebaseEmail    || FIREBASE_CONFIG.teamEmail;
+        const _fbPass     = _appUser?.firebasePassword || FIREBASE_CONFIG.teamPassword;
 
-      // Sign in so Firestore WebChannel has a valid ID token.
-      // Firebase Auth persists credentials in IndexedDB across page loads.
-      // We wait for the cached state to restore first — if already signed in,
-      // no network request is needed, avoiding auth/network-request-failed errors
-      // on flaky connections.
-      console.log('[Sync] Step 3: restoreAuthState');
-      // Race against a 3-second timeout so a slow/broken IndexedDB auth cache
-      // doesn't hang the entire init (and leave the login button disabled forever).
-      const restoredUser = await Promise.race([
-        new Promise(resolve => {
-          const unsub = firebase.auth().onAuthStateChanged(u => { unsub(); resolve(u); });
-        }),
-        new Promise(resolve => setTimeout(() => resolve(null), 3000)),
-      ]);
-      console.log('[Sync] Step 4: auth state =', restoredUser ? restoredUser.email || 'anon' : 'none (timed out or fresh)');
+        // Sign in so Firestore WebChannel has a valid ID token.
+        // Firebase Auth persists credentials in IndexedDB across page loads.
+        // We wait for the cached state to restore first — if already signed in,
+        // no network request is needed, avoiding auth/network-request-failed errors
+        // on flaky connections.
+        console.log('[Sync] Step 3: restoreAuthState');
+        // Race against a 3-second timeout so a slow/broken IndexedDB auth cache
+        // doesn't hang the entire init (and leave the login button disabled forever).
+        const restoredUser = await Promise.race([
+          new Promise(resolve => {
+            const unsub = firebase.auth().onAuthStateChanged(u => { unsub(); resolve(u); });
+          }),
+          new Promise(resolve => setTimeout(() => resolve(null), 3000)),
+        ]);
+        console.log('[Sync] Step 4: auth state =', restoredUser ? restoredUser.email || 'anon' : 'none (timed out or fresh)');
 
-      if (!restoredUser) {
-        // No cached session — need a real network sign-in
-        console.log('[Sync] Step 4b: signIn (network) →', _fbEmail || 'anonymous');
-        if (_fbEmail && _fbPass) {
-          await firebase.auth().signInWithEmailAndPassword(_fbEmail, _fbPass);
-        } else {
-          await firebase.auth().signInAnonymously();
+        if (!restoredUser) {
+          // No cached session — need a real network sign-in
+          console.log('[Sync] Step 4b: signIn (network) →', _fbEmail || 'anonymous');
+          if (_fbEmail && _fbPass) {
+            await firebase.auth().signInWithEmailAndPassword(_fbEmail, _fbPass);
+          } else {
+            await firebase.auth().signInAnonymously();
+          }
+        } else if (_fbEmail && restoredUser.email !== _fbEmail) {
+          // Cached session belongs to a different Firebase account — this happens
+          // when a different app user logs in, or when a user's account was just
+          // provisioned after they were already signed in via teamEmail.
+          // Sign out of the stale session and authenticate with the correct account.
+          console.log('[Sync] Step 4c: auth switch', restoredUser.email, '→', _fbEmail);
+          await firebase.auth().signOut();
+          if (_fbEmail && _fbPass) {
+            await firebase.auth().signInWithEmailAndPassword(_fbEmail, _fbPass);
+          } else {
+            await firebase.auth().signInAnonymously();
+          }
         }
-      } else if (_fbEmail && restoredUser.email !== _fbEmail) {
-        // Cached session belongs to a different Firebase account — this happens
-        // when a different app user logs in, or when a user's account was just
-        // provisioned after they were already signed in via teamEmail.
-        // Sign out of the stale session and authenticate with the correct account.
-        console.log('[Sync] Step 4c: auth switch', restoredUser.email, '→', _fbEmail);
-        await firebase.auth().signOut();
-        if (_fbEmail && _fbPass) {
-          await firebase.auth().signInWithEmailAndPassword(_fbEmail, _fbPass);
-        } else {
-          await firebase.auth().signInAnonymously();
-        }
+        this._uid = firebase.auth().currentUser?.uid || 'anon';
+        console.log('[Sync] Step 5a: signIn OK, uid=', this._uid);
+      } else {
+        // Tauri: no Auth SDK — identify by device ID (already set in _initDeviceId)
+        this._uid = 'tauri-' + (this._deviceId || 'device');
+        console.log('[Sync] Tauri mode: no auth, uid=', this._uid);
       }
-      this._uid = firebase.auth().currentUser?.uid || 'anon';
-      console.log('[Sync] Step 5a: signIn OK, uid=', this._uid);
 
       // Flush pending queue BEFORE pulling from Firestore so that any records
       // saved on the previous page (and enqueued via beforeunload) are already

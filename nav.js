@@ -185,15 +185,11 @@
       return;
     }
 
-    // In Tauri, location.hostname === 'localhost' (tauri://localhost), but Google's
-    // Firebase Auth compat SDK spawns a hidden OAuth iframe which Google rejects for
-    // non-http(s) origins. Skip Firebase entirely — HDD storage covers persistence.
-    if (location.protocol === 'tauri:') { hideSyncBadge(); return; }
-
     // Try loading local credentials override (firebase-credentials.js)
     // Gitignored — only exists on local dev machines (localhost / 127.0.0.1).
     // Skip entirely on GitHub Pages / Netlify to avoid a console 404.
-    const _isLocal = ['localhost','127.0.0.1'].includes(location.hostname) || location.protocol === 'file:';
+    const _isLocal = ['localhost','127.0.0.1'].includes(location.hostname) ||
+                     location.protocol === 'file:' || location.protocol === 'tauri:';
     if (_isLocal) {
       loadScript('./firebase-credentials.js', startFirebaseSDK, startFirebaseSDK);
     } else {
@@ -208,41 +204,49 @@
       setSyncBadge('⚠ Sync ✗', 'bg-danger');
     }
 
-    // firebase-auth-compat.js IS loaded so Firestore's internal auth-provider is
-    // registered (required for Firestore SDK to connect). However, sync.js never
-    // calls firebase.auth(), so the cross-origin iframe that causes the GitHub
-    // Pages COOP warning is never initialised. Access is controlled by Firestore
-    // security rules (open by org path — see Firebase Console → Firestore rules).
-    loadScript(`${FB_BASE}/firebase-app-compat.js`, function() {
-      loadScript(`${FB_BASE}/firebase-auth-compat.js`, function() {
-        loadScript(`${FB_BASE}/firebase-firestore-compat.js`, function() {
-          // Ensure idb.js is available — some pages include it as a static <script>,
-          // others don't.  sync.js and db.js both rely on IDB for device-ID storage
-          // and localStorage-overflow data.  Load it here if not already present.
-          function loadSyncStack() {
-            // Load local-folder-sync.js (IDB is guaranteed loaded at this point)
-            // then connection-status.js, then sync.js
-            function afterFolderSync() {
-              if (window.LocalFolderSync) LocalFolderSync.init();
-              loadScript('./connection-status.js', function() {
-                loadScript('./sync.js', null, onSDKError);
-              }, function() {
-                loadScript('./sync.js', null, onSDKError);
-              });
-            }
-            if (!window.LocalFolderSync) {
-              loadScript('./local-folder-sync.js', afterFolderSync, afterFolderSync);
-            } else {
-              afterFolderSync();
-            }
+    // Inner function: load Firestore SDK then the rest of the sync stack.
+    // Called directly in Tauri (no auth-compat) or after auth-compat on web.
+    function loadFirestoreAndSync() {
+      loadScript(`${FB_BASE}/firebase-firestore-compat.js`, function() {
+        // Ensure idb.js is available — some pages include it as a static <script>,
+        // others don't.  sync.js and db.js both rely on IDB for device-ID storage
+        // and localStorage-overflow data.  Load it here if not already present.
+        function loadSyncStack() {
+          // Load local-folder-sync.js (IDB is guaranteed loaded at this point)
+          // then connection-status.js, then sync.js
+          function afterFolderSync() {
+            if (window.LocalFolderSync) LocalFolderSync.init();
+            loadScript('./connection-status.js', function() {
+              loadScript('./sync.js', null, onSDKError);
+            }, function() {
+              loadScript('./sync.js', null, onSDKError);
+            });
           }
-          if (typeof IDB === 'undefined') {
-            loadScript('./idb.js', loadSyncStack, loadSyncStack);
+          if (!window.LocalFolderSync) {
+            loadScript('./local-folder-sync.js', afterFolderSync, afterFolderSync);
           } else {
-            loadSyncStack();
+            afterFolderSync();
           }
-        }, onSDKError);
+        }
+        if (typeof IDB === 'undefined') {
+          loadScript('./idb.js', loadSyncStack, loadSyncStack);
+        } else {
+          loadSyncStack();
+        }
       }, onSDKError);
+    }
+
+    loadScript(`${FB_BASE}/firebase-app-compat.js`, function() {
+      if (location.protocol === 'tauri:') {
+        // In Tauri: skip firebase-auth-compat.js — it creates a hidden Google OAuth
+        // persistence iframe which Google rejects for tauri:// origins.
+        // Firestore works without Auth because security rules use org-path access
+        // (no request.auth check).  sync.js detects Tauri and skips auth() calls.
+        loadFirestoreAndSync();
+      } else {
+        // Browser: load auth-compat so sync.js can sign in with teamEmail/password.
+        loadScript(`${FB_BASE}/firebase-auth-compat.js`, loadFirestoreAndSync, onSDKError);
+      }
     }, onSDKError);
     } // end startFirebaseSDK
   }, function() {
