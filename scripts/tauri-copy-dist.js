@@ -23,8 +23,16 @@ function skipFile(name) {
   if (name.startsWith('mockup-'))   return true;   // temp mockup files
   if (name.endsWith('.md'))         return true;   // markdown docs
   if (name.endsWith('.lock'))       return true;   // git lock files
-  // Example / template files — not needed in the built app
+  // Firebase + Drive config excluded from Tauri build:
+  //   • firebase-config.js  — without it, FIREBASE_CONFIG is undefined → Firebase
+  //     SDK never loads → no firebase-auth-compat.js → no hidden Google OAuth iframe
+  //   • drive-config.js     — without it, GOOGLE_CLIENT_ID is '' → DriveStore.init()
+  //     returns early → no GIS script → no Google OAuth popup from settings.html
+  // Both services are web-only; Tauri uses HDD storage + no cloud sync.
+  if (name === 'firebase-config.js')         return true;
   if (name === 'firebase-config.example.js') return true;
+  if (name === 'firebase-credentials.js')    return true;
+  if (name === 'drive-config.js')            return true;
   if (name === 'drive-config.example.js')    return true;
   // temp result txt files from session
   const tempFiles = ['gitpush_result.txt','gitresult.txt','gitresult2.txt',

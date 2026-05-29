@@ -667,14 +667,20 @@ const DB = {
 
   // ─── INIT ────────────────────────────────────────────────────────────────────
   init() {
-    // ── Tauri desktop: clear all wt_* data keys from localStorage ────────────
-    // In Tauri, data lives in HDD files + in-memory cache.  localStorage is never
-    // written by this build, but OLDER builds (before HDD storage was implemented)
-    // may have filled it up.  Remove all data keys now — before the LZ migration
-    // runs — so localStorage stays empty and no storage-full banner can appear.
+    // ── Tauri desktop: wipe localStorage entirely (keep only 2 safe keys) ────
+    // Data lives in HDD files + memory cache.  localStorage is not written by
+    // this build, but older builds (and sync.js metadata writes) could fill it.
+    // Clear everything EXCEPT wt_last_user (login form pre-fill) and
+    // wt_restore_pending (unclean-exit banner) before any other code runs.
     if (location.protocol === 'tauri:') {
-      Object.values(this.K).forEach(k => { try { localStorage.removeItem(k); } catch {} });
-      // Mark migration as done so the loop below doesn't iterate (empty) localStorage
+      const _keep = new Set(['wt_last_user', 'wt_restore_pending']);
+      const _allLs = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && !_keep.has(k)) _allLs.push(k);
+      }
+      _allLs.forEach(k => { try { localStorage.removeItem(k); } catch {} });
+      // Mark LZ migration done so the loop below is skipped on empty storage
       try { localStorage.setItem('wt_lz_migrated', '1'); } catch {}
     }
 
