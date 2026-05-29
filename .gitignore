@@ -34,3 +34,11 @@ dist/
 src-tauri/.updater-private.key
 src-tauri/.updater-private.key.pub
 src-tauri/target/
+
+# Session temp files / mockups (never commit)
+git*result*.txt
+gitstatus.txt
+gr3.txt
+CONTINUATION_PROMPT.md
+HANDOFF.md
+mockup-*.html
