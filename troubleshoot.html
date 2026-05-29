@@ -129,10 +129,22 @@ function _doRun() {
   ));
 
   // JSON parse integrity
+  // Keys stored intentionally as plain strings (not JSON-encoded) — skip parse check
+  const PLAIN_STR_KEYS = new Set([
+    'wt_last_user', 'wt_lz_migrated', 'wt_customers_seeded',
+    'wt_sync_device_id', 'wt_sync_lastAt', 'wt_sync_lastPulledAt',
+    'wt_overdue_check_date', 'wt_restore_pending',
+  ]);
   let parseErrors = 0;
   for (const k in localStorage) {
     if (!k.startsWith('wt_')) continue;
-    try { JSON.parse(localStorage.getItem(k)); } catch {
+    if (PLAIN_STR_KEYS.has(k)) continue; // plain string — not expected to be JSON
+    try {
+      // DB._lzRead() decompresses LZString-compressed values before parsing;
+      // raw JSON.parse(localStorage.getItem()) would always fail on compressed data.
+      const raw = (window.DB && DB._lzRead) ? DB._lzRead(k) : localStorage.getItem(k);
+      if (raw !== null) JSON.parse(raw);
+    } catch {
       parseErrors++;
       storageChecks.push(_checkItem('error',
         `JSON เสียหาย (parse error): <code>${k}</code>`,
