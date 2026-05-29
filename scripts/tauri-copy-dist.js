@@ -79,4 +79,17 @@ if (fs.existsSync(iconsSrc)) {
   copyRecursive(iconsSrc, path.join(DIST, 'icons'));
 }
 
+// Write stub config files for excluded secrets so HTML <script src="..."> tags
+// don't receive an HTML 404/fallback page (which causes SyntaxError on '<').
+// onerror only fires for network failures, not parse errors, so we need real files.
+fs.writeFileSync(
+  path.join(DIST, 'drive-config.js'),
+  '// Google Drive OAuth is not available in the desktop app (tauri:// origin rejected by Google)\n' +
+  'window.GOOGLE_CLIENT_ID = "";\n'
+);
+fs.writeFileSync(
+  path.join(DIST, 'firebase-credentials.js'),
+  '// firebase-credentials.js — local dev override (not present in desktop build)\n'
+);
+
 console.log(`✅ dist/ ready — ${count} entries copied from project root`);
