@@ -8,7 +8,8 @@ This file provides guidance to Claude when working with code in this repository.
 
 - **Stack:** Vanilla JS + HTML + Bootstrap 5.3.2 — no framework, no bundler
 - **Hosting:** GitHub Pages (static), auto-deployed from GitHub on push to `main` (`.github/workflows/pages.yml`)
-- **Primary storage:** localStorage (`wt_*` keys), LZString-compressed by `DB._set()`
+- **Desktop app:** Tauri 1.x Windows build with auto-update (`src-tauri/`, `.github/workflows/release-desktop.yml`) — see "Tauri Desktop App" below
+- **Primary storage:** localStorage (`wt_*` keys), LZString-compressed by `DB._set()`. In the Tauri desktop app, storage is HDD JSON files + in-memory cache instead (localStorage stays empty).
 - **Offline-first:** Service Worker + localStorage work without any network
 
 ## UI/UX Workflow Rule
@@ -254,14 +255,59 @@ git commit -m "..."
 git push origin main
 ```
 
+## Tauri Desktop App (`src-tauri/`)
+
+The app ships as a Windows `.exe`/`.msi` via **Tauri 1.x**. Key facts and gotchas:
+
+### Detecting the desktop runtime — `window.IS_TAURI`
+**Always use `window.IS_TAURI` (defined at the top of `utils.js`) — never `location.protocol === 'tauri:'` directly.**
+The desktop origin differs by OS:
+- macOS / Linux → `tauri://localhost` (`location.protocol === 'tauri:'`)
+- **Windows → `https://tauri.localhost`** (`location.protocol === 'https:'`, hostname `tauri.localhost`)
+
+A bare `location.protocol === 'tauri:'` check is **false on Windows**, silently disabling every desktop-only path (HDD storage, OAuth skips, update button, PC name). `IS_TAURI` is true for `tauri:`, `tauri.localhost`, or when `window.__TAURI__` is injected. `utils.js` loads first on every page, so the global is available to `db.js`/`sync.js`/etc. at early-guard time.
+
+### HDD storage (replaces localStorage on desktop)
+When `IS_TAURI`, all `wt_*` data lives in **plain JSON files in `%APPDATA%\<app>\data\`** + an in-memory `DB._cache`. localStorage is intentionally kept empty:
+- `DB._tauri.init()` (called first in `preloadFromIDB()`) reads every `wt_*.json` from HDD into `DB._cache`. **It loads into the cache, not localStorage.**
+- `DB._set()` Tauri branch writes cache → HDD (`_tauri.write`) → `Sync.push()` (Firestore still syncs!); it skips the localStorage/IDB path entirely.
+- `DB.init()` Tauri branch wipes all localStorage keys (except `wt_last_user`, `wt_restore_pending`) on every launch so stale data from old builds can't trigger storage-full warnings.
+- `DB.invalidate()` is a **no-op in Tauri** — the cache is authoritative (HDD-backed). On the web, invalidate forces a re-read from localStorage; in Tauri that would blank the just-written cache and return `[]` (this caused the "invoice list empty after PDF import" bug).
+- `sync.js` `_lsWrite()` / `_localRead()` route to `DB._cache` + HDD in Tauri (not localStorage), so Firestore pulls/merges persist correctly.
+
+### Firebase / Firestore in Tauri
+Firestore sync **works** in the desktop app. `firebase-auth-compat.js` is loaded but `sync.js` calls `setPersistence(NONE)` in Tauri so the SDK does **not** create the hidden `[project].firebaseapp.com/__/auth/iframe` (Google rejects that iframe's `tauri://` / `tauri.localhost` origin → the "OAuth 2.0 policy" error). The login page (`index.html`) also loads Firebase + sync so Firestore users are pulled **before** login (otherwise accounts that exist only in Firestore can't authenticate).
+
+### Google Drive is disabled in Tauri
+Drive uses Google OAuth, which rejects desktop origins. `drive-config.js` is **excluded from the Tauri build** by `scripts/tauri-copy-dist.js` (which then writes a stub `drive-config.js` setting `GOOGLE_CLIENT_ID=''`, so `<script src>` doesn't get an HTML fallback → no `SyntaxError: Unexpected token '<'`). `DriveStore.init()` / `driveSignIn()` also early-return when `IS_TAURI`.
+
+### Build pipeline
+- `scripts/tauri-copy-dist.js` (run by `beforeBuildCommand`) copies web assets into `dist/`, excluding `node_modules`/`src-tauri`/mockups/`drive-config.js`/example files, and writes stub `drive-config.js` + `firebase-credentials.js`.
+- `src-tauri/tauri.conf.json`: `withGlobalTauri: true`, `csp: null`, `distDir: "../dist"`, allowlist includes `os` (PC name), `dialog` (confirm/message/ask), `fs`, `path`, `window`; `updater.active: true` with `dialog: true`.
+- `src-tauri/Cargo.toml`: tauri features include `updater`, `os-all`, the `dialog-*` set, `fs-*`, `path-all`.
+- Dialogs: `window.confirm/alert/prompt` are native in Tauri and require the `dialog` allowlist entries (`confirm`, `message`, `ask`).
+
+### Version sources — keep in sync with `npm run bump`
+Three files carry the version: `package.json`, `src-tauri/tauri.conf.json` (drives the auto-update comparison), and `utils.js` `APP_VERSION` (the Settings card display, with an ISO timestamp for date+time). **Always run `node scripts/bump-version.js X.Y.Z` (`npm run bump X.Y.Z`)** to update all three at once, then commit + tag.
+
+## Automatic Updates (Desktop) — release flow
+
+The app checks `releases/latest/download/latest.json` on launch and prompts to install newer **signed** builds. Settings → เวอร์ชันโปรแกรม also has a manual **ตรวจสอบอัปเดต** button (`checkForUpdate()` → `window.__TAURI__.updater.checkUpdate()`; desktop only).
+
+To cut a release:
+```bash
+npm run bump 1.0.6                 # syncs all 3 version files (ISO datetime label)
+git add -A && git commit -m "release v1.0.6"
+git tag v1.0.6 && git push origin main --tags
+```
+`.github/workflows/release-desktop.yml` (Windows runner, Node 24) builds, signs with `TAURI_PRIVATE_KEY`/`TAURI_KEY_PASSWORD` secrets, and publishes the GitHub Release + `latest.json`. The signing **public** key is embedded in `tauri.conf.json`; the **private** key lives only in the `TAURI_PRIVATE_KEY` secret and `src-tauri/.updater-private.key` (gitignored — **back it up; losing it breaks updates for all installed apps**).
+
+> Binary-level changes (new allowlist entries, new Cargo features) require installing a freshly built `.msi` — they can't arrive purely through the asset-only auto-update from a build that predates them.
+
 ## Deployment
 
 **Web app:** Push to `main` → `.github/workflows/pages.yml` injects `FIREBASE_TEAM_PASSWORD` into `firebase-config.js` and `GOOGLE_CLIENT_ID` into `drive-config.js` from GitHub Secrets, bumps the SW cache version, and deploys to GitHub Pages.
 
 Required GitHub Secrets (Repo → Settings → Secrets and variables → Actions): `FIREBASE_TEAM_PASSWORD`, `GOOGLE_CLIENT_ID`.
 
-**Desktop app:** Push a `v*` tag → `.github/workflows/release-desktop.yml` builds the Windows installer, signs it for the auto-updater, and publishes a GitHub Release with `latest.json`. Additional secrets: `TAURI_PRIVATE_KEY`, `TAURI_KEY_PASSWORD`. See "Automatic Updates" below.
-
-## Automatic Updates (Desktop)
-
-The Tauri app checks `releases/latest/download/latest.json` on launch and prompts to install newer signed builds (`tauri.conf.json` → `updater`). To release: bump `version` in both `package.json` and `src-tauri/tauri.conf.json`, commit, then `git tag vX.Y.Z && git push origin main --tags`. The signing public key is embedded in `tauri.conf.json`; the private key lives only in the `TAURI_PRIVATE_KEY` GitHub Secret (and `src-tauri/.updater-private.key`, gitignored — back it up).
+**Desktop app:** Push a `v*` tag → `.github/workflows/release-desktop.yml` builds & signs the Windows installer and publishes a GitHub Release with `latest.json`. Secrets: `TAURI_PRIVATE_KEY`, `TAURI_KEY_PASSWORD`, plus `FIREBASE_TEAM_PASSWORD`. Full flow documented in "Automatic Updates (Desktop) — release flow" above.
