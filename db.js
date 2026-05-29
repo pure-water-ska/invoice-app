@@ -135,11 +135,16 @@ const DB = {
 
     // ── Tauri desktop: localStorage is never used — HDD is the only store ────
     // Cache (above) is the fast read layer; HDD JSON files are durable storage.
-    // Skip all localStorage / IDB paths entirely to keep localStorage empty and
-    // avoid any storage-full warnings.
+    // Skip all localStorage / IDB paths to keep localStorage empty, but STILL
+    // push to Firestore so changes made on the desktop app reach other devices.
     if (location.protocol === 'tauri:') {
       if (this._tauri.dataDir) this._tauri.write(key, val);
       if (window.LocalFolderSync) LocalFolderSync.queueWrite(key, val);
+      // Sync to Firestore (queued if sync.js not ready yet — flushed on init)
+      if (window.Sync) {
+        if (Sync.ready) Sync.push(key, val);
+        else Sync._enqueue(key, val);
+      }
       return;
     }
 

@@ -179,7 +179,9 @@
       document.head.appendChild(s);
     }
 
-    const FB_VER  = '10.7.1';
+    // Use 9.23.0 compat (matches nav.js) — has enableIndexedDbPersistence and
+    // works in Tauri once sync.js sets Auth persistence to NONE (no OAuth iframe).
+    const FB_VER  = '9.23.0';
     const FB_BASE = `https://www.gstatic.com/firebasejs/${FB_VER}`;
 
     loadScript('./firebase-config.js', function() {
@@ -188,9 +190,10 @@
         onSyncReady(); // no Firebase — enable immediately
         return;
       }
-      // Firebase Auth compat SDK creates a hidden Google OAuth iframe that Google
-      // rejects for tauri:// origins. Skip entirely — HDD storage handles persistence.
-      if (location.protocol === 'tauri:') { onSyncReady(); return; }
+      // Load Firebase + sync on the login page so Firestore users are pulled
+      // BEFORE login — otherwise accounts that exist only in Firestore (created
+      // on another device) can't be authenticated. In Tauri, sync.js uses
+      // setPersistence(NONE) which avoids the Google OAuth iframe rejection.
       loadScript('./firebase-credentials.js', startSDK, startSDK);
       function startSDK() {
         loadScript(`${FB_BASE}/firebase-app-compat.js`, function() {
