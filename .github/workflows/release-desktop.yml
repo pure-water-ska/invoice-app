@@ -1,0 +1,72 @@
+name: Release Desktop App
+
+# Builds the Windows .exe/.msi, signs it for the Tauri auto-updater, and
+# publishes a GitHub Release containing the installer + latest.json manifest.
+#
+# Trigger: push a version tag, e.g.
+#     git tag v1.0.1 && git push origin v1.0.1
+#
+# Installed apps poll the "releases/latest/download/latest.json" endpoint
+# (configured in src-tauri/tauri.conf.json) and auto-prompt to update when the
+# tagged version is newer than the installed package.version.
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   TAURI_PRIVATE_KEY       contents of src-tauri/.updater-private.key
+#   TAURI_KEY_PASSWORD      the key password (empty string if none)
+#   FIREBASE_TEAM_PASSWORD  (optional) injected into firebase-config.js for sync
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write   # needed to create the GitHub Release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Inject Firebase teamPassword
+        shell: bash
+        env:
+          FIREBASE_TEAM_PASSWORD: ${{ secrets.FIREBASE_TEAM_PASSWORD }}
+        run: |
+          if [ -n "$FIREBASE_TEAM_PASSWORD" ]; then
+            sed -i "s|teamPassword: \"\"|teamPassword: \"$FIREBASE_TEAM_PASSWORD\"|" firebase-config.js
+            echo "Firebase teamPassword injected"
+          else
+            echo "No FIREBASE_TEAM_PASSWORD secret — desktop sync will use anonymous auth"
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build, sign & publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'ระบบใบกำกับสินค้า ${{ github.ref_name }}'
+          releaseBody: 'ดาวน์โหลดตัวติดตั้งจากไฟล์แนบด้านล่าง — แอปที่ติดตั้งแล้วจะอัปเดตอัตโนมัติ'
+          releaseDraft: false
+          prerelease: false

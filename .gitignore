@@ -29,3 +29,8 @@ dist/
 # Env
 .env
 .env.local
+
+# Tauri updater signing keys — NEVER commit (private key is a secret)
+src-tauri/.updater-private.key
+src-tauri/.updater-private.key.pub
+src-tauri/target/

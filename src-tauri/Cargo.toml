@@ -12,7 +12,8 @@ rust-version = "1.70"
 tauri-build = { version = "1.5", features = [] }
 
 [dependencies]
-tauri = { version = "1.7", features = [
+tauri = { version = "1.7", features = [ "updater",
+  "dialog-message", "dialog-ask", "dialog-confirm",
   "dialog-open",
   "dialog-save",
   "fs-read-file",
