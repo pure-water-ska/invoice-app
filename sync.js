@@ -768,6 +768,11 @@ var Sync = {
   // For IDB-overflow keys the value lives in DB._cache (loaded by preloadFromIDB).
   _localRead(lsKey) {
     if (window.DB) {
+      // Tauri: data lives in DB._cache (loaded from HDD), not localStorage
+      if (location.protocol === 'tauri:') {
+        const v = DB._cache[lsKey];
+        return (v !== null && v !== undefined) ? JSON.stringify(v) : null;
+      }
       // IDB-overflow keys have no localStorage copy — read from _cache
       if (DB._idbKeys && DB._idbKeys.has(lsKey)) {
         const v = DB._cache[lsKey];
@@ -786,6 +791,16 @@ var Sync = {
     // DB.invalidate() will be a no-op for IDB keys (they don't have a localStorage
     // copy to re-read from), so the cache set here is the lasting reference.
     if (window.DB) DB._cache[lsKey] = data;
+
+    // ── Tauri desktop: persist to HDD, never localStorage ────────────────────
+    // Firestore-pulled data (invoices, payments, customers…) must NOT be written
+    // to localStorage in the desktop app — that refills the ~5 MB budget that
+    // DB.init() deliberately wiped, triggering the storage-full banner.
+    // DB._cache (above) serves reads; HDD JSON files are the durable store.
+    if (location.protocol === 'tauri:') {
+      if (window.DB && DB._tauri && DB._tauri.dataDir) DB._tauri.write(lsKey, data);
+      return;
+    }
 
     // Key already overflowed to IDB — write there, skip localStorage
     if (window.DB && DB._idbKeys && DB._idbKeys.has(lsKey)) {
