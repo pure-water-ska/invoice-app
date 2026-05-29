@@ -9,7 +9,7 @@
   },
   "package": {
     "productName": "ระบบใบกำกับสินค้า",
-    "version": "1.0.3"
+    "version": "1.0.4"
   },
   "tauri": {
     "allowlist": {
@@ -35,6 +35,9 @@
         "scope": ["$APPDATA/*", "$DESKTOP/*", "$DOWNLOAD/*", "$DOCUMENT/*"]
       },
       "path": {
+        "all": true
+      },
+      "os": {
         "all": true
       },
       "window": {

@@ -13,6 +13,7 @@ tauri-build = { version = "1.5", features = [] }
 
 [dependencies]
 tauri = { version = "1.7", features = [ "updater",
+  "os-all",
   "dialog-message", "dialog-ask", "dialog-confirm",
   "dialog-open",
   "dialog-save",

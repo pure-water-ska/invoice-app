@@ -1866,20 +1866,54 @@ function runHealthCheck() {
 
 function loadVersionInfo() {
   document.getElementById('versionBadge').textContent = APP_VERSION.version;
+
+  // วันที่อัปเดต — show time too when the timestamp carries one (ISO with 'T')
   const d = new Date(APP_VERSION.date);
-  document.getElementById('versionDate').textContent =
-    `${d.getDate()} ${['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'][d.getMonth()]} ${d.getFullYear()+543}`;
-  document.getElementById('versionDevice').textContent = window.location.hostname || 'localhost';
+  const months = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+  let dateStr = `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear() + 543}`;
+  if (String(APP_VERSION.date).includes('T')) {
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    dateStr += ` ${hh}:${mm} น.`;
+  }
+  document.getElementById('versionDate').textContent = dateStr;
+
+  // เครื่องนี้ — real PC name in the desktop app, browser host on the web
+  const devEl = document.getElementById('versionDevice');
+  if (location.protocol === 'tauri:' && window.__TAURI__?.os?.hostname) {
+    window.__TAURI__.os.hostname()
+      .then(name => { devEl.textContent = name || 'เครื่องเดสก์ท็อป'; })
+      .catch(() => { devEl.textContent = 'เครื่องเดสก์ท็อป'; });
+  } else {
+    devEl.textContent = window.location.hostname || 'localhost';
+  }
+
+  // Check-for-update button — desktop app only (web auto-updates on reload)
+  if (location.protocol === 'tauri:') {
+    document.getElementById('updateRow').classList.remove('d-none');
+  }
 }
 
-function compareVersion() {
-  const other = document.getElementById('versionOther').value.trim();
-  const el = document.getElementById('versionCompareResult');
-  if (!other) { el.innerHTML = ''; return; }
-  if (other === APP_VERSION.version) {
-    el.innerHTML = '<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>เวอร์ชันตรงกัน — โปรแกรมเป็นรุ่นเดียวกัน</span>';
-  } else {
-    el.innerHTML = `<span class="text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>เวอร์ชันไม่ตรงกัน — เครื่องนี้ <strong>${APP_VERSION.version}</strong> / เครื่องอื่น <strong>${other}</strong></span>`;
+async function checkForUpdate() {
+  const btn = document.getElementById('btnCheckUpdate');
+  const st  = document.getElementById('updateStatus');
+  if (location.protocol !== 'tauri:' || !window.__TAURI__?.updater) {
+    st.innerHTML = '<span class="text-muted">ใช้ได้เฉพาะแอปเดสก์ท็อป</span>';
+    return;
+  }
+  btn.disabled = true;
+  st.innerHTML = '<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span>กำลังตรวจสอบ...</span>';
+  try {
+    const { shouldUpdate, manifest } = await window.__TAURI__.updater.checkUpdate();
+    if (shouldUpdate) {
+      st.innerHTML = `<span class="text-success"><i class="bi bi-arrow-up-circle-fill me-1"></i>พบเวอร์ชันใหม่ <strong>${manifest?.version || ''}</strong> — ทำตามหน้าต่างที่ปรากฏเพื่อติดตั้ง</span>`;
+    } else {
+      st.innerHTML = '<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>เป็นเวอร์ชันล่าสุดแล้ว</span>';
+    }
+  } catch (e) {
+    st.innerHTML = `<span class="text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>ตรวจสอบไม่สำเร็จ: ${e?.message || e}</span>`;
+  } finally {
+    btn.disabled = false;
   }
 }
 

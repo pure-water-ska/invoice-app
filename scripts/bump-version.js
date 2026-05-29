@@ -25,7 +25,7 @@ if (!ver || !/^\d+\.\d+\.\d+$/.test(ver)) {
 const ROOT = path.resolve(__dirname, '..');
 const THAI_MONTHS = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
 const now   = new Date();
-const isoDate = now.toISOString().slice(0, 10);                    // YYYY-MM-DD
+const isoDate = now.toISOString();                                 // full ISO timestamp (date + time)
 const label = `v${ver} (${now.getDate()} ${THAI_MONTHS[now.getMonth()]} ${now.getFullYear() + 543})`;
 
 function patch(file, fn) {
