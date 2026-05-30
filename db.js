@@ -269,8 +269,13 @@ const DB = {
   preloadFromIDB() {
     return (async () => {
       // Step 0: in Tauri, restore all HDD files → memory cache before anything else
-      // (localStorage is never written in Tauri — HDD + cache are the storage stack)
-      if (window.IS_TAURI) await this._tauri.init();
+      // (localStorage is never written in Tauri — HDD + cache are the storage stack).
+      // Seeding/migration is deferred to HERE (after the cache reflects real HDD
+      // data) so empty-cache false positives can't resurrect deleted records.
+      if (window.IS_TAURI) {
+        await this._tauri.init();
+        this._seedAndMigrate();
+      }
 
       // Step 1: restore _idbKeys from localStorage (tiny JSON — always fits)
       const stored = localStorage.getItem(this._IDB_KEYS_LS);
@@ -732,6 +737,35 @@ const DB = {
       if (migrated) console.log(`[DB] LZString migration: compressed ${migrated} legacy keys`);
     }
 
+    // Seed defaults + migrate settings.
+    // ⚠️ In Tauri this MUST run AFTER the HDD data is loaded into the cache
+    // (preloadFromIDB → _tauri.init). If it runs now, the cache looks EMPTY
+    // (HDD not loaded yet), every "if length === 0" seed fires, and _set writes
+    // those defaults into the sessionStorage shadow — which _tauri.init then
+    // applies OVER the real HDD data, resurrecting deleted records (the
+    // "delete all customers → they come back + Customer synced" bug). So on
+    // Tauri we defer; on web the cache is already valid from localStorage.
+    if (!window.IS_TAURI) this._seedAndMigrate();
+
+    // ── Kick off async IDB preload ────────────────────────────────────────────
+    // Resolves almost instantly when no keys have overflowed.
+    // Pages that render heavy data should await: DB.ready.then(render)
+    this.ready = this.preloadFromIDB();
+
+    // If overflow was already active from a prior session, show the warning
+    // banner on every page load — not just at the moment overflow first occurs.
+    this.ready.then(() => {
+      if (this._idbKeys.size > 0) this._notifyIdbOverflow('');
+    });
+  },
+
+  // Seed default catalog + migrate settings. Idempotent and safe to call once
+  // per launch. Catalog seeding (products/customers/pricing) is gated behind a
+  // PERSISTENT flag (wt_seed_done) stored in the DB store — HDD-backed in Tauri,
+  // localStorage on web — so it runs only on the very first run ever and a
+  // user's deletion is never undone on the next launch.
+  _seedAndMigrate() {
+    // Admin login always ensured (recovery — you can never be locked out)
     if (this.getUsers().length === 0) {
       this.addUser({
         id: Utils.uuid(),
@@ -743,19 +777,15 @@ const DB = {
         createdAt: new Date().toISOString()
       });
     }
-    if (this.getProducts().length === 0) {
-      this._seedProducts();
+
+    // First-run catalog seed only — respects later user deletions
+    if (this._getObj('wt_seed_done', false) !== true) {
+      if (this.getProducts().length === 0)  this._seedProducts();
+      if (this.getCustomers().length === 0) this._seedCustomers();
+      if (this.getPricing().length === 0)   this._seedPricing();
+      this._set('wt_seed_done', true);
     }
-    // ใช้ flag แยกต่างหาก เพื่อไม่ seed ซ้ำเมื่อผู้ใช้ลบข้อมูลออกเอง
-    if (!localStorage.getItem('wt_customers_seeded')) {
-      if (this.getCustomers().length === 0) {
-        this._seedCustomers();
-      }
-      localStorage.setItem('wt_customers_seeded', '1');
-    }
-    if (this.getPricing().length === 0) {
-      this._seedPricing();
-    }
+
     // ── migrate company info (replace placeholder / old demo values) ──────────
     const OLD_NAMES = ['บริษัท/ร้าน ของคุณ', 'บริษัท โกลด์สตาร์วอเตอร์เทคโนโลยี จำกัด'];
     const cur = this.getSettings();
@@ -769,26 +799,13 @@ const DB = {
         showHeader:  true,
       });
     }
-    // ── add showHeader default for existing installs that never had it ────────
     const cfg = this.getSettings();
     if (cfg.showHeader === undefined) {
       this.saveSettings({ ...cfg, showHeader: true });
     }
-    // ── Default: auto backup enabled daily if never configured ────────────────
     if (!cfg.autoBackup) {
       this.saveSettings({ ...cfg, autoBackup: { enabled: true, interval: 'daily', lastBackupAt: null } });
     }
-
-    // ── Kick off async IDB preload ────────────────────────────────────────────
-    // Resolves almost instantly when no keys have overflowed.
-    // Pages that render heavy data should await: DB.ready.then(render)
-    this.ready = this.preloadFromIDB();
-
-    // If overflow was already active from a prior session, show the warning
-    // banner on every page load — not just at the moment overflow first occurs.
-    this.ready.then(() => {
-      if (this._idbKeys.size > 0) this._notifyIdbOverflow('');
-    });
   },
 
   _seedProducts() {
