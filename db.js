@@ -74,6 +74,26 @@ const DB = {
           }
         }
         console.log(`[DB][Tauri] HDD storage loaded → ${this.dataDir} (${loaded} keys)`);
+
+        // Apply any shadow copies that were written to sessionStorage but whose
+        // HDD counterpart hadn't been confirmed before the last page reload.
+        // These represent the latest in-memory state — override the stale HDD data.
+        const PREFIX = 'wt_hdd_shadow_';
+        const shadows = [];
+        for (let i = 0; i < sessionStorage.length; i++) {
+          const k = sessionStorage.key(i);
+          if (k && k.startsWith(PREFIX)) shadows.push(k);
+        }
+        for (const sk of shadows) {
+          const dataKey = sk.slice(PREFIX.length);
+          try {
+            const val = JSON.parse(sessionStorage.getItem(sk));
+            DB._cache[dataKey] = val;
+            // Re-issue the HDD write now that dataDir is available
+            this.write(dataKey, val);
+            console.log('[DB][Tauri] Applied shadow write for', dataKey);
+          } catch {}
+        }
       } catch (e) {
         console.error('[DB][Tauri] HDD init failed', e);
       }
@@ -84,6 +104,11 @@ const DB = {
       const { writeTextFile } = window.__TAURI__.fs;
       join(this.dataDir, key + '.json')
         .then(p => writeTextFile(p, JSON.stringify(val)))
+        .then(() => {
+          // HDD write confirmed — clear the sessionStorage shadow copy so it
+          // doesn't linger unnecessarily after a clean write.
+          try { sessionStorage.removeItem('wt_hdd_shadow_' + key); } catch {}
+        })
         .catch(e => console.warn('[DB][Tauri] Write failed', key, e));
     },
   },
@@ -139,6 +164,11 @@ const DB = {
     // push to Firestore so changes made on the desktop app reach other devices.
     if (window.IS_TAURI) {
       this._cache[key] = val;                      // keep in-memory cache current
+      // Shadow-write to sessionStorage so a page reload (F5) before the async
+      // HDD write finishes won't load stale data.  sessionStorage survives F5
+      // within the same Tauri WebView process.  _tauri.init() applies these on
+      // startup and _tauri.write() clears them once the HDD file is confirmed.
+      try { sessionStorage.setItem('wt_hdd_shadow_' + key, JSON.stringify(val)); } catch {}
       if (this._tauri.dataDir) this._tauri.write(key, val);
       if (window.LocalFolderSync) LocalFolderSync.queueWrite(key, val);
       // Sync to Firestore (queued if sync.js not ready yet — flushed on init)
