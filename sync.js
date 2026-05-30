@@ -1358,6 +1358,11 @@ var Sync = {
     for (const { key, val } of q) {
       try {
         await this._writeKey(key, val);
+        // After a successful Firestore write, bring local cache in sync with
+        // what was just pushed.  Without this, _pullAll()'s merge logic reads
+        // the stale pre-flush cache, sees the deleted record as "local-only",
+        // and merges it back into the Firestore document — undoing the delete.
+        this._lsWrite(key, val);
       } catch (e) {
         console.warn('[Sync] pre-flush error:', key, e.message);
         return; // stop on error, queue stays intact for _flushQueue()
