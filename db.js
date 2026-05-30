@@ -637,13 +637,19 @@ const DB = {
 
   // ─── INIT ────────────────────────────────────────────────────────────────────
   init() {
-    // ── Tauri desktop: wipe localStorage entirely (keep only 2 safe keys) ────
+    // ── Tauri desktop: wipe localStorage entirely (keep only safe keys) ──────
     // Data lives in HDD files + memory cache.  localStorage is not written by
     // this build, but older builds (and sync.js metadata writes) could fill it.
-    // Clear everything EXCEPT wt_last_user (login form pre-fill) and
-    // wt_restore_pending (unclean-exit banner) before any other code runs.
+    // Clear everything EXCEPT:
+    //   wt_last_user      — login form pre-fill
+    //   wt_restore_pending — unclean-exit banner
+    //   wt_sync_pending   — offline Firestore write queue (beforeunload-enqueued
+    //                       writes from the previous session must survive the wipe
+    //                       so _flushQueueNow() can push them before _pullAll()
+    //                       reads stale data back — e.g. a delete that looks like
+    //                       it "came back" after a refresh)
     if (window.IS_TAURI) {
-      const _keep = new Set(['wt_last_user', 'wt_restore_pending']);
+      const _keep = new Set(['wt_last_user', 'wt_restore_pending', 'wt_sync_pending']);
       const _allLs = [];
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
