@@ -234,6 +234,12 @@ var Sync = {
 
   // ── Initialize ─────────────────────────────────────────────────────────────
   async init() {
+    // Wait for DB.preloadFromIDB() to complete before any Firestore work.
+    // In Tauri this sets DB._tauri.dataDir — without this wait, _lsWrite()
+    // skips HDD writes (dataDir is null) and pulled data is lost on restart.
+    // On the web it ensures IDB-overflow keys are loaded before _pullAll() reads.
+    if (window.DB && DB.ready) await DB.ready;
+
     // Load (or generate) device ID from IndexedDB first — must be ready before
     // any _writeKey() or listener echo-detection call.
     await this._initDeviceId();
