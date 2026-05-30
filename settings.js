@@ -1898,6 +1898,7 @@ function loadVersionInfo() {
   // Check-for-update button — desktop app only (web auto-updates on reload)
   if (window.IS_TAURI) {
     document.getElementById('updateRow').classList.remove('d-none');
+    document.getElementById('btnCheckUpdate')?.classList.remove('d-none');
   }
 }
 
@@ -1911,9 +1912,10 @@ function _updShow(id) {
       if (el) el.style.display = (s === id) ? '' : 'none';
     });
   const panel = document.getElementById('updPanel');
-  const idle  = document.getElementById('updIdle');
+  const btn   = document.getElementById('btnCheckUpdate');
   if (panel) panel.style.display = id ? '' : 'none';
-  if (idle)  idle.style.display  = id ? 'none' : '';
+  // Hide the header check button while a state panel is active; show it when idle
+  if (btn) btn.style.display = id ? 'none' : '';
 }
 
 function updReset() {

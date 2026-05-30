@@ -678,8 +678,11 @@ const DB = {
     //                       so _flushQueueNow() can push them before _pullAll()
     //                       reads stale data back — e.g. a delete that looks like
     //                       it "came back" after a refresh)
+    //   wt_sync_tombstones — deleted-record IDs; if wiped, a delete that hasn't
+    //                       fully propagated to Firestore is restored by _pullAll()
+    //                       (the "deleted customer comes back on refresh" bug)
     if (window.IS_TAURI) {
-      const _keep = new Set(['wt_last_user', 'wt_restore_pending', 'wt_sync_pending']);
+      const _keep = new Set(['wt_last_user', 'wt_restore_pending', 'wt_sync_pending', 'wt_sync_tombstones']);
       const _allLs = [];
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);

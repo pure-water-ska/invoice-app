@@ -77,41 +77,57 @@ jobs:
 
       # tauri-action skips latest.json when the product name contains non-ASCII
       # characters (Thai filename matching fails). Generate it manually instead.
+      #
+      # CRITICAL: GitHub strips non-ASCII characters from asset filenames on
+      # upload, so the local file "ระบบใบกำกับสินค้า_X_x64-setup.nsis.zip" becomes
+      # "_X_x64-setup.nsis.zip" on the release. The updater URL MUST use the
+      # actual uploaded asset name (queried from the GitHub API), not the local
+      # filename — otherwise the download 404s.
       - name: Generate and upload latest.json
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          node - <<'EOF'
+          # Query the ACTUAL uploaded asset names from the release (post-sanitization)
+          ASSETS_JSON="$(gh release view "$GITHUB_REF_NAME" --json assets)"
+          echo "Release assets:"
+          echo "$ASSETS_JSON" | node -e "JSON.parse(require('fs').readFileSync(0)).assets.forEach(a=>console.log(' -',a.name))"
+
+          ASSETS_JSON="$ASSETS_JSON" node - <<'EOF'
           const fs   = require('fs');
           const path = require('path');
-          const { execSync } = require('child_process');
 
           const nsisDir = 'src-tauri/target/release/bundle/nsis';
           const msiDir  = 'src-tauri/target/release/bundle/msi';
 
-          // Pick NSIS zip + sig (preferred for updates; falls back to MSI)
-          let zipName, sigContent, bundleDir;
-          const nsisFiles = fs.readdirSync(nsisDir);
+          // Read the .sig CONTENT locally (the signature itself, not the name)
+          let sigContent, preferExt;
+          const nsisFiles = fs.existsSync(nsisDir) ? fs.readdirSync(nsisDir) : [];
           const nsisSigFile = nsisFiles.find(f => f.endsWith('.nsis.zip.sig'));
-          const nsisZipFile = nsisFiles.find(f => f.endsWith('.nsis.zip') && !f.endsWith('.sig'));
-          if (nsisSigFile && nsisZipFile) {
-            bundleDir = nsisDir;
-            zipName   = nsisZipFile;
+          if (nsisSigFile) {
             sigContent = fs.readFileSync(path.join(nsisDir, nsisSigFile), 'utf8').trim();
+            preferExt = '.nsis.zip';
           } else {
             const msiFiles  = fs.readdirSync(msiDir);
             const msiSigFile = msiFiles.find(f => f.endsWith('.msi.zip.sig'));
-            const msiZipFile = msiFiles.find(f => f.endsWith('.msi.zip') && !f.endsWith('.sig'));
-            bundleDir = msiDir;
-            zipName   = msiZipFile;
             sigContent = fs.readFileSync(path.join(msiDir, msiSigFile), 'utf8').trim();
+            preferExt = '.msi.zip';
+          }
+
+          // Find the REAL asset name on the GitHub release (Thai chars stripped)
+          const assets = JSON.parse(process.env.ASSETS_JSON).assets;
+          const asset  = assets.find(a => a.name.endsWith(preferExt) && !a.name.endsWith('.sig'));
+          if (!asset) {
+            console.error('FATAL: no uploaded asset ending in', preferExt);
+            console.error('Available:', assets.map(a => a.name).join(', '));
+            process.exit(1);
           }
 
           const tag     = process.env.GITHUB_REF_NAME;
           const version = require('./package.json').version;
+          // Use the actual uploaded asset name; encode for the URL path segment.
           const url     = 'https://github.com/pure-water-ska/invoice-app/releases/download/'
-                          + tag + '/' + encodeURIComponent(zipName);
+                          + tag + '/' + encodeURIComponent(asset.name);
 
           const latest = {
             version,
@@ -123,7 +139,7 @@ jobs:
           };
 
           fs.writeFileSync('latest.json', JSON.stringify(latest, null, 2));
-          console.log('Generated latest.json for', zipName);
+          console.log('Generated latest.json → asset:', asset.name);
           console.log('URL:', url);
           EOF
 

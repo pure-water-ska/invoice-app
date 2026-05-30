@@ -32,6 +32,7 @@ var Sync = {
   _pendingWrite:  {},                    // { [lsKey]: boolean } — true while a debounced write is in-flight; listener skips snapshots during this window to avoid overwriting just-modified local data (e.g. cancelled payment)
   _lastFromCache: undefined,             // last known snapshot.metadata.fromCache value — deduplicates sync:connectionstate events
   _lastDocJson:   {},                    // { [lsKey]: string } — JSON fingerprint of last written DOCUMENT; skip write if unchanged (opt ②)
+  _lastDocIds:    {},                    // { [docName]: Set<id> } — IDs last seen for an array DOCUMENT; used to tombstone deletions so a pull/listener can't restore a deleted record (customers, products, …)
   _lastSyncedRecs:{},                    // { [colName]: Map<id,string> } — JSON fingerprint per record; diff to send only changed records (opt ③)
   _listenerSeeded:{},                   // { [colName]: boolean } — true after the initial onSnapshot delivery (all docs "added"); toasts suppressed until then
   ARCHIVE_MONTHS:    6,                  // invoices older than this are not fetched on page load (date-filtered _pullAll)
@@ -124,6 +125,24 @@ var Sync = {
         return true;
       }
       return false;                           // tombstoned — skip
+    });
+  },
+
+  // Filter a plain array of records (DOCUMENT arrays: customers, products, …)
+  // through active tombstones keyed under `name`.  Used so a deleted record can
+  // never be restored by a Firestore pull/listener that hasn't yet seen the
+  // delete (the "deleted customer comes back on refresh" bug for DOCUMENTS).
+  _filterArrayTombstones(name, arr) {
+    if (!Array.isArray(arr)) return arr;
+    const stones = this._getTombstones(name);
+    if (!Object.keys(stones).length) return arr;
+    const now = Date.now();
+    return arr.filter(r => {
+      if (!r || !r.id) return true;
+      const t = stones[r.id];
+      if (!t) return true;
+      if (now - t > this._tombstoneTTL) { this._clearTombstones(name, [r.id]); return true; }
+      return false;                           // tombstoned — drop
     });
   },
 
@@ -539,6 +558,25 @@ var Sync = {
       }, 600);
       return;
     }
+    // ── Tombstone deletions for array DOCUMENTS (customers, products, …) ───────
+    // Compare the new array's IDs against what we last saw for this doc. Any ID
+    // that disappeared was deleted — tombstone it so a Firestore pull/listener
+    // that hasn't yet seen the delete cannot restore it. This is the DOCUMENTS
+    // equivalent of the COLLECTIONS deletion tracking above. _lastDocIds is seeded
+    // by _pullAll() and _seedStateFromLocalStorage() so the first delete after a
+    // page load diffs against the real pre-delete set, not an empty one.
+    if (Array.isArray(val)) {
+      const docName = this.DOCUMENTS[key];
+      const newIds  = new Set(val.filter(r => r && r.id).map(r => r.id));
+      const prevIds = this._lastDocIds[docName] || new Set();
+      const deleted = [...prevIds].filter(id => !newIds.has(id));
+      if (deleted.length > 0) this._addTombstones(docName, deleted);
+      // A re-added ID should clear its tombstone so it isn't filtered out
+      const readded = [...newIds].filter(id => (this._getTombstones(docName))[id]);
+      if (readded.length > 0) this._clearTombstones(docName, readded);
+      this._lastDocIds[docName] = newIds;
+    }
+
     // ── Opt ①②: Debounce DOCUMENTS writes + skip if content unchanged ──────────
     // Mirrors the COLLECTION debounce: collapses rapid saves into one Firestore write.
     // At fire time we also compare a JSON fingerprint — if nothing changed since the
@@ -759,11 +797,19 @@ var Sync = {
     }
     // Seed _lastDocJson fingerprints so the first save on this page doesn't
     // re-push data that's already identical to what's in Firestore.
-    for (const [lsKey] of Object.entries(this.DOCUMENTS)) {
+    // Also seed _lastDocIds for array DOCUMENTS so the first delete after this
+    // page load can correctly diff against the pre-delete ID set.
+    for (const [lsKey, docName] of Object.entries(this.DOCUMENTS)) {
       if (this.NO_SYNC.has(lsKey)) continue;
       try {
         const raw = this._localRead(lsKey);
         if (raw && !this._lastDocJson[lsKey]) this._lastDocJson[lsKey] = raw;
+        if (raw) {
+          const arr = JSON.parse(raw);
+          if (Array.isArray(arr)) {
+            this._lastDocIds[docName] = new Set(arr.filter(r => r && r.id).map(r => r.id));
+          }
+        }
       } catch {}
     }
   },
@@ -908,16 +954,29 @@ var Sync = {
             console.log(`[Sync] Delta: skip write for ${docName} (doc ts ≤ last pull)`);
             return;
           }
-          const fsVal = doc.data().d;
+          let fsVal = doc.data().d;
           // For array documents (users, customers, products, etc.) merge with local data
           // so records created locally before sync was working are never lost on pull.
           if (Array.isArray(fsVal)) {
+            // Drop any records that were deleted locally but still linger in this
+            // Firestore snapshot (delete not yet propagated) — prevents the
+            // "deleted customer comes back on refresh" bug. If anything was
+            // filtered out, push the cleaned array back so Firestore agrees.
+            const filtered = this._filterArrayTombstones(docName, fsVal);
+            if (filtered.length !== fsVal.length) {
+              console.log(`[Sync] Doc pull: dropped ${fsVal.length - filtered.length} tombstoned ${docName} record(s)`);
+              fsVal = filtered;
+              this._writeKey(lsKey, fsVal).catch(e =>
+                console.warn('[Sync] tombstone re-push failed:', docName, e.message));
+            }
             try {
               const raw = this._localRead(lsKey);
               const localArr = JSON.parse(raw || '[]');
               if (Array.isArray(localArr) && localArr.length > 0) {
                 const fsIds = new Set(fsVal.filter(r => r.id).map(r => r.id));
-                const localOnly = localArr.filter(r => r.id && !fsIds.has(r.id));
+                // local-only records, EXCLUDING any that are tombstoned (deleted)
+                const localOnly = this._filterArrayTombstones(docName,
+                  localArr.filter(r => r.id && !fsIds.has(r.id)));
                 if (localOnly.length > 0) {
                   console.log(`[Sync] Doc merge: keeping ${localOnly.length} local-only ${docName} records`);
                   // Push local-only records into the Firestore doc immediately
@@ -926,10 +985,12 @@ var Sync = {
                   this._lsWrite(lsKey, merged);
                   if (window.DB) DB.invalidate(lsKey);
                   this._lastDocJson[lsKey] = JSON.stringify(merged); // opt ②: seed fingerprint
+                  this._lastDocIds[docName] = new Set(merged.filter(r => r && r.id).map(r => r.id));
                   return; // skip plain fsVal write below
                 }
               }
             } catch {}
+            this._lastDocIds[docName] = new Set(fsVal.filter(r => r && r.id).map(r => r.id));
           }
           // Write via _lsWrite — handles IDB overflow transparently
           this._lsWrite(lsKey, fsVal);
@@ -1169,7 +1230,7 @@ var Sync = {
               } catch {}
             }
 
-            const fsVal = doc.data().d;
+            let fsVal = doc.data().d;
 
             // For array documents (activity log, login log, users, etc.) MERGE
             // local-only entries rather than wholesale overwriting.
@@ -1177,12 +1238,21 @@ var Sync = {
             // keyed under this same Firestore doc → Device A's listener would replace
             // its local array with Device B's older version, silently losing A's entries.
             if (Array.isArray(fsVal)) {
+              // Drop records this device deleted but that still linger in the
+              // incoming snapshot — and re-push the cleaned array if needed.
+              const filtered = this._filterArrayTombstones(docName, fsVal);
+              if (filtered.length !== fsVal.length) {
+                fsVal = filtered;
+                this._writeKey(lsKey, fsVal).catch(e =>
+                  console.warn('[Sync] tombstone re-push (listener) failed:', docName, e.message));
+              }
               try {
                 const raw = this._localRead(lsKey);
                 const localArr = JSON.parse(raw || '[]');
                 if (Array.isArray(localArr) && localArr.length > 0) {
                   const fsIds    = new Set(fsVal.filter(r => r && r.id).map(r => r.id));
-                  const localOnly = localArr.filter(r => r && r.id && !fsIds.has(r.id));
+                  const localOnly = this._filterArrayTombstones(docName,
+                    localArr.filter(r => r && r.id && !fsIds.has(r.id)));
                   if (localOnly.length > 0) {
                     // Local has entries not yet in this Firestore snapshot — merge them in
                     // and push the merged array back so Firestore stays canonical.
