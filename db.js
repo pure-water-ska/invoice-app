@@ -156,6 +156,18 @@ const DB = {
     return this._cache[key] ?? def;
   },
   _set(key, val) {
+    // ── Record deletions for tombstoning BEFORE the cache is overwritten ──────
+    // Both the old (current cache) and new arrays are available here, so a
+    // deleted record's ID can be tombstoned synchronously — independent of
+    // whether Sync is ready (push) or the write is queued (enqueue). This is the
+    // authoritative deletion-detection point that fixes "deleted record comes
+    // back on refresh" for array DOCUMENTS (customers, products, users, …).
+    if (window.Sync && typeof Sync._recordDocDeletions === 'function') {
+      const _prev = Object.prototype.hasOwnProperty.call(this._cache, key)
+        ? this._cache[key] : undefined;
+      try { Sync._recordDocDeletions(key, _prev, val); } catch {}
+    }
+
     this._cache[key] = val;                      // update cache immediately
 
     // ── Tauri desktop: localStorage is never used — HDD is the only store ────

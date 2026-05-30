@@ -128,6 +128,30 @@ var Sync = {
     });
   },
 
+  // Called synchronously by DB._set() BEFORE the cache is overwritten, with the
+  // previous and next values for a key. For array DOCUMENTS it diffs the IDs and
+  // tombstones any that were removed — and clears tombstones for re-added IDs.
+  // Runs regardless of Sync.ready/_online, so a delete made offline or before
+  // sync init still suppresses the record on the next pull/listener delivery.
+  _recordDocDeletions(key, prevVal, nextVal) {
+    const docName = this.DOCUMENTS[key];
+    if (!docName) return;                 // not a synced DOCUMENT
+    if (this.NO_SYNC.has(key)) return;    // local-only (logs, errors)
+    if (!Array.isArray(prevVal) || !Array.isArray(nextVal)) return;
+    const nextIds = new Set(nextVal.filter(r => r && r.id).map(r => r.id));
+    const deleted = prevVal.filter(r => r && r.id && !nextIds.has(r.id)).map(r => r.id);
+    if (deleted.length > 0) {
+      this._addTombstones(docName, deleted);
+      console.log(`[Sync] Tombstoned ${deleted.length} deleted ${docName} record(s)`);
+    }
+    // A re-added ID (same id appears again) must clear its tombstone, otherwise
+    // the filter would wrongly drop the re-created record.
+    const stones  = this._getTombstones(docName);
+    const readded = [...nextIds].filter(id => stones[id]);
+    if (readded.length > 0) this._clearTombstones(docName, readded);
+    this._lastDocIds[docName] = nextIds;
+  },
+
   // Filter a plain array of records (DOCUMENT arrays: customers, products, …)
   // through active tombstones keyed under `name`.  Used so a deleted record can
   // never be restored by a Firestore pull/listener that hasn't yet seen the
@@ -558,24 +582,8 @@ var Sync = {
       }, 600);
       return;
     }
-    // ── Tombstone deletions for array DOCUMENTS (customers, products, …) ───────
-    // Compare the new array's IDs against what we last saw for this doc. Any ID
-    // that disappeared was deleted — tombstone it so a Firestore pull/listener
-    // that hasn't yet seen the delete cannot restore it. This is the DOCUMENTS
-    // equivalent of the COLLECTIONS deletion tracking above. _lastDocIds is seeded
-    // by _pullAll() and _seedStateFromLocalStorage() so the first delete after a
-    // page load diffs against the real pre-delete set, not an empty one.
-    if (Array.isArray(val)) {
-      const docName = this.DOCUMENTS[key];
-      const newIds  = new Set(val.filter(r => r && r.id).map(r => r.id));
-      const prevIds = this._lastDocIds[docName] || new Set();
-      const deleted = [...prevIds].filter(id => !newIds.has(id));
-      if (deleted.length > 0) this._addTombstones(docName, deleted);
-      // A re-added ID should clear its tombstone so it isn't filtered out
-      const readded = [...newIds].filter(id => (this._getTombstones(docName))[id]);
-      if (readded.length > 0) this._clearTombstones(docName, readded);
-      this._lastDocIds[docName] = newIds;
-    }
+    // (Deletion tombstoning for array DOCUMENTS happens earlier, in
+    //  Sync._recordDocDeletions(), called synchronously by DB._set().)
 
     // ── Opt ①②: Debounce DOCUMENTS writes + skip if content unchanged ──────────
     // Mirrors the COLLECTION debounce: collapses rapid saves into one Firestore write.
