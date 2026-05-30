@@ -556,13 +556,12 @@
 
   <!-- ── App Version ───────────────────────────────────────────────────── -->
   <div class="card mb-4">
-    <div class="card-header bg-secondary text-white fw-semibold py-2 d-flex justify-content-between align-items-center">
-      <span><i class="bi bi-info-circle me-1"></i>เวอร์ชันโปรแกรม</span>
-      <button class="btn btn-light btn-sm d-none" id="btnCheckUpdate" onclick="checkForUpdate()">
-        <i class="bi bi-arrow-clockwise me-1"></i>ตรวจสอบอัปเดต
-      </button>
+    <div class="card-header bg-secondary text-white fw-semibold py-2">
+      <i class="bi bi-info-circle me-1"></i>เวอร์ชันโปรแกรม
     </div>
     <div class="card-body">
+      <!-- Two columns: info table (left) + update button & reaction panel (right) -->
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
       <table class="table table-sm table-borderless mb-0" style="max-width:420px">
         <tr>
           <td class="text-muted fw-semibold" style="width:130px">เวอร์ชัน</td>
@@ -577,9 +576,14 @@
           <td id="versionDevice" class="small text-muted"></td>
         </tr>
       </table>
-      <div id="updateRow" class="mt-3 d-none">
-        <!-- active panel shown during / after check (right-aligned in body) -->
-        <div id="updPanel" class="border rounded p-3 mt-2 ms-auto" style="display:none;max-width:420px">
+      <!-- right column: aligned with the info rows on the right of the body -->
+      <div class="text-end">
+        <button class="btn btn-outline-primary btn-sm d-none" id="btnCheckUpdate" onclick="checkForUpdate()">
+          <i class="bi bi-arrow-clockwise me-1"></i>ตรวจสอบอัปเดต
+        </button>
+      <div id="updateRow" class="d-none">
+        <!-- active panel shown during / after check -->
+        <div id="updPanel" class="border rounded p-3 mt-2 text-start" style="display:none;width:320px">
 
           <!-- checking -->
           <div id="updChecking" style="display:none">
@@ -664,6 +668,8 @@
 
         </div><!-- /updPanel -->
       </div><!-- /updateRow -->
+      </div><!-- /right column -->
+      </div><!-- /flex row -->
     </div>
   </div>
 

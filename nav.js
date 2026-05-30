@@ -53,6 +53,24 @@
 (function() {
   if (!('serviceWorker' in navigator)) return;
 
+  // ── Desktop app: NO service worker ───────────────────────────────────────
+  // A SW caches assets (db.js, etc.) Cache-First. In the desktop app the SW
+  // cache is frozen at whatever was first cached and is NOT busted by an
+  // auto-update, so it keeps serving STALE pre-fix JS even after the app
+  // updates — every db.js fix silently fails to load. The desktop app loads
+  // from the local bundle and needs no offline cache, so unregister any SW and
+  // purge its caches, then never register one. nav.js is Network-Only so this
+  // freshly-loaded copy runs even when an old SW is still active.
+  if (window.IS_TAURI) {
+    navigator.serviceWorker.getRegistrations()
+      .then(rs => rs.forEach(r => r.unregister()))
+      .catch(() => {});
+    if (window.caches) {
+      caches.keys().then(ks => ks.forEach(k => caches.delete(k))).catch(() => {});
+    }
+    return;
+  }
+
   window.addEventListener('load', function() {
     navigator.serviceWorker.register('./sw.js').then(function(reg) {
 
