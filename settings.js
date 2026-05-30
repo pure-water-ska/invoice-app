@@ -1901,26 +1901,97 @@ function loadVersionInfo() {
   }
 }
 
+// ── Update-progress helpers ────────────────────────────────────────────────
+let _updManifest = null;   // stored from checkUpdate() so installUpdate() can use it
+
+function _updShow(id) {
+  ['Checking','UpToDate','Available','Downloading','Installing','Done','Error']
+    .forEach(s => {
+      const el = document.getElementById('upd' + s);
+      if (el) el.style.display = (s === id) ? '' : 'none';
+    });
+  const panel = document.getElementById('updPanel');
+  const idle  = document.getElementById('updIdle');
+  if (panel) panel.style.display = id ? '' : 'none';
+  if (idle)  idle.style.display  = id ? 'none' : '';
+}
+
+function updReset() {
+  _updManifest = null;
+  _updShow(null);
+}
+
 async function checkForUpdate() {
-  const btn = document.getElementById('btnCheckUpdate');
-  const st  = document.getElementById('updateStatus');
-  if (!window.IS_TAURI || !window.__TAURI__?.updater) {
-    st.innerHTML = '<span class="text-muted">ใช้ได้เฉพาะแอปเดสก์ท็อป</span>';
-    return;
-  }
-  btn.disabled = true;
-  st.innerHTML = '<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span>กำลังตรวจสอบ...</span>';
+  if (!window.IS_TAURI || !window.__TAURI__?.updater) return;
+  _updShow('Checking');
   try {
     const { shouldUpdate, manifest } = await window.__TAURI__.updater.checkUpdate();
+    _updManifest = manifest;
     if (shouldUpdate) {
-      st.innerHTML = `<span class="text-success"><i class="bi bi-arrow-up-circle-fill me-1"></i>พบเวอร์ชันใหม่ <strong>${manifest?.version || ''}</strong> — ทำตามหน้าต่างที่ปรากฏเพื่อติดตั้ง</span>`;
+      const verEl = document.getElementById('updNewVer');
+      if (verEl) verEl.textContent = 'v' + (manifest?.version || '');
+      _updShow('Available');
     } else {
-      st.innerHTML = '<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>เป็นเวอร์ชันล่าสุดแล้ว</span>';
+      _updShow('UpToDate');
     }
   } catch (e) {
-    st.innerHTML = `<span class="text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>ตรวจสอบไม่สำเร็จ: ${e?.message || e}</span>`;
-  } finally {
-    btn.disabled = false;
+    const msg = document.getElementById('updErrMsg');
+    if (msg) msg.textContent = e?.message || String(e);
+    _updShow('Error');
+  }
+}
+
+async function doInstallUpdate() {
+  if (!window.IS_TAURI || !window.__TAURI__?.updater) return;
+  const btn = document.getElementById('btnDoUpdate');
+  if (btn) btn.disabled = true;
+
+  // ── Fake download progress (Tauri 1.x has no download-chunk events) ───────
+  // installUpdate() takes ~5-25 s depending on file size and connection.
+  // We animate a progress bar that fills ~80% over 20 s, then jumps to 100%
+  // when installUpdate() resolves.
+  _updShow('Downloading');
+  let pct = 0;
+  const dlBar  = document.getElementById('updDlBar');
+  const dlPct  = document.getElementById('updDlPct');
+  const dlNote = document.getElementById('updDlNote');
+  const FILL_DURATION_MS = 20000;   // assume ~20 s to download; bar stops at 80%
+  const TICK_MS = 300;
+  const MAX_AUTO_PCT = 80;
+  let dlTimer = setInterval(() => {
+    // Ease-out: fast at start, slows near 80%
+    const remaining = MAX_AUTO_PCT - pct;
+    pct = Math.min(pct + remaining * (TICK_MS / FILL_DURATION_MS) * 2.5, MAX_AUTO_PCT);
+    if (dlBar) dlBar.style.width = pct.toFixed(1) + '%';
+    if (dlPct) dlPct.textContent = Math.round(pct) + '%';
+    if (dlNote) dlNote.textContent = pct < 30 ? 'กำลังเชื่อมต่อ…' : pct < 65 ? 'กำลังดาวน์โหลด…' : 'กำลังตรวจสอบไฟล์…';
+  }, TICK_MS);
+
+  try {
+    await window.__TAURI__.updater.installUpdate();
+
+    // Download + verify done — jump bar to 100% then show installing
+    clearInterval(dlTimer);
+    if (dlBar) dlBar.style.width = '100%';
+    if (dlPct) dlPct.textContent = '100%';
+    await new Promise(r => setTimeout(r, 400));
+
+    _updShow('Installing');
+    // Brief pause so the user sees the installing state before Tauri restarts the app
+    await new Promise(r => setTimeout(r, 1500));
+    _updShow('Done');
+
+    // Tauri with dialog:true shows its own restart prompt after installUpdate().
+    // If the process allowlist is available, we can also trigger relaunch directly.
+    try {
+      if (window.__TAURI__?.process?.relaunch) await window.__TAURI__.process.relaunch();
+    } catch {}
+
+  } catch (e) {
+    clearInterval(dlTimer);
+    const msg = document.getElementById('updErrMsg');
+    if (msg) msg.textContent = e?.message || String(e);
+    _updShow('Error');
   }
 }
 
