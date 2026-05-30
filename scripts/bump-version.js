@@ -52,6 +52,27 @@ patch('utils.js', s =>
     `const APP_VERSION = {\n  version: '${ver}',\n  date: '${isoDate}',\n  label: '${label}',\n};`
   ));
 
+// ── Cache-bust core Cache-First JS in every HTML ───────────────────────────
+// The service worker serves these files Cache-First; an auto-update does NOT
+// bust that cache, so the desktop app can keep running stale pre-fix JS (this
+// caused the "deleted customer comes back" bug to survive many releases — the
+// db.js fixes were cached and never ran). Appending ?v=<version> changes the
+// request URL each release; since the SW matches by exact URL (no ignoreSearch)
+// the new query misses the cached entry and falls through to the network/bundle,
+// guaranteeing a FRESH copy on the very first launch of the new version.
+const BUST_FILES = ['utils.js', 'db.js', 'auth.js', 'idb.js'];
+for (const f of fs.readdirSync(ROOT)) {
+  if (!f.endsWith('.html')) continue;
+  patch(f, s => {
+    let out = s;
+    for (const js of BUST_FILES) {
+      const re = new RegExp(`(src=")((?:\\./)?)${js.replace('.', '\\.')}(?:\\?v=[\\d.]+)?(")`, 'g');
+      out = out.replace(re, `$1$2${js}?v=${ver}$3`);
+    }
+    return out;
+  });
+}
+
 console.log(`\nVersion bumped to ${ver}.  Next:`);
 console.log(`  git add -A && git commit -m "release v${ver}"`);
 console.log(`  git tag v${ver} && git push origin main --tags`);
