@@ -444,28 +444,56 @@ async function _ensureCustomersFromFirestore() {
   try {
     if (typeof Sync === 'undefined' || !Sync._db || !Sync.COLLECTIONS) return;
     const colName = Sync.COLLECTIONS['wt_customers'] || 'customers_v2';
-    const snap = await Sync._orgRef().collection(colName).get();
-    if (snap.empty) return;
-    // Server records, de-duped by name (in case of duplicate uploads)
-    const byName = new Map();
+    const col = Sync._orgRef().collection(colName);
+    const snap = await col.get();
+    if (snap.empty) {
+      // server empty: nothing to pull. (Don't wipe local — local-only adds will sync up.)
+      return;
+    }
+
+    // Group server docs by name. For each name keep ONE doc — deterministically
+    // the smallest id so EVERY device picks the same one — and DELETE the rest
+    // from the server. This cleans duplicate uploads at the source so they stop
+    // resyncing and piling up (194→97), and both devices converge identically.
+    const byName = new Map();   // name → [{id, rec}]
     snap.forEach(d => {
       const r = d.data() || {}; const { _by, _byName, _ts, ...rec } = r;
       const n = rec.name != null ? String(rec.name) : d.id;
-      if (!byName.has(n)) byName.set(n, { ...rec, id: rec.id || d.id });
+      if (!byName.has(n)) byName.set(n, []);
+      byName.get(n).push({ id: d.id, rec: { ...rec, id: rec.id || d.id } });
     });
-    const serverList = [...byName.values()];
-    const serverIds  = new Set(serverList.map(c => c.id));
-    const serverNames = new Set(serverList.map(c => String(c.name)));
 
+    const serverList = [];
+    const dupIdsToDelete = [];
+    for (const [, arr] of byName) {
+      arr.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      serverList.push(arr[0].rec);                 // keep smallest-id doc
+      for (let i = 1; i < arr.length; i++) dupIdsToDelete.push(arr[i].id);
+    }
+
+    // Delete duplicate docs on the server (batched). Safe + idempotent.
+    if (dupIdsToDelete.length > 0) {
+      try {
+        let batch = Sync._db.batch(), ops = 0;
+        for (const id of dupIdsToDelete) {
+          batch.delete(col.doc(id)); if (++ops >= 400) { await batch.commit(); batch = Sync._db.batch(); ops = 0; }
+        }
+        if (ops > 0) await batch.commit();
+        if (Sync._serverIds && Sync._serverIds[colName]) dupIdsToDelete.forEach(id => Sync._serverIds[colName].delete(id));
+        console.log('[customers] removed ' + dupIdsToDelete.length + ' duplicate server docs');
+      } catch (e) { console.warn('[customers] dup cleanup failed', e); }
+    }
+
+    const serverIds   = new Set(serverList.map(c => c.id));
+    const serverNames = new Set(serverList.map(c => String(c.name)));
     const local = DB.getCustomers();
-    // Keep local records the server doesn't have BY ID and BY NAME (genuinely
-    // local-only / not-yet-synced); everything else comes from the server.
+    // Keep genuinely local-only records (not on server by id AND by name) so a
+    // just-added, not-yet-synced customer isn't lost.
     const localOnly = local.filter(c => c && c.id && !serverIds.has(c.id) && !serverNames.has(String(c.name)));
     const merged = [...serverList, ...localOnly];
 
-    // Only rewrite if the set actually changed (avoid needless churn)
     const curIds = new Set(local.filter(c => c && c.id).map(c => c.id));
-    const changed = merged.length !== local.length || merged.some(c => !curIds.has(c.id));
+    const changed = merged.length !== local.length || merged.some(c => !curIds.has(c.id)) || dupIdsToDelete.length > 0;
     if (changed) {
       DB.saveCustomers(merged);
       _custPage = 1; render();
