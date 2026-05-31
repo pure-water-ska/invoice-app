@@ -1902,6 +1902,78 @@ function loadVersionInfo() {
   }
 }
 
+// ── Sync diagnostic ─────────────────────────────────────────────────────────
+// Reveals the identity each device syncs under + a live server round-trip.
+// Run on BOTH devices and compare:
+//   • If "deviceId" is IDENTICAL on both → that's the bug: the echo guard
+//     (by === deviceId) makes each device ignore the other's writes.
+//   • "Server read-back → last write by" shows which device last touched the
+//     test doc; run on A then B — B should see A's deviceId (cross-device read OK).
+async function runSyncDiagnostic() {
+  const out = document.getElementById('syncDiagOut');
+  out.classList.remove('d-none');
+  const lines = [];
+  const log = (k, v) => lines.push(k.padEnd(26) + ': ' + v);
+  out.textContent = 'กำลังตรวจสอบ…';
+
+  try {
+    log('IS_TAURI', !!window.IS_TAURI);
+    log('Sync loaded', typeof Sync !== 'undefined');
+    if (typeof Sync === 'undefined') { out.textContent = lines.join('\n') + '\n\n❌ sync.js not loaded'; return; }
+    log('Sync.ready', Sync.ready === true);
+    log('Sync._online', Sync._online);
+    log('deviceId', Sync._deviceId || '(none)');
+    log('orgId', (typeof FIREBASE_CONFIG !== 'undefined' ? FIREBASE_CONFIG.orgId : '?'));
+
+    const fb = (typeof firebase !== 'undefined' && firebase.apps && firebase.apps.length) ? firebase : null;
+    const user = fb ? fb.auth().currentUser : null;
+    log('auth uid', user ? user.uid : '(not signed in)');
+    log('auth email', user ? (user.email || '(anonymous)') : '(none)');
+    log('rules expect email', '*@' + ((typeof FIREBASE_CONFIG!=='undefined'?FIREBASE_CONFIG.orgId:'?')) + '.wt.local');
+
+    if (!fb || !Sync._db) { out.textContent = lines.join('\n') + '\n\n❌ Firestore not initialised'; return; }
+
+    // ── Server round-trip write/read ─────────────────────────────────────────
+    const ref = Sync._orgRef().collection('data').doc('_diag');
+    const stamp = { by: Sync._deviceId, at: Date.now(), email: user ? user.email : null,
+                    label: 'diag-' + new Date().toISOString() };
+    log('', '');
+    log('writing test doc', '…');
+    out.textContent = lines.join('\n');
+    try {
+      await ref.set({ d: stamp, ts: firebase.firestore.FieldValue.serverTimestamp(), by: Sync._deviceId });
+      log('server WRITE', '✅ committed');
+    } catch (e) {
+      log('server WRITE', '❌ ' + (e.code || e.message));
+    }
+
+    // Force a read straight from the SERVER (bypass local cache)
+    try {
+      const snap = await ref.get({ source: 'server' });
+      const d = snap.exists ? snap.data().d : null;
+      if (d) {
+        log('server READ', '✅ ok');
+        log('last write by', d.by + (d.by === Sync._deviceId ? '  (THIS device)' : '  (OTHER device!)'));
+        log('last write at', new Date(d.at).toLocaleString());
+        log('last write email', d.email || '(none)');
+      } else {
+        log('server READ', '⚠️ doc empty');
+      }
+    } catch (e) {
+      log('server READ', '❌ ' + (e.code || e.message));
+    }
+
+    log('', '');
+    lines.push('▶ Run this on BOTH devices.');
+    lines.push('  • If deviceId is the SAME on both → that is the bug.');
+    lines.push('  • Run on device A, then device B: B\'s "last write by"');
+    lines.push('    should show A\'s deviceId (cross-device read works).');
+    out.textContent = lines.join('\n');
+  } catch (e) {
+    out.textContent = lines.join('\n') + '\n\n❌ ' + (e.message || e);
+  }
+}
+
 // ── Update-progress helpers ────────────────────────────────────────────────
 let _updManifest = null;   // stored from checkUpdate() so installUpdate() can use it
 
