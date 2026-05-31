@@ -834,6 +834,7 @@ var Sync = {
           d:  val,
           ts: firebase.firestore.FieldValue.serverTimestamp(),
           by: this._deviceId,
+          byName: this._deviceName(),
         });
 
       } else {
@@ -947,6 +948,7 @@ var Sync = {
         batch.set(colRef.doc(record.id), {
           ...record,
           _by: this._deviceId,   // per-device ID so remote devices can detect this isn't their own echo
+          _byName: this._deviceName(),
           _ts: firebase.firestore.FieldValue.serverTimestamp(),
         }, { merge: true });
         if (++ops >= 490) await commit();
@@ -1401,6 +1403,7 @@ var Sync = {
     // (no refresh needed) and is never re-uploaded.
     const unsubDel = this._fsDeletionsRef().onSnapshot((doc) => {
       if (!doc.exists || !doc.data() || !doc.data().d) return;
+      const delByName = doc.data().by === this._deviceId ? null : doc.data().byName;
       const affected = this._mergeDeletionsLocal(doc.data().d);
       if (!affected.size) return;
       // Map docName → lsKey so we can rewrite the local array
@@ -1415,6 +1418,13 @@ var Sync = {
           if (!Array.isArray(arr)) return;
           const filtered = this._filterArrayTombstones(name, arr);
           if (filtered.length !== arr.length) {
+            // Toast the records being removed (only for OTHER devices' deletes)
+            if (delByName) {
+              const removed = arr.filter(r => r && r.id && !filtered.some(f => f.id === r.id));
+              removed.slice(0, 3).forEach(r => this._activityToast({
+                typeKey: name, action: 'del', name: this._recordName(name, r), byName: delByName,
+              }));
+            }
             this._lsWrite(lsKey, filtered);
             if (window.DB) DB.invalidate(lsKey);
             this._lastDocJson[lsKey] = JSON.stringify(filtered);
@@ -1461,17 +1471,35 @@ var Sync = {
             }
 
             const fsVal = doc.data().d;
+            const byName = doc.data().byName;
 
             if (Array.isArray(fsVal)) {
-              // Unified apply: distinguishes remote DELETIONS (id was confirmed
-              // on the server before, now gone → drop it) from local-only
-              // additions (never synced → keep & re-upload). This is what makes
-              // a delete on another device actually disappear here instead of
-              // being re-uploaded, while still preserving offline-created records.
+              // Diff incoming vs current local (BEFORE applying) to show activity
+              // toasts: records newly present = add, content-changed = edit.
+              let localBefore = [];
+              try { localBefore = JSON.parse(this._localRead(lsKey) || '[]'); } catch {}
+              const beforeById = new Map((Array.isArray(localBefore) ? localBefore : [])
+                .filter(r => r && r.id).map(r => [r.id, JSON.stringify(r)]));
+
               const before = this._lastDocJson[lsKey];
               const result = this._applyArrayDoc(lsKey, docName, fsVal);
               const after  = JSON.stringify(result);
-              if (after !== before) this._notifyUpdate(lsKey);
+              if (after !== before) {
+                // Emit toasts for adds/edits coming from the other device (cap 3)
+                const changes = [];
+                for (const r of fsVal) {
+                  if (!r || !r.id) continue;
+                  const prev = beforeById.get(r.id);
+                  if (prev === undefined) changes.push({ action: 'add', rec: r });
+                  else if (prev !== JSON.stringify(r)) changes.push({ action: 'edit', rec: r });
+                  if (changes.length >= 3) break;
+                }
+                changes.forEach(c => this._activityToast({
+                  typeKey: docName, action: c.action,
+                  name: this._recordName(docName, c.rec), byName,
+                }));
+                this._notifyUpdate(lsKey);
+              }
               return;
             }
 
@@ -1588,6 +1616,18 @@ var Sync = {
             if (!this._listenerSeeded[colName]) {
               this._listenerSeeded[colName] = true; // mark seeded — next real change will toast
             } else {
+              // Activity toasts for changes from OTHER devices (cap 3)
+              let shown = 0;
+              for (const ch of snap.docChanges()) {
+                if (shown >= 3) break;
+                const rec = ch.doc.data();
+                if (!rec || rec._by === this._deviceId) continue;     // skip our own echo
+                if (ch.doc.metadata.hasPendingWrites) continue;
+                const action = ch.type === 'added' ? 'add' : ch.type === 'removed' ? 'del' : 'edit';
+                this._activityToast({ typeKey: colName, action,
+                  name: this._recordName(colName, rec), byName: rec._byName });
+                shown++;
+              }
               this._notifyUpdate(lsKey);
             }
           }
@@ -1682,6 +1722,81 @@ var Sync = {
     el.style.fontSize = '10px';
   },
 
+  // ── Activity toasts ────────────────────────────────────────────────────────
+  // Friendly name of THIS device, shown to other devices as the source of a
+  // change. Set in Settings ("ชื่อเครื่องนี้"); stored in the HDD-backed DB store
+  // (not synced). Falls back to the OS/platform label.
+  _deviceName() {
+    try {
+      const n = (window.DB && DB._getObj) ? DB._getObj('wt_device_label', '') : '';
+      if (n && typeof n === 'string') return n;
+    } catch {}
+    if (window.IS_TAURI) return 'เครื่องเดสก์ท็อป';
+    return (location.hostname || 'อุปกรณ์');
+  },
+
+  _ACTIVITY_TYPE: {
+    customers:  { label: 'ลูกค้า',        icon: 'bi-people' },
+    users_cfg:  { label: 'ผู้ใช้',         icon: 'bi-person-gear' },
+    products:   { label: 'สินค้า',        icon: 'bi-box-seam' },
+    pricing:    { label: 'ราคา',          icon: 'bi-tag' },
+    versions:   { label: 'ฉลากขวด',       icon: 'bi-tag' },
+    invoices:   { label: 'ใบกำกับ',        icon: 'bi-receipt' },
+    payments:   { label: 'การชำระเงิน',    icon: 'bi-cash-coin' },
+    returns:    { label: 'คืนสินค้า',      icon: 'bi-arrow-return-left' },
+  },
+  _ACTIVITY_ACTION: {
+    add:  { verb: 'เพิ่ม',  color: '#37c871', icon: 'bi-plus-circle' },
+    edit: { verb: 'แก้ไข', color: '#4f8cff', icon: 'bi-pencil' },
+    del:  { verb: 'ลบ',    color: '#ff5c6c', icon: 'bi-trash' },
+  },
+
+  // Display name for a record of the given type.
+  _recordName(typeKey, rec) {
+    if (!rec) return '';
+    switch (typeKey) {
+      case 'customers': return rec.name || rec.shopName || rec.id || '';
+      case 'users_cfg': return rec.name || rec.username || rec.id || '';
+      case 'products':  return rec.name || rec.id || '';
+      case 'pricing':   return rec.customerName || rec.name || rec.id || '';
+      case 'versions':  return rec.name || rec.colorName || rec.id || '';
+      case 'invoices':  return '#' + (rec.invoiceNumber || rec.id || '');
+      case 'payments':  return (rec.amount != null ? Number(rec.amount).toLocaleString('th-TH') + ' บาท' : (rec.id || ''));
+      default:          return rec.name || rec.id || '';
+    }
+  },
+
+  // Render one activity toast (bottom-right stack). action ∈ add|edit|del.
+  _activityToast({ typeKey, action, name, byName }) {
+    try {
+      const T = this._ACTIVITY_TYPE[typeKey] || { label: typeKey, icon: 'bi-arrow-repeat' };
+      const A = this._ACTIVITY_ACTION[action] || this._ACTIVITY_ACTION.edit;
+      let stack = document.getElementById('syncActivityStack');
+      if (!stack) {
+        stack = document.createElement('div');
+        stack.id = 'syncActivityStack';
+        stack.style.cssText = 'position:fixed;bottom:16px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px;width:320px;max-width:90vw;';
+        document.body.appendChild(stack);
+      }
+      const card = document.createElement('div');
+      card.style.cssText = `background:#1f2340;color:#fff;border-radius:10px;padding:9px 11px;
+        box-shadow:0 8px 24px rgba(0,0,0,.4);display:flex;align-items:flex-start;gap:9px;
+        border-left:4px solid ${A.color};font-family:'Sarabun',sans-serif;`;
+      const now = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+      card.innerHTML = `
+        <i class="bi ${T.icon}" style="font-size:1.1rem;color:${A.color};line-height:1.3"></i>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;font-size:.88rem">${A.verb}${T.label}${name ? ': ' + this._esc(name) : ''}</div>
+          <div style="font-size:.7rem;opacity:.6;margin-top:1px"><i class="bi bi-pc-display me-1"></i>${this._esc(byName || 'เครื่องอื่น')} · ${now}</div>
+        </div>
+        <i class="bi bi-x" style="opacity:.5;cursor:pointer" onclick="this.closest('div').parentNode.removeChild(this.closest('div'))"></i>`;
+      stack.appendChild(card);
+      while (stack.children.length > 4) stack.firstElementChild.remove();
+      setTimeout(() => { card.style.transition = 'opacity .4s'; card.style.opacity = '0'; setTimeout(() => card.remove(), 400); }, 5000);
+    } catch (e) { console.warn('[Sync] activity toast failed:', e.message); }
+  },
+  _esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); },
+
   _notifyUpdate(lsKey) {
     const label = {
       wt_invoices:  'ใบกำกับ',
@@ -1705,30 +1820,7 @@ var Sync = {
       'customers.html': ['wt_customers'],
       'dashboard.html': ['wt_invoices', 'wt_payments'],
     };
-    const relevantKeys = PAGE_KEYS[page];
-    const isRelevant   = !!(relevantKeys && relevantKeys.includes(lsKey));
-
-    // Show toast
-    if (label && isRelevant) {
-      let toast = document.getElementById('syncToast');
-      if (!toast) {
-        toast = document.createElement('div');
-        toast.id = 'syncToast';
-        toast.style.cssText = 'position:fixed;bottom:1rem;right:1rem;z-index:9999;min-width:180px;';
-        toast.className = 'toast show align-items-center text-white bg-dark border-0';
-        toast.setAttribute('role', 'alert');
-        document.body.appendChild(toast);
-      }
-      toast.innerHTML = `
-        <div class="d-flex">
-          <div class="toast-body fw-semibold">
-            <i class="bi bi-arrow-repeat me-1"></i>ซิงค์ <strong>${label}</strong> แล้ว
-          </div>
-          <button type="button" class="btn-close btn-close-white me-2 m-auto" onclick="this.closest('.toast').remove()"></button>
-        </div>`;
-      clearTimeout(toast._hide);
-      toast._hide = setTimeout(() => toast.remove(), 3000);
-    }
+    void label; void page; void PAGE_KEYS;  // (kept for reference; rich activity toasts replace the old generic toast)
 
     // Update last-sync timestamp + snapshot counter for the settings card
     localStorage.setItem(this._lastSyncKey, new Date().toISOString());

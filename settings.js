@@ -1982,6 +1982,24 @@ async function runSyncDiagnostic() {
   }
 }
 
+// Device label — shown to other devices in sync-activity toasts. Stored in the
+// HDD-backed DB store (not synced; each device keeps its own name).
+function loadDeviceLabel() {
+  const el = document.getElementById('deviceLabel');
+  if (!el) return;
+  let v = '';
+  try { v = DB._getObj('wt_device_label', '') || ''; } catch {}
+  el.value = v;
+}
+function saveDeviceLabel() {
+  const el = document.getElementById('deviceLabel');
+  if (!el) return;
+  const v = (el.value || '').trim().slice(0, 40);
+  try { DB._set('wt_device_label', v); } catch {}
+  Utils.showAlert('<i class="bi bi-check-circle me-1"></i>บันทึกชื่อเครื่องแล้ว: <strong>' + (v || '(ค่าเริ่มต้น)') + '</strong>', 'success');
+}
+window.addEventListener('DOMContentLoaded', () => { try { DB.ready.then(loadDeviceLabel); } catch {} });
+
 // Clear all deletion tombstones (local + the shared Firestore _deletions doc).
 // Recovery tool: earlier versions auto-tombstoned bulk reductions, poisoning the
 // shared _deletions doc and wiping real records on every device. Running this

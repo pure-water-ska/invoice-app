@@ -684,6 +684,19 @@
         <span id="fsStatusText" class="ms-1 text-muted">กำลังตรวจสอบ...</span>
       </div>
       <div id="fsSyncMsg" class="alert d-none small py-2 mb-3"></div>
+
+      <!-- Device name — shown to other devices in sync activity notifications -->
+      <div class="mb-3" style="max-width:420px">
+        <label class="form-label fw-semibold small mb-1">
+          <i class="bi bi-pc-display me-1"></i>ชื่อเครื่องนี้
+          <span class="text-muted fw-normal">(แสดงในแจ้งเตือนของเครื่องอื่น)</span>
+        </label>
+        <div class="input-group input-group-sm">
+          <input type="text" id="deviceLabel" class="form-control" placeholder="เช่น PC-หน้าร้าน, โน้ตบุ๊คเจ้าของ" maxlength="40">
+          <button class="btn btn-primary" onclick="saveDeviceLabel()"><i class="bi bi-save me-1"></i>บันทึก</button>
+        </div>
+      </div>
+
       <p class="text-muted small mb-3">
         กด <strong>Push All → Firestore</strong> เพื่ออัปโหลดข้อมูลจากเครื่องนี้ไปยัง Firestore
         ทำครั้งเดียวหลังตั้งค่าครั้งแรก — หลังจากนั้นซิงค์อัตโนมัติทุกการเขียน
