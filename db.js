@@ -699,7 +699,12 @@ const DB = {
     //                       fully propagated to Firestore is restored by _pullAll()
     //                       (the "deleted customer comes back on refresh" bug)
     if (window.IS_TAURI) {
-      const _keep = new Set(['wt_last_user', 'wt_restore_pending', 'wt_sync_pending', 'wt_sync_tombstones']);
+      // wt_sync_sids — persisted "ids ever seen on the server" per collection.
+      // Must survive the wipe: it's how _pullAll tells a record DELETED on the
+      // server (was in the set, now gone → drop) from one created locally and
+      // not yet synced (never in the set → push). Without it, a deleted record
+      // looks "new" on the next launch and gets re-uploaded ("delete comes back").
+      const _keep = new Set(['wt_last_user', 'wt_restore_pending', 'wt_sync_pending', 'wt_sync_tombstones', 'wt_sync_sids']);
       const _allLs = [];
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
