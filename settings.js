@@ -2033,6 +2033,63 @@ async function forceDedupeCustomers() {
   } catch (e) { L.push('❌ ' + (e.code || '') + ' ' + (e.message || e)); paint(); }
 }
 
+// DANGER: permanently delete ALL customers from the server (customers_v2 +
+// the old data/customers doc) and locally. Use to verify a clean wipe. Because
+// the app no longer auto-seeds customers, after this they stay gone — including
+// after a reinstall (the server has none to sync down).
+async function purgeAllCustomers() {
+  if (!confirm('⚠️ ลบลูกค้าทั้งหมดถาวร ออกจากเซิร์ฟเวอร์และทุกอุปกรณ์?\n\nใช้ไม่ได้ย้อนกลับ. ใบกำกับ/การชำระเงินยังอยู่.')) return;
+  if (!confirm('ยืนยันอีกครั้ง — ลบลูกค้าทั้งหมดถาวร?')) return;
+  const out = document.getElementById('syncDiagOut');
+  out.classList.remove('d-none');
+  const L = []; const paint = () => out.textContent = L.join('\n');
+  L.push('=== Purge ALL customers (server + local) ==='); paint();
+  try {
+    if (typeof Sync === 'undefined' || !Sync._db) { L.push('❌ Firestore not ready'); paint(); return; }
+    const base = Sync._orgRef();
+
+    // 1) Delete every doc in the customers_v2 collection
+    const colName = (Sync.COLLECTIONS && Sync.COLLECTIONS['wt_customers']) || 'customers_v2';
+    const col = base.collection(colName);
+    const snap = await col.get({ source: 'server' });
+    let batch = Sync._db.batch(), ops = 0, deleted = 0;
+    for (const d of snap.docs) {
+      batch.delete(d.ref); ops++; deleted++;
+      if (ops >= 400) { await batch.commit(); batch = Sync._db.batch(); ops = 0; L.push('deleted ' + deleted + '…'); paint(); }
+    }
+    if (ops > 0) await batch.commit();
+    L.push('deleted ' + deleted + ' docs from ' + colName); paint();
+
+    // 2) Delete the legacy whole-array document data/customers
+    try { await base.collection('data').doc('customers').delete(); L.push('deleted legacy data/customers doc'); }
+    catch (e) { L.push('(legacy doc: ' + (e.code || 'none') + ')'); }
+
+    // 3) Clear local customers + customer-related sync state
+    if (window.DB) DB.saveCustomers([]);
+    try {
+      const stones = JSON.parse(localStorage.getItem('wt_sync_tombstones') || '{}');
+      delete stones[colName]; delete stones['customers'];
+      localStorage.setItem('wt_sync_tombstones', JSON.stringify(stones));
+    } catch {}
+    try {
+      const sids = JSON.parse(localStorage.getItem('wt_sync_sids') || '{}');
+      delete sids[colName]; localStorage.setItem('wt_sync_sids', JSON.stringify(sids));
+    } catch {}
+    try {
+      const pids = JSON.parse(sessionStorage.getItem('wt_sync_pull_ids') || '{}');
+      delete pids[colName]; sessionStorage.setItem('wt_sync_pull_ids', JSON.stringify(pids));
+    } catch {}
+    if (Sync._serverIds) delete Sync._serverIds[colName];
+    if (Sync._pullIds)   delete Sync._pullIds[colName];
+
+    L.push('cleared local customers + sync state');
+    L.push('');
+    L.push('✅ DONE. Now: reopen the app on EVERY device (customers should be 0).');
+    L.push('   The app no longer re-creates customers, so they stay gone.');
+    paint();
+  } catch (e) { L.push('❌ ' + (e.code || '') + ' ' + (e.message || e)); paint(); }
+}
+
 // Comprehensive customer/sync analysis — dumps the complete picture so the
 // duplicate/id-mismatch situation is visible at a glance.
 async function runCustomerAnalysis() {

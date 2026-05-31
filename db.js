@@ -783,50 +783,17 @@ const DB = {
       });
     }
 
-    // ── Auto-recover the canonical customer list when EMPTY ───────────────────
-    // The customer list is the business's master data and ships hardcoded in
-    // _seedCustomers() with DETERMINISTIC ids. If a device's list is empty (lost
-    // through the earlier sync chaos / a wipe), restore it on launch. Because ids
-    // are deterministic this is idempotent and converges across devices (every
-    // device gets the SAME ids), which is exactly what makes cross-device delete
-    // work. Deleting a FEW customers leaves the list non-empty, so this does NOT
-    // resurrect individually-deleted customers — it only rebuilds a fully-empty
-    // list. Runs regardless of wt_seed_done so a wiped device can recover.
-    // ── ONE-TIME customer recovery/normalisation ─────────────────────────────
-    // Runs exactly ONCE per device (flag wt_cust_recover_v1). NOT every-empty —
-    // an every-empty restore made "delete all → comes back on refresh". After
-    // this one pass, customer deletions (including delete-all) are fully
-    // respected. On that single pass:
-    //   • empty list → restore canonical default customers (recovers a wiped
-    //     device), with DETERMINISTIC ids.
-    //   • non-empty   → remap any old random-uuid seed customers to the
-    //     deterministic ids so every device shares identical ids (prerequisite
-    //     for cross-device delete). Custom customers untouched.
-    // EMPTY list → restore canonical defaults ONCE (flag) so "delete all" is not
-    // resurrected on every refresh. NON-EMPTY → normalise/dedupe EVERY launch.
+    // ── Customers are NO LONGER auto-seeded/restored ─────────────────────────
+    // The hardcoded customer list re-created customers on every empty/fresh
+    // install, which made "delete all" appear to never stick (and resurrected
+    // data after a reinstall). Customer master data now lives ONLY in Firestore
+    // (customers_v2) and syncs down — the app never auto-creates customers. A
+    // truly empty list stays empty. (_seedCustomers/_defaultCustomers are kept
+    // as methods for a manual one-off restore if ever needed, but are not called
+    // automatically.)
     //
-    // Why normalise every launch: the same customer can exist with TWO ids — a
-    // deterministic one (cust-seed-N) and an old random-uuid one seeded
-    // independently on another device. Deleting one id leaves the duplicate, so
-    // deletes appear not to work. _normalizeCustomerIds() remaps seed customers
-    // to their deterministic id BY NAME and de-dupes; saving the deduped list
-    // makes the normal sync DELETE the leftover random-id docs from the server
-    // (syncDeletedIds). It is idempotent — once every device is on deterministic
-    // ids it changes nothing — so running it each launch safely CONVERGES all
-    // devices to one canonical id per customer, which is what makes delete work.
-    if (this.getCustomers().length === 0) {
-      if (this._getObj('wt_cust_restored_v1', false) !== true) {
-        console.log('[DB] Restoring canonical default customers (one-time)');
-        this._seedCustomers();
-        this._set('wt_cust_restored_v1', true);
-      }
-    } else {
-      try {
-        if (this._normalizeCustomerIds()) console.log('[DB] Normalised/de-duped customer ids');
-      } catch (e) { console.warn('[DB] customer normalise failed', e); }
-    }
-
-    // First-run catalog seed only — respects later user deletions
+    // Products/pricing: keep the one-time first-run seed (small reference data,
+    // not the source of the delete pain). Gated by wt_seed_done.
     if (this._getObj('wt_seed_done', false) !== true) {
       if (this.getProducts().length === 0)  this._seedProducts();
       if (this.getPricing().length === 0)   this._seedPricing();
