@@ -316,14 +316,33 @@ window.addEventListener('DOMContentLoaded', () => {
     return;
   }
 
+  // ⚠️ Tauri loads HDD data into DB._cache ASYNCHRONOUSLY (DB.ready). Building
+  // the customer list / loading the invoice synchronously here would read an
+  // EMPTY cache → permanently empty customer box and blank edit/view. So defer
+  // the entire data-dependent init until DB.ready resolves (instant on web).
+  const _startInit = () => {
+
   // Build customer list for searchable dropdown.
   // Defensive: a single record with a missing/non-string name used to throw in
-  // .localeCompare and abort the whole list build → empty customer box even when
-  // customers exist. Coerce names to strings and keep only records with an id.
-  window._custList = DB.getCustomers()
-    .filter(c => c && c.id)
-    .map(c => ({ ...c, name: (c.name == null ? '' : String(c.name)) }))
-    .sort((a,b) => a.name.localeCompare(b.name, 'th'));
+  // .localeCompare and abort the whole list build. Coerce names to strings and
+  // keep only records with an id. Exposed so it can be rebuilt when customers
+  // sync in from another device.
+  window.buildCustList = function () {
+    window._custList = DB.getCustomers()
+      .filter(c => c && c.id)
+      .map(c => ({ ...c, name: (c.name == null ? '' : String(c.name)) }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'th'));
+  };
+  window.buildCustList();
+  // Rebuild the list (and refresh an open dropdown) when customers arrive via sync
+  ['sync:pulled', 'sync:updated', 'sync:ready'].forEach(evt =>
+    window.addEventListener(evt, () => {
+      try {
+        window.buildCustList();
+        const dd = document.getElementById('custDropdown');
+        if (dd && dd.style.display === 'block') _custOpen();
+      } catch {}
+    }));
 
   // ── Searchable customer dropdown helpers ───────────────────────────────────
   let _custHi = -1; // highlighted index
@@ -478,6 +497,12 @@ window.addEventListener('DOMContentLoaded', () => {
       }
     }
   }
+
+  }; // end _startInit
+
+  // Run init only after the local cache is populated (HDD load in Tauri).
+  if (window.DB && DB.ready && typeof DB.ready.then === 'function') DB.ready.then(_startInit);
+  else _startInit();
 });
 
 // ── VIEW MODE ─────────────────────────────────────────────────────────────────
