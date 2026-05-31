@@ -1617,6 +1617,13 @@ var Sync = {
           // expires — this would restore a just-cancelled/deleted record.
           const docChanges = snap.docChanges();
           if (docChanges.length > 0 && docChanges.every(c => c.doc.data()?._by === this._deviceId)) return;
+          // EXPLICIT removals: ids Firestore reports as type:"removed" were deleted
+          // on the server. Remove them locally unconditionally — this is a reliable
+          // signal (unlike the pullIds inference below, which fails to recognise a
+          // delete when pullIds is missing the id, leaving the record on screen).
+          const removedIds = new Set(
+            docChanges.filter(c => c.type === 'removed').map(c => c.doc.id)
+          );
           // Apply tombstones — prevents snapshots from restoring records
           // that were tombstoned locally (belt-and-suspenders with the main batch)
           const fsArr = this._applyTombstones(colName, snap.docs).map(d => {
@@ -1642,6 +1649,7 @@ var Sync = {
               const now      = Date.now();
               const localOnly = localArr.filter(r => {
                 if (!r.id || fsIds.has(r.id)) return false;
+                if (removedIds.has(r.id)) return false;   // explicitly deleted on the server → drop
                 if (stones[r.id] && now - stones[r.id] <= this._tombstoneTTL) return false;
                 // Records OUTSIDE the archive window will never appear in this date-filtered
                 // listener query — their absence is not a deletion signal, always keep them.
