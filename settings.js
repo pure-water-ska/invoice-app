@@ -1909,16 +1909,18 @@ function loadVersionInfo() {
 //     (by === deviceId) makes each device ignore the other's writes.
 //   • "Server read-back → last write by" shows which device last touched the
 //     test doc; run on A then B — B should see A's deviceId (cross-device read OK).
-let _diagUnsub = null;
+let _diagUnsub = [];
 let _diagEvents = [];
 async function runSyncDiagnostic() {
   const out = document.getElementById('syncDiagOut');
   out.classList.remove('d-none');
   const head = [];
-  const log = (k, v) => head.push(k.padEnd(26) + ': ' + v);
-  const paint = () => { out.textContent = head.join('\n') + '\n\n── LIVE LISTENER (keep this open) ──\n' + _diagEvents.slice(-12).join('\n'); };
+  const log = (k, v) => head.push(String(k).padEnd(28) + ': ' + v);
+  const paint = () => { out.textContent = head.join('\n') + '\n\n── LIVE (keep open; act on OTHER device) ──\n' + _diagEvents.slice(-14).join('\n'); };
   _diagEvents = [];
   out.textContent = 'กำลังตรวจสอบ…';
+  (_diagUnsub || []).forEach(u => { try { u(); } catch {} });
+  _diagUnsub = [];
 
   try {
     log('IS_TAURI', !!window.IS_TAURI);
@@ -1926,50 +1928,54 @@ async function runSyncDiagnostic() {
     log('Sync.ready', Sync.ready === true);
     log('Sync._online', Sync._online);
     log('deviceId', Sync._deviceId || '(none)');
-    log('orgId', (typeof FIREBASE_CONFIG !== 'undefined' ? FIREBASE_CONFIG.orgId : '?'));
+    log('app listeners attached', (Sync._unsubscribers ? Sync._unsubscribers.length : 0) + '  (expect ≥ 4)');
     const fb = (typeof firebase !== 'undefined' && firebase.apps && firebase.apps.length) ? firebase : null;
     const user = fb ? fb.auth().currentUser : null;
-    log('auth uid', user ? user.uid : '(none)');
     log('auth email', user ? (user.email || '(anon)') : '(none)');
-
     if (!fb || !Sync._db) { paint(); return; }
-    const ref = Sync._orgRef().collection('data').doc('_diag');
 
-    // ── STEP 1: READ BEFORE WRITE — true cross-device read test ──────────────
-    // Shows who LAST wrote _diag. Run on A, then B: B must show A's id here.
-    try {
-      const snap = await ref.get({ source: 'server' });
-      const d = snap.exists ? snap.data().d : null;
-      if (d) {
-        const who = d.by === Sync._deviceId ? '(this device)' : '(OTHER device ✓ cross-device read works)';
-        log('BEFORE write, last by', d.by + ' ' + who);
-        log('  …at', new Date(d.at).toLocaleTimeString());
-      } else { log('BEFORE write', 'doc empty (first run)'); }
-    } catch (e) { log('server READ', '❌ ' + (e.code || e.message)); }
+    const base = Sync._orgRef();
 
-    // ── STEP 2: WRITE our own stamp ──────────────────────────────────────────
-    try {
-      await ref.set({ d: { by: Sync._deviceId, at: Date.now(), email: user ? user.email : null },
-                      ts: firebase.firestore.FieldValue.serverTimestamp(), by: Sync._deviceId });
-      log('server WRITE', '✅ committed at ' + new Date().toLocaleTimeString());
-    } catch (e) { log('server WRITE', '❌ ' + (e.code || e.message)); }
+    // ── LOCAL vs SERVER counts — the decisive comparison ─────────────────────
+    // Run on A right after you add/delete, then on B. Compares what's on this
+    // device vs what's actually on the Firestore server.
+    //   • A: local and server should MATCH (your change reached the server).
+    //   • B: server should match A; if B's LOCAL differs from server → B isn't
+    //     applying remote changes (apply/listener bug). If SERVER on B differs
+    //     from A → A's write never reached the server (push bug).
+    async function countDoc(docName, lsKey) {
+      let localN = '?';
+      try { const a = JSON.parse((Sync._localRead ? Sync._localRead(lsKey) : null) || '[]'); localN = Array.isArray(a) ? a.length : 'obj'; } catch {}
+      let serverN = '?';
+      try {
+        const s = await base.collection('data').doc(docName).get({ source: 'server' });
+        const d = s.exists ? s.data().d : null;
+        serverN = Array.isArray(d) ? d.length : (d ? 'obj' : 'missing');
+      } catch (e) { serverN = 'ERR ' + (e.code || e.message); }
+      log(docName + ' count', 'local=' + localN + '  server=' + serverN +
+          (localN === serverN ? '  ✓match' : '  ✗DIFFER'));
+    }
+    log('', '');
+    await countDoc('customers', 'wt_customers');
+    await countDoc('users_cfg', 'wt_users');
+    await countDoc('products',  'wt_products');
 
-    // ── STEP 3: LIVE LISTENER — the mechanism the app relies on ──────────────
-    // Attach onSnapshot to _diag. Keep this panel open on BOTH devices; when one
-    // device runs the diagnostic (writes), the OTHER device's listener must log
-    // the event here. If it never does (but STEP 1 read worked) → the real-time
-    // listener is broken in Tauri = the real bug.
-    if (_diagUnsub) { try { _diagUnsub(); } catch {} }
-    log('live listener', 'attached — keep open, write from other device');
-    _diagUnsub = ref.onSnapshot({ includeMetadataChanges: true }, (snap) => {
-      const d = snap.exists ? snap.data().d : null;
-      const t = new Date().toLocaleTimeString();
-      const by = d ? d.by : '?';
-      const mine = d && d.by === Sync._deviceId;
-      _diagEvents.push(`${t}  fromCache=${snap.metadata.fromCache}  by=${by}` + (mine ? '  (self)' : '  ◀ REMOTE ✓'));
-      paint();
-    }, (err) => { _diagEvents.push('listener ERROR: ' + err.code); paint(); });
-
+    // ── LIVE listener on the REAL customers + users docs ─────────────────────
+    // Keep this open on device B; add/delete a customer or user on device A.
+    // A line should appear here within seconds if B's listener gets the change.
+    [['customers','wt_customers'], ['users_cfg','wt_users']].forEach(([docName]) => {
+      const u = base.collection('data').doc(docName).onSnapshot({ includeMetadataChanges: true }, (snap) => {
+        const d = snap.exists ? snap.data().d : null;
+        const n = Array.isArray(d) ? d.length : (d ? 'obj' : '-');
+        const by = d && snap.data().by ? snap.data().by : '?';
+        const mine = by === Sync._deviceId;
+        _diagEvents.push(`${new Date().toLocaleTimeString()}  ${docName}  n=${n}  cache=${snap.metadata.fromCache}  by=${by}` + (mine ? ' (self)' : ' ◀REMOTE'));
+        paint();
+      }, (err) => { _diagEvents.push(docName + ' listener ERR: ' + err.code); paint(); });
+      _diagUnsub.push(u);
+    });
+    log('', '');
+    log('live monitor', 'attached to customers + users_cfg');
     paint();
   } catch (e) {
     out.textContent = head.join('\n') + '\n\n❌ ' + (e.message || e);
