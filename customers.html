@@ -414,7 +414,12 @@ window.addEventListener('DOMContentLoaded', () => {
   noteModal = new bootstrap.Modal(document.getElementById('noteModal'));
   suspendModal = new bootstrap.Modal(document.getElementById('suspendModal'));
   document.getElementById('searchInput').addEventListener('input', Utils.debounce(() => { _custPage = 1; render(); }, 200));
-  DB.ready.then(() => render());
+  DB.ready.then(() => {
+    render();
+    // If the local list is empty but Firestore has customers, pull them now so
+    // the page reflects the server (not just whatever happens to be in local).
+    _ensureCustomersFromFirestore();
+  });
 });
 
 // Re-render when a remote device pushes customer/invoice/payment changes
@@ -423,6 +428,34 @@ window.addEventListener('sync:updated', (e) => {
     _custPage = 1; render();
   }
 });
+// Re-render after the initial Firestore pull / when sync becomes ready, so the
+// page shows server data once it lands (it previously only listened to
+// sync:updated and missed the _pullAll() population → "renders local only").
+window.addEventListener('sync:pulled', () => { _custPage = 1; render(); });
+window.addEventListener('sync:ready',  () => { _ensureCustomersFromFirestore(); render(); });
+
+// Force-load customers from the Firestore collection into local when local is
+// empty. Direct + reliable — bypasses the pull/listener guard timing.
+async function _ensureCustomersFromFirestore() {
+  try {
+    if (typeof Sync === 'undefined' || !Sync._db || !Sync.COLLECTIONS) return;
+    if (DB.getCustomers().length > 0) return;           // already have data locally
+    const colName = Sync.COLLECTIONS['wt_customers'] || 'customers_v2';
+    const snap = await Sync._orgRef().collection(colName).get();
+    if (snap.empty) return;
+    // De-dupe by name (server may hold duplicate uploads), keep one per name
+    const byName = new Map();
+    snap.forEach(d => { const r = d.data() || {}; const { _by, _byName, _ts, ...rec } = r;
+      const n = rec.name != null ? String(rec.name) : d.id;
+      if (!byName.has(n)) byName.set(n, { ...rec, id: rec.id || d.id }); });
+    const list = [...byName.values()];
+    if (list.length && DB.getCustomers().length === 0) {
+      DB.saveCustomers(list);
+      _custPage = 1; render();
+      console.log('[customers] loaded ' + list.length + ' from Firestore');
+    }
+  } catch (e) { console.warn('[customers] ensure-from-firestore failed', e); }
+}
 
 function render() {
   const q = document.getElementById('searchInput').value.toLowerCase();
