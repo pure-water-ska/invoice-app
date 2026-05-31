@@ -316,8 +316,14 @@ window.addEventListener('DOMContentLoaded', () => {
     return;
   }
 
-  // Build customer list for searchable dropdown
-  window._custList = DB.getCustomers().sort((a,b)=>a.name.localeCompare(b.name,'th'));
+  // Build customer list for searchable dropdown.
+  // Defensive: a single record with a missing/non-string name used to throw in
+  // .localeCompare and abort the whole list build → empty customer box even when
+  // customers exist. Coerce names to strings and keep only records with an id.
+  window._custList = DB.getCustomers()
+    .filter(c => c && c.id)
+    .map(c => ({ ...c, name: (c.name == null ? '' : String(c.name)) }))
+    .sort((a,b) => a.name.localeCompare(b.name, 'th'));
 
   // ── Searchable customer dropdown helpers ───────────────────────────────────
   let _custHi = -1; // highlighted index

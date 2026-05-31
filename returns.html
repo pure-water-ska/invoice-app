@@ -305,7 +305,7 @@ function openReturnModal(id) {
   // populate customer datalist
   const dl = document.getElementById('returnCustDatalist');
   dl.innerHTML = '';
-  DB.getCustomers().sort((a,b) => a.name.localeCompare(b.name,'th')).forEach(c => {
+  DB.getCustomers().sort((a,b) => String(a.name||'').localeCompare(String(b.name||''),'th')).forEach(c => {
     dl.innerHTML += `<option value="${c.name}" data-id="${c.id}">`;
   });
 

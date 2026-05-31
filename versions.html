@@ -211,7 +211,7 @@ window.addEventListener('DOMContentLoaded', () => {
   BEDate.byId('filterFrom', { onChange: render });
   BEDate.byId('filterTo',   { onChange: render });
   DB.ready.then(() => {
-    const custs = DB.getCustomers().sort((a,b) => a.name.localeCompare(b.name,'th'));
+    const custs = DB.getCustomers().sort((a,b) => String(a.name||'').localeCompare(String(b.name||''),'th'));
     custs.forEach(c => {
       document.getElementById('filterCust').innerHTML += `<option value="${c.id}">${c.name}</option>`;
       document.getElementById('vCust').innerHTML      += `<option value="${c.id}">${c.name}</option>`;

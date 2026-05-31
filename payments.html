@@ -799,7 +799,7 @@ window.addEventListener('DOMContentLoaded', () => {
   DB.ready.then(() => {
     document.getElementById('bankDatalist').innerHTML = Utils.bankDatalistOptions();
 
-    DB.getCustomers().sort((a,b) => a.name.localeCompare(b.name,'th')).forEach(c => {
+    DB.getCustomers().sort((a,b) => String(a.name||'').localeCompare(String(b.name||''),'th')).forEach(c => {
       document.getElementById('custNameDatalist').innerHTML +=
         `<option value="${c.name}">`;
     });
@@ -2129,7 +2129,7 @@ function openMultiPayModal() {
     '<option value="">— เลือกลูกค้า —</option>' +
     customers
       .filter(c => custIds.has(c.id))
-      .sort((a, b) => a.name.localeCompare(b.name, 'th'))
+      .sort((a, b) => String(a.name||'').localeCompare(String(b.name||''), 'th'))
       .map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`)
       .join('');
 
