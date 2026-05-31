@@ -787,17 +787,27 @@ const DB = {
     // work. Deleting a FEW customers leaves the list non-empty, so this does NOT
     // resurrect individually-deleted customers — it only rebuilds a fully-empty
     // list. Runs regardless of wt_seed_done so a wiped device can recover.
-    if (this.getCustomers().length === 0) {
-      console.log('[DB] Customer list empty → restoring canonical default customers');
-      this._seedCustomers();
-    } else if (this._getObj('wt_cust_idnorm_v1', false) !== true) {
-      // One-time: remap old random-uuid seed customers to deterministic ids so
-      // all devices share identical ids (prerequisite for cross-device delete).
+    // ── ONE-TIME customer recovery/normalisation ─────────────────────────────
+    // Runs exactly ONCE per device (flag wt_cust_recover_v1). NOT every-empty —
+    // an every-empty restore made "delete all → comes back on refresh". After
+    // this one pass, customer deletions (including delete-all) are fully
+    // respected. On that single pass:
+    //   • empty list → restore canonical default customers (recovers a wiped
+    //     device), with DETERMINISTIC ids.
+    //   • non-empty   → remap any old random-uuid seed customers to the
+    //     deterministic ids so every device shares identical ids (prerequisite
+    //     for cross-device delete). Custom customers untouched.
+    if (this._getObj('wt_cust_recover_v1', false) !== true) {
       try {
-        if (this._normalizeCustomerIds()) console.log('[DB] Normalised customer ids to deterministic scheme');
-      } catch (e) { console.warn('[DB] customer id normalise failed', e); }
+        if (this.getCustomers().length === 0) {
+          console.log('[DB] One-time: restoring canonical default customers');
+          this._seedCustomers();
+        } else if (this._normalizeCustomerIds()) {
+          console.log('[DB] One-time: normalised customer ids to deterministic scheme');
+        }
+      } catch (e) { console.warn('[DB] customer recovery failed', e); }
+      this._set('wt_cust_recover_v1', true);
     }
-    this._set('wt_cust_idnorm_v1', true);
 
     // First-run catalog seed only — respects later user deletions
     if (this._getObj('wt_seed_done', false) !== true) {
