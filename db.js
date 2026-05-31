@@ -797,16 +797,28 @@ const DB = {
     //   • non-empty   → remap any old random-uuid seed customers to the
     //     deterministic ids so every device shares identical ids (prerequisite
     //     for cross-device delete). Custom customers untouched.
-    if (this._getObj('wt_cust_recover_v1', false) !== true) {
+    // EMPTY list → restore canonical defaults ONCE (flag) so "delete all" is not
+    // resurrected on every refresh. NON-EMPTY → normalise/dedupe EVERY launch.
+    //
+    // Why normalise every launch: the same customer can exist with TWO ids — a
+    // deterministic one (cust-seed-N) and an old random-uuid one seeded
+    // independently on another device. Deleting one id leaves the duplicate, so
+    // deletes appear not to work. _normalizeCustomerIds() remaps seed customers
+    // to their deterministic id BY NAME and de-dupes; saving the deduped list
+    // makes the normal sync DELETE the leftover random-id docs from the server
+    // (syncDeletedIds). It is idempotent — once every device is on deterministic
+    // ids it changes nothing — so running it each launch safely CONVERGES all
+    // devices to one canonical id per customer, which is what makes delete work.
+    if (this.getCustomers().length === 0) {
+      if (this._getObj('wt_cust_restored_v1', false) !== true) {
+        console.log('[DB] Restoring canonical default customers (one-time)');
+        this._seedCustomers();
+        this._set('wt_cust_restored_v1', true);
+      }
+    } else {
       try {
-        if (this.getCustomers().length === 0) {
-          console.log('[DB] One-time: restoring canonical default customers');
-          this._seedCustomers();
-        } else if (this._normalizeCustomerIds()) {
-          console.log('[DB] One-time: normalised customer ids to deterministic scheme');
-        }
-      } catch (e) { console.warn('[DB] customer recovery failed', e); }
-      this._set('wt_cust_recover_v1', true);
+        if (this._normalizeCustomerIds()) console.log('[DB] Normalised/de-duped customer ids');
+      } catch (e) { console.warn('[DB] customer normalise failed', e); }
     }
 
     // First-run catalog seed only — respects later user deletions
