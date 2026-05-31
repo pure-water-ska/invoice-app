@@ -1997,9 +1997,31 @@ async function forceMigrateCustomers() {
     if (!colName) { L.push('❌ This build still treats customers as a DOCUMENT — update the app.'); paint(); return; }
     const local = (window.DB ? DB.getCustomers() : []) || [];
     L.push('local customers (this device): ' + local.length); paint();
+
+    // RECOVER STRANDED DATA: the old whole-array document (data/customers) still
+    // holds the customers from before the collection migration. Devices whose
+    // local list was wiped have 0 locally and the app no longer reads that old
+    // doc — so pull it from the server, merge with local, and seed customers_v2.
+    let oldArr = [];
+    try {
+      const oldDoc = await Sync._orgRef().collection('data').doc('customers').get({ source: 'server' });
+      if (oldDoc.exists && Array.isArray(oldDoc.data().d)) oldArr = oldDoc.data().d;
+    } catch (e) { L.push('(could not read old data/customers: ' + (e.code || e.message) + ')'); }
+    L.push('old data/customers doc: ' + oldArr.length + ' records'); paint();
+
+    // Merge local + old by id (union); also pull whatever is already in customers_v2.
+    const byId = new Map();
+    try {
+      const existing = await Sync._orgRef().collection(colName).get({ source: 'server' });
+      existing.forEach(d => { const r = d.data(); if (r && r.id) byId.set(String(r.id), r); });
+    } catch {}
+    [...oldArr, ...local].forEach(c => { if (c && c.id) byId.set(String(c.id), c); });
+    const merged = [...byId.values()];
+    L.push('merged unique customers to migrate: ' + merged.length); paint();
+
     const col = Sync._orgRef().collection(colName);
     let ok = 0, err = 0, noId = 0, firstErr = '';
-    for (const c of local) {
+    for (const c of merged) {
       if (!c || !c.id) { noId++; continue; }
       try {
         await col.doc(String(c.id)).set({ ...c, _by: Sync._deviceId, _byName: Sync._deviceName(), _ts: Date.now() });
@@ -2009,11 +2031,16 @@ async function forceMigrateCustomers() {
     }
     L.push(`pushed: ok=${ok}  err=${err}  no-id=${noId}`);
     if (firstErr) L.push('first error: ' + firstErr);
+    // Restore the merged set to LOCAL so this device shows the recovered customers.
+    try {
+      if (merged.length > 0 && window.DB) { DB.saveCustomers(merged); L.push('restored ' + merged.length + ' customers to this device'); }
+    } catch (e) { L.push('(local restore failed: ' + (e.message || e) + ')'); }
     const all = await col.get({ source: 'server' });
     L.push('customers_v2 docs on server now: ' + all.size);
-    L.push(all.size > 0 ? '✅ Migration populated. Reopen the app; deletes will now persist.'
-                        : '⚠️ Still 0 — see error above / local count.');
+    L.push(all.size > 0 ? '✅ Migration populated. Customers recovered + deletes will now persist. Reopen the app on every device.'
+                        : '⚠️ Still 0 — local AND old data/customers were both empty on this device. Run this on the device that still shows your customers.');
     paint();
+    if (merged.length > 0) { try { window.dispatchEvent(new CustomEvent('sync:pulled')); } catch {} }
   } catch (e) { L.push('❌ ' + (e.code || '') + ' ' + (e.message || e)); paint(); }
 }
 
