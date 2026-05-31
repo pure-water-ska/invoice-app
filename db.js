@@ -790,7 +790,14 @@ const DB = {
     if (this.getCustomers().length === 0) {
       console.log('[DB] Customer list empty → restoring canonical default customers');
       this._seedCustomers();
+    } else if (this._getObj('wt_cust_idnorm_v1', false) !== true) {
+      // One-time: remap old random-uuid seed customers to deterministic ids so
+      // all devices share identical ids (prerequisite for cross-device delete).
+      try {
+        if (this._normalizeCustomerIds()) console.log('[DB] Normalised customer ids to deterministic scheme');
+      } catch (e) { console.warn('[DB] customer id normalise failed', e); }
     }
+    this._set('wt_cust_idnorm_v1', true);
 
     // First-run catalog seed only — respects later user deletions
     if (this._getObj('wt_seed_done', false) !== true) {
@@ -862,7 +869,9 @@ const DB = {
     });
   },
 
-  _seedCustomers() {
+  // Canonical default customer list with DETERMINISTIC ids (cust-seed-N by index).
+  // Single source of truth used by both seeding and id-normalisation.
+  _defaultCustomers() {
     const now = new Date().toISOString();
     const note = (text) => [{ id: Utils.uuid(), text, createdAt: now, createdBy: 'ระบบ' }];
     const customers = [
@@ -965,16 +974,41 @@ const DB = {
       { name: 'ยิ้มแย้ม',                             address: '146 ม.14 ต.สตูล อ.เมืองสตูล จ.สตูล',                         phone: '099-4782177, 087-4752493',  taxId: '',             brand: '', notes: [] },
       { name: 'H2O ป้าก',                             address: '',                                                            phone: '099-9584119',               taxId: '',             brand: '', notes: [] },
     ];
-    // DETERMINISTIC ids — every device/seed-run produces the SAME id for the
-    // same customer. Previously this used Utils.uuid() so each device seeded the
-    // identical customer list with DIFFERENT ids → a delete on one device never
-    // matched the other device's copy → deletes never propagated, and re-seeding
-    // created fresh-id duplicates ("data comes back"). Stable ids fix both.
-    const seeded = customers.map((c, i) => ({ id: 'cust-seed-' + (i + 1), ...c, createdAt: now }));
+    // DETERMINISTIC ids — every device produces the SAME id for the same
+    // customer (random uuids previously caused cross-device id mismatch → deletes
+    // never propagated + re-seed duplicates).
+    return customers.map((c, i) => ({ id: 'cust-seed-' + (i + 1), ...c, createdAt: now }));
+  },
+
+  _seedCustomers() {
+    const seeded   = this._defaultCustomers();
     const existing = this.getCustomers();
-    const haveIds = new Set(existing.filter(c => c && c.id).map(c => c.id));
-    const merged = [...existing, ...seeded.filter(c => !haveIds.has(c.id))];
-    this.saveCustomers(merged);
+    const haveIds  = new Set(existing.filter(c => c && c.id).map(c => c.id));
+    this.saveCustomers([...existing, ...seeded.filter(c => !haveIds.has(c.id))]);
+  },
+
+  // ── One-time: normalise seed-customer ids to the deterministic scheme ──────
+  // Devices that kept the OLD random-uuid seed customers have different ids for
+  // the same customer than devices that restored the deterministic set → a
+  // delete on one never matches the other. Remap by NAME to the canonical
+  // deterministic id so every device converges. Custom (non-seed) customers are
+  // left untouched. Returns true if anything changed.
+  _normalizeCustomerIds() {
+    const nameToId = new Map(this._defaultCustomers().map(c => [c.name, c.id]));
+    const cur = this.getCustomers();
+    let changed = false;
+    const remapped = cur.map(c => {
+      if (!c) return c;
+      const detId = nameToId.get(c.name);
+      if (detId && c.id !== detId) { changed = true; return { ...c, id: detId }; }
+      return c;
+    });
+    if (!changed) return false;
+    // De-dupe by id (a device might have had both a random-id and deterministic copy)
+    const byId = new Map();
+    remapped.forEach(c => { if (c && c.id) byId.set(c.id, c); });
+    this.saveCustomers([...byId.values()]);
+    return true;
   },
 
   _seedPricing() {
