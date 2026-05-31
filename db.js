@@ -778,10 +778,23 @@ const DB = {
       });
     }
 
+    // ── Auto-recover the canonical customer list when EMPTY ───────────────────
+    // The customer list is the business's master data and ships hardcoded in
+    // _seedCustomers() with DETERMINISTIC ids. If a device's list is empty (lost
+    // through the earlier sync chaos / a wipe), restore it on launch. Because ids
+    // are deterministic this is idempotent and converges across devices (every
+    // device gets the SAME ids), which is exactly what makes cross-device delete
+    // work. Deleting a FEW customers leaves the list non-empty, so this does NOT
+    // resurrect individually-deleted customers — it only rebuilds a fully-empty
+    // list. Runs regardless of wt_seed_done so a wiped device can recover.
+    if (this.getCustomers().length === 0) {
+      console.log('[DB] Customer list empty → restoring canonical default customers');
+      this._seedCustomers();
+    }
+
     // First-run catalog seed only — respects later user deletions
     if (this._getObj('wt_seed_done', false) !== true) {
       if (this.getProducts().length === 0)  this._seedProducts();
-      if (this.getCustomers().length === 0) this._seedCustomers();
       if (this.getPricing().length === 0)   this._seedPricing();
       this._set('wt_seed_done', true);
     }
