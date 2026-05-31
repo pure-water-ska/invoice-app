@@ -936,17 +936,17 @@ var Sync = {
         this._ignoreUntil[key] = Date.now() + this._skipInitialMs;
       }
 
-      // Update the PERSISTED server-id set for ALL collections: remove the ids we
-      // just deleted, add the current local ids. Persisting (not replacing) keeps
-      // archive ids for invoices/payments, and for every collection it records
-      // exactly which ids exist on the server so a later pull can tell deleted
-      // records from new ones (the "delete comes back" fix).
-      {
+      // Update cached server IDs to reflect the new local state.
+      // Invoices: MERGE into the persisted set (keeps archive ids outside the
+      // window). Other collections: replace with current local ids.
+      if (colName === 'invoices') {
         const persisted = this._loadSavedServerIds(colName);
         syncDeletedIds.forEach(id => persisted.delete(id));
         localIds.forEach(id => persisted.add(id));
         this._serverIds[colName] = persisted;
         this._saveServerIds(colName);
+      } else {
+        this._serverIds[colName] = new Set(localIds);
       }
 
       // ── Opt ③: diff against last-synced fingerprints — only write changed/new records ──
@@ -1031,12 +1031,13 @@ var Sync = {
         const localArr = JSON.parse(raw || '[]');
         if (Array.isArray(localArr)) {
           const ids = new Set(localArr.filter(r => r.id).map(r => r.id));
-          // ALL collections: keep the persisted "ever-seen on server" set as the
-          // authoritative base (so deletion detection works), unioned with current
-          // local ids.
-          const persisted = this._loadSavedServerIds(colName);
-          ids.forEach(id => persisted.add(id));
-          this._serverIds[colName] = persisted;
+          if (colName === 'invoices' || colName === 'payments') {
+            const persisted = this._loadSavedServerIds(colName);
+            ids.forEach(id => persisted.add(id));
+            this._serverIds[colName] = persisted;
+          } else {
+            this._serverIds[colName] = new Set(ids);
+          }
           // CRITICAL: restore _pullIds from sessionStorage (set by the real _pullAll() Firestore
           // query at session start) — NOT from all local IDs.  Local-only records (created after
           // _pullAll(), not yet pushed) must not be in _pullIds or the listener will treat their
@@ -1269,13 +1270,11 @@ var Sync = {
         } catch {}
         return;
       }
-      // ── Seed _serverIds from the PERSISTED "ids ever seen on the server" set ──
-      // (ALL collections, not just invoices/payments). This is what lets the
-      // merge below tell a record DELETED on the server (was in the set, gone
-      // from the snapshot → drop) from one created locally not yet synced (never
-      // in the set → push). Without it a deleted record looks "new" and gets
-      // re-uploaded — the "delete comes back" bug for customers.
-      this._serverIds[colName] = this._loadSavedServerIds(colName);
+      // Archive collections seed _serverIds from the persisted set (date-windowed
+      // pull won't include archive ids). Other collections seed from the snapshot.
+      if (colName === 'invoices' || colName === 'payments') {
+        this._serverIds[colName] = this._loadSavedServerIds(colName);
+      }
       // ── Date-filtered Firestore query for archive collections ─────────────────
       // Both invoices and payments are filtered to the last ARCHIVE_MONTHS to stay
       // within Firestore read quotas and page-load budgets.
@@ -1291,8 +1290,12 @@ var Sync = {
           // Cache server IDs — used by _writeKey() to tombstone deletions synchronously.
           // Archive collections: MERGE fetched IDs into the seeded persisted set (not replace)
           // so archived records outside the window remain tombstone-trackable.
-          snap.docs.forEach(d => this._serverIds[colName].add(d.id));
-          this._saveServerIds(colName);
+          if (colName === 'invoices' || colName === 'payments') {
+            snap.docs.forEach(d => this._serverIds[colName].add(d.id));
+            this._saveServerIds(colName);
+          } else {
+            this._serverIds[colName] = new Set(snap.docs.map(d => d.id));
+          }
           // Cache pull IDs — used by listener to tell "new this session" from "deleted on another device".
           // Also persist to sessionStorage so _seedStateFromLocalStorage() can restore the exact same set
           // on subsequent page navigations (instead of re-computing from all local IDs, which would
@@ -1328,28 +1331,31 @@ var Sync = {
               );
               if (localOnly.length > 0) {
                 const isArchive = (colName === 'invoices' || colName === 'payments');
-                // A local record missing from the server snapshot is either:
-                //   • genuinely NEW (never on the server → not in knownServerIds) → push it
-                //   • or it WAS on the server and is now gone:
-                //       – archive collection → it's just outside the date window → KEEP locally
-                //       – non-archive collection → it was DELETED on another device → DROP it
-                //         (this is the fix: previously these were re-uploaded → "delete comes back")
-                const toSync      = localOnly.filter(r => !knownServerIds.has(r.id));
-                const wasOnServer = localOnly.filter(r =>  knownServerIds.has(r.id));
-                const toKeepLocal = isArchive ? wasOnServer : [];
-                if (!isArchive && wasOnServer.length > 0) {
-                  // Remove the deleted ids from the persisted server-id set so they
-                  // are not considered "known" again, and don't get re-added.
-                  wasOnServer.forEach(r => this._serverIds[colName].delete(r.id));
-                  this._saveServerIds(colName);
-                  console.log(`[Sync] Merge: dropped ${wasOnServer.length} server-deleted ${colName} record(s)`);
+                // SAFE policy for _pullAll merge (no data loss, no resurrection):
+                //   • Archive collections (invoices/payments): records that were on
+                //     the server (in knownServerIds) but outside the date window are
+                //     KEPT locally; genuinely-new ones are pushed.
+                //   • Non-archive collections (customers, …): KEEP every local-only
+                //     record locally, but NEVER re-upload it from the pull. Re-
+                //     uploading was what resurrected deleted records on other
+                //     devices ("delete comes back"). A genuinely-new record is
+                //     pushed by its own DB._set→push, so we lose nothing. The
+                //     real-time listener (pullIds-based) removes records actually
+                //     deleted on another device. We never DROP here, so a transient
+                //     or partial snapshot can never wipe local data.
+                let toSync, toKeepLocal;
+                if (isArchive) {
+                  toSync      = localOnly.filter(r => !knownServerIds.has(r.id));
+                  toKeepLocal = localOnly.filter(r =>  knownServerIds.has(r.id));
+                  for (const rec of toSync) {
+                    try { await base.collection(colName).doc(rec.id).set({ ...rec, _by: this._deviceId, _ts: Date.now() }); this._serverIds[colName].add(rec.id); } catch {}
+                  }
+                  if (toSync.length) this._saveServerIds(colName);
+                } else {
+                  toSync = [];
+                  toKeepLocal = localOnly;   // keep all locally, never re-upload from a pull
                 }
-                console.log(`[Sync] Merge: ${toSync.length} new-to-Firestore + ${toKeepLocal.length} kept-local for ${colName}`);
-                // Push genuinely-new records to Firestore so they survive the next pull
-                for (const rec of toSync) {
-                  try { await base.collection(colName).doc(rec.id).set({ ...rec, _by: this._deviceId, _ts: Date.now() }); this._serverIds[colName].add(rec.id); } catch {}
-                }
-                if (toSync.length) this._saveServerIds(colName);
+                console.log(`[Sync] Merge ${colName}: kept ${toKeepLocal.length} local${isArchive ? ', pushed ' + toSync.length : ' (no re-upload)'}`);
                 const merged = [...fsArr, ...toSync, ...toKeepLocal];
                 this._lsWrite(lsKey, merged);
                 if (window.DB) DB.invalidate(lsKey);
