@@ -100,6 +100,8 @@ var Sync = {
       ids.forEach(id => { all[colName][id] = now; });
       localStorage.setItem(this._tombstoneKey, JSON.stringify(all));
     } catch {}
+    // Propagate the deletion to other devices via Firestore
+    this._fsPushDeletions(colName, ids);
   },
 
   _clearTombstones(colName, ids) {
@@ -110,6 +112,98 @@ var Sync = {
       if (!Object.keys(all[colName]).length) delete all[colName];
       if (!Object.keys(all).length) localStorage.removeItem(this._tombstoneKey);
       else localStorage.setItem(this._tombstoneKey, JSON.stringify(all));
+    } catch {}
+    // Propagate the un-delete to other devices
+    this._fsClearDeletions(colName, ids);
+  },
+
+  // ── Firestore-propagated deletions ─────────────────────────────────────────
+  // Array DOCUMENTS (customers, users, products…) are stored whole. When one
+  // device deletes a record, another device that still has it would re-merge it
+  // back as a "local-only" record — so the delete never sticks across devices.
+  // A shared doc data/_deletions records every deleted ID per docName; all
+  // devices read it, drop those IDs, and never re-upload them. This is what
+  // makes a delete on device A propagate to device B.
+  _deletionsDoc: '_deletions',
+
+  _fsDeletionsRef() {
+    return this._orgRef().collection('data').doc(this._deletionsDoc);
+  },
+
+  // Record deletions in Firestore (best-effort, field-path merge so concurrent
+  // device writes don't clobber each other).
+  _fsPushDeletions(name, ids) {
+    if (!this._db || !ids || !ids.length) return;
+    try {
+      const ref = this._fsDeletionsRef();
+      const now = Date.now();
+      const updates = { ts: firebase.firestore.FieldValue.serverTimestamp(), by: this._deviceId };
+      ids.forEach(id => { updates[`d.${name}.${id}`] = now; });
+      ref.update(updates).catch(() => {
+        // Doc doesn't exist yet → create it
+        const d = {}; d[name] = {}; ids.forEach(id => { d[name][id] = now; });
+        ref.set({ d, ts: firebase.firestore.FieldValue.serverTimestamp(), by: this._deviceId }, { merge: true }).catch(() => {});
+      });
+    } catch {}
+  },
+
+  // Remove deletion entries (when a record with the same id is re-added)
+  _fsClearDeletions(name, ids) {
+    if (!this._db || !ids || !ids.length) return;
+    try {
+      const ref = this._fsDeletionsRef();
+      const updates = {};
+      ids.forEach(id => { updates[`d.${name}.${id}`] = firebase.firestore.FieldValue.delete(); });
+      ref.update(updates).catch(() => {});
+    } catch {}
+  },
+
+  // Merge a Firestore deletions map { docName: { id: ts } } INTO the local
+  // tombstone store WITHOUT re-pushing (avoids a loop). Timestamps are refreshed
+  // to "now" so a Firestore-sourced deletion never expires via the local TTL
+  // while it still exists server-side. Returns the set of affected docNames.
+  _mergeDeletionsLocal(dmap) {
+    const affected = new Set();
+    if (!dmap || typeof dmap !== 'object') return affected;
+    try {
+      const all = JSON.parse(localStorage.getItem(this._tombstoneKey) || '{}');
+      const now = Date.now();
+      for (const [name, ids] of Object.entries(dmap)) {
+        if (!ids || typeof ids !== 'object') continue;
+        if (!all[name]) all[name] = {};
+        for (const id of Object.keys(ids)) {
+          all[name][id] = now;           // refresh ts so TTL doesn't expire it
+          affected.add(name);
+        }
+      }
+      localStorage.setItem(this._tombstoneKey, JSON.stringify(all));
+    } catch {}
+    return affected;
+  },
+
+  // Fetch the Firestore deletions doc → merge into local store. Called early in
+  // _pullAll so the document filters drop deleted records on every device.
+  async _pullDeletions() {
+    if (!this._db) return new Set();
+    try {
+      const doc = await this._fsDeletionsRef().get();
+      if (doc.exists && doc.data() && doc.data().d) {
+        return this._mergeDeletionsLocal(doc.data().d);
+      }
+    } catch (e) { console.warn('[Sync] pull deletions:', e.message); }
+    return new Set();
+  },
+
+  // Push all local tombstones up to Firestore — covers deletions made while
+  // offline or before sync was ready (e.g. tombstones written by DB._set).
+  _flushTombstonesToFs() {
+    if (!this._db) return;
+    try {
+      const all = JSON.parse(localStorage.getItem(this._tombstoneKey) || '{}');
+      for (const [name, ids] of Object.entries(all)) {
+        const idList = Object.keys(ids || {});
+        if (idList.length) this._fsPushDeletions(name, idList);
+      }
     } catch {}
   },
 
@@ -921,6 +1015,13 @@ var Sync = {
     // session — only ~14 extra reads per login, a negligible Firestore cost.
     try { localStorage.removeItem('wt_sync_doc_ts'); } catch {}
 
+    // ── Cross-device deletions ───────────────────────────────────────────────
+    // Pull the shared deletions doc FIRST (so the document filters below drop
+    // records other devices deleted), then push our own local tombstones up
+    // (covers deletes made offline / before sync was ready).
+    await this._pullDeletions();
+    this._flushTombstonesToFs();
+
     // ── Delta pull timing ────────────────────────────────────────────────────
     // For DOCUMENTS: skip the Firestore .get() entirely if the doc hasn't changed
     // since our last pull (checked via the server ts field stored in _lastDocTs).
@@ -1207,6 +1308,42 @@ var Sync = {
     // Note: synchronizeTabs:false means secondary tabs don't use fromCache, so both
     // DOCUMENTS and COLLECTIONS listeners can safely guard on fromCache (see below).
     const shouldSkip = (lsKey) => Date.now() < (this._ignoreUntil[lsKey] || 0);
+
+    // ── Real-time deletions listener ─────────────────────────────────────────
+    // When another device deletes a record it writes to data/_deletions. Merge
+    // those IDs into the local tombstone store and immediately filter them out
+    // of the affected local DOCUMENT arrays so the deletion shows up live
+    // (no refresh needed) and is never re-uploaded.
+    const unsubDel = this._fsDeletionsRef().onSnapshot((doc) => {
+      if (!doc.exists || !doc.data() || !doc.data().d) return;
+      const affected = this._mergeDeletionsLocal(doc.data().d);
+      if (!affected.size) return;
+      // Map docName → lsKey so we can rewrite the local array
+      const docToLs = {};
+      for (const [lsKey, dn] of Object.entries(this.DOCUMENTS)) docToLs[dn] = lsKey;
+      let anyChange = false;
+      affected.forEach(name => {
+        const lsKey = docToLs[name];
+        if (!lsKey) return;
+        try {
+          const arr = JSON.parse(this._localRead(lsKey) || '[]');
+          if (!Array.isArray(arr)) return;
+          const filtered = this._filterArrayTombstones(name, arr);
+          if (filtered.length !== arr.length) {
+            this._lsWrite(lsKey, filtered);
+            if (window.DB) DB.invalidate(lsKey);
+            this._lastDocJson[lsKey] = JSON.stringify(filtered);
+            this._lastDocIds[name] = new Set(filtered.filter(r => r && r.id).map(r => r.id));
+            anyChange = true;
+          }
+        } catch {}
+      });
+      if (anyChange) {
+        window.dispatchEvent(new CustomEvent('sync:updated'));
+        window.dispatchEvent(new CustomEvent('sync:pulled'));
+      }
+    }, (err) => console.warn('[Sync] deletions listener:', err.code, err.message));
+    this._unsubscribers.push(unsubDel);
 
     // Listen to document keys
     for (const [lsKey, docName] of Object.entries(this.DOCUMENTS)) {

@@ -206,6 +206,11 @@ window.addEventListener('DOMContentLoaded', () => {
   DB.ready.then(() => render());
 });
 
+// Re-render when users sync in from another device (new account, edit, delete)
+window.addEventListener('sync:updated', () => render());
+window.addEventListener('sync:pulled',  () => render());
+window.addEventListener('sync:ready',   () => render());
+
 function render() {
   const users = DB.getUsers();
   const logins = DB.getLogins();
