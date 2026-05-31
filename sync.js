@@ -1589,7 +1589,17 @@ var Sync = {
           async (snap) => {
           // Track fromCache BEFORE any guards so the banner always reflects reality
           this._emitConnectionState(snap.metadata.fromCache);
-          if (shouldSkip(lsKey)) return;
+          // Does this snapshot contain records we DON'T have locally? If so we are
+          // MISSING data (e.g. a device whose list is empty while the server has
+          // records). Applying missing records is pure addition (union) — always
+          // safe — so we bypass the initial ignore-window and the fromCache guard
+          // in that case, otherwise an empty device never populates from the server.
+          let _hasMissing = false;
+          try {
+            const _localIds = new Set(JSON.parse(this._localRead(lsKey) || '[]').filter(r => r && r.id).map(r => r.id));
+            _hasMissing = snap.docs.some(d => !_localIds.has(d.id));
+          } catch {}
+          if (!_hasMissing && shouldSkip(lsKey)) return;
           // Skip if a debounced local write is still pending — local state is
           // authoritative during this window and must not be overwritten by a
           // Firestore snapshot that predates our write (e.g. a snapshot showing
@@ -1607,7 +1617,7 @@ var Sync = {
           // arrives.  _pullAll() already handled the initial IndexedDB read, so skipping
           // fromCache here is safe.  With synchronizeTabs:false, updates from other devices
           // always arrive fromCache:false, so no real-time changes are lost.
-          if (!snap.metadata.hasPendingWrites && snap.metadata.fromCache) {
+          if (!_hasMissing && !snap.metadata.hasPendingWrites && snap.metadata.fromCache) {
             console.log(`[Sync] Col listener skip: fromCache snapshot for ${colName} (stale cache guard)`);
             return;
           }
@@ -1621,7 +1631,9 @@ var Sync = {
           // on the server. Remove them locally unconditionally — this is a reliable
           // signal (unlike the pullIds inference below, which fails to recognise a
           // delete when pullIds is missing the id, leaving the record on screen).
-          const removedIds = new Set(
+          // Only honor removals from a SERVER snapshot — a fromCache snapshot can
+          // report spurious removals from a stale/incomplete cache.
+          const removedIds = snap.metadata.fromCache ? new Set() : new Set(
             docChanges.filter(c => c.type === 'removed').map(c => c.doc.id)
           );
           // Apply tombstones — prevents snapshots from restoring records
