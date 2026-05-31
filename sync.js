@@ -291,9 +291,21 @@ var Sync = {
     } catch { return false; }
   },
 
-  // Apply an authoritative server array (from _pullAll or the listener) to local
-  // storage, correctly distinguishing remote DELETIONS from local-only additions.
-  // Returns the array actually written locally.
+  // Apply a server array (from _pullAll or the listener) to local storage using
+  // UNION + EXPLICIT-TOMBSTONE deletion. This is the only safe rule for a whole-
+  // document array shared by multiple devices:
+  //
+  //   • A record present locally but MISSING from the incoming snapshot is KEPT
+  //     (union) UNLESS it is explicitly tombstoned in the _deletions doc.
+  //   • A record present in the snapshot is added.
+  //   • Tombstoned records are dropped from the result.
+  //
+  // Why union (not "missing = deleted"): a device with stale/empty data pushes
+  // its whole array too; if "missing = deleted" we would wipe the other device's
+  // real records on receipt of that smaller array (observed: an empty device
+  // pushing n=0 made the full device drop everything → clobber war + data loss).
+  // Real deletions are carried explicitly by the _deletions doc, so union loses
+  // nothing while still honouring deletes.
   _applyArrayDoc(lsKey, docName, fsVal) {
     if (!Array.isArray(fsVal)) fsVal = [];
     const fsIds = new Set(fsVal.filter(r => r && r.id).map(r => r.id));
@@ -301,23 +313,11 @@ var Sync = {
     try { localArr = JSON.parse(this._localRead(lsKey) || '[]'); } catch {}
     if (!Array.isArray(localArr)) localArr = [];
 
-    const known      = this._knownDocIds(docName);
-    const haveKnown  = this._hasKnownDocIds(docName);
-    const localMissing = localArr.filter(r => r && r.id && !fsIds.has(r.id));
+    // Union: server records + local records the server snapshot doesn't have.
+    const localOnly = localArr.filter(r => r && r.id && !fsIds.has(r.id));
+    let result = localOnly.length > 0 ? [...fsVal, ...localOnly] : fsVal;
 
-    // A locally-present record that is NOT in the server snapshot is:
-    //   • a DELETION  → if its id was confirmed on the server before (known set)
-    //                   OR it is tombstoned (_deletions doc). Drop it.
-    //   • a NEW local → otherwise (created offline, never synced). Preserve it.
-    // On the very first apply of a session (no known set yet) we fall back to the
-    // tombstone/_deletions check only, so a fresh device can't wrongly resurrect.
-    const stones = this._getTombstones(docName);
-    const isDeleted = (id) =>
-      (haveKnown && known.has(id)) || (stones[id] !== undefined);
-    const newLocal = localMissing.filter(r => !isDeleted(r.id));
-
-    let result = newLocal.length > 0 ? [...fsVal, ...newLocal] : fsVal;
-    // Drop anything tombstoned (covers records still lingering in fsVal)
+    // Apply explicit deletions (the ONLY way a record is removed).
     result = this._filterArrayTombstones(docName, result);
 
     this._lsWrite(lsKey, result);
@@ -327,9 +327,13 @@ var Sync = {
     this._lastDocIds[docName] = resultIds;
     this._lastDocJson[lsKey] = JSON.stringify(result);
 
-    // If we kept genuinely-new local records, push the merged array up so the
-    // server (and other devices) converge on it.
-    if (newLocal.length > 0) {
+    // Re-upload only when our union actually added something the server lacked,
+    // OR when tombstones trimmed records still present in the snapshot — so all
+    // devices converge. When result equals fsVal we DON'T re-push (prevents the
+    // ping-pong write loop between devices).
+    const changedVsServer = result.length !== fsVal.length ||
+      result.some(r => r && r.id && !fsIds.has(r.id));
+    if (changedVsServer) {
       this._writeKey(lsKey, result).catch(e =>
         console.warn('[Sync] array-doc reupload failed:', docName, e.message));
     }
