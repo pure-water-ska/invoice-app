@@ -1988,19 +1988,27 @@ async function runSyncDiagnostic() {
 // once clears that poison so the UNION merge can restore data; afterwards only
 // small, intentional deletions are tombstoned.
 async function clearSyncDeletions() {
-  if (!confirm('รีเซ็ตรายการลบทั้งหมด?\n\nใช้เพื่อกู้ข้อมูล (ลูกค้า/ผู้ใช้) ที่หายไปจากการซิงค์ผิดพลาด ' +
-               'ข้อมูลจะถูกรวม (union) กลับมาจากทุกเครื่อง\n\nทำครั้งเดียว แล้วรีเฟรชทุกเครื่อง')) return;
-  try { localStorage.removeItem('wt_sync_tombstones'); } catch {}
+  if (!confirm('ซ่อมการซิงค์ / รีเซ็ต?\n\n' +
+               '• ล้างคิวค้าง + รายการลบ + สถานะซิงค์ในเครื่องนี้\n' +
+               '• ดึงข้อมูลใหม่ทั้งหมดจากเซิร์ฟเวอร์ แล้วรวม (union)\n\n' +
+               'แนะนำ: กดที่ "เครื่องที่ข้อมูลครบ" ก่อน จากนั้นเปิดแอปใหม่ทุกเครื่อง')) return;
+  // Clear ALL stuck local sync state — a leftover pending-write queue (e.g. from
+  // an earlier delete-all) can make a device keep pushing an empty array and
+  // fighting the device that has the real data. Forcing a fresh full pull lets
+  // the UNION merge pull everything back.
+  const keys = ['wt_sync_pending', 'wt_sync_tombstones', 'wt_sync_known_doc_ids',
+                'wt_sync_doc_ts', 'wt_sync_sids', 'wt_sync_pull_ids', 'wt_sync_lastPulledAt'];
+  keys.forEach(k => { try { localStorage.removeItem(k); } catch {} ; try { sessionStorage.removeItem(k); } catch {} });
+  try { sessionStorage.removeItem('wt_sync_session_pulled'); } catch {}  // force a fresh _pullAll
   try {
     if (typeof Sync !== 'undefined' && Sync._db && Sync._fsDeletionsRef) {
       await Sync._fsDeletionsRef().set({
         d: {}, ts: firebase.firestore.FieldValue.serverTimestamp(), by: Sync._deviceId
       });
     }
-    Utils.showAlert('<i class="bi bi-check-circle me-1"></i>ล้างรายการลบแล้ว — รีเฟรช/เปิดแอปใหม่ทุกเครื่องเพื่อให้ข้อมูลรวมกลับมา', 'success');
-  } catch (e) {
-    Utils.showAlert('ล้มเหลว: ' + (e.message || e), 'danger');
-  }
+  } catch (e) { console.warn('reset _deletions:', e); }
+  Utils.showAlert('<i class="bi bi-check-circle me-1"></i>ล้างสถานะซิงค์แล้ว — กำลังโหลดใหม่…', 'success');
+  setTimeout(() => location.reload(), 1200);
 }
 
 // ── Update-progress helpers ────────────────────────────────────────────────
