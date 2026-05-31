@@ -2016,8 +2016,20 @@ async function forceMigrateCustomers() {
       existing.forEach(d => { const r = d.data(); if (r && r.id) byId.set(String(r.id), r); });
     } catch {}
     [...oldArr, ...local].forEach(c => { if (c && c.id) byId.set(String(c.id), c); });
-    const merged = [...byId.values()];
+    let merged = [...byId.values()];
     L.push('merged unique customers to migrate: ' + merged.length); paint();
+
+    // If everything is empty everywhere, restore the canonical default customer
+    // list (now with DETERMINISTIC ids) so every device ends up with identical
+    // ids — the prerequisite for cross-device delete to work.
+    if (merged.length === 0 && window.DB && typeof DB._seedCustomers === 'function') {
+      L.push('all sources empty → restoring default customer list…'); paint();
+      try { DB._seedCustomers(); merged = DB.getCustomers(); L.push('restored ' + merged.length + ' default customers'); }
+      catch (e) { L.push('restore failed: ' + (e.message || e)); }
+      byId.clear(); merged.forEach(c => { if (c && c.id) byId.set(String(c.id), c); });
+      merged = [...byId.values()];
+      paint();
+    }
 
     const col = Sync._orgRef().collection(colName);
     let ok = 0, err = 0, noId = 0, firstErr = '';

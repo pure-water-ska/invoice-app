@@ -952,9 +952,16 @@ const DB = {
       { name: 'ยิ้มแย้ม',                             address: '146 ม.14 ต.สตูล อ.เมืองสตูล จ.สตูล',                         phone: '099-4782177, 087-4752493',  taxId: '',             brand: '', notes: [] },
       { name: 'H2O ป้าก',                             address: '',                                                            phone: '099-9584119',               taxId: '',             brand: '', notes: [] },
     ];
-    customers.forEach(c => {
-      this.addCustomer({ id: Utils.uuid(), ...c, createdAt: now });
-    });
+    // DETERMINISTIC ids — every device/seed-run produces the SAME id for the
+    // same customer. Previously this used Utils.uuid() so each device seeded the
+    // identical customer list with DIFFERENT ids → a delete on one device never
+    // matched the other device's copy → deletes never propagated, and re-seeding
+    // created fresh-id duplicates ("data comes back"). Stable ids fix both.
+    const seeded = customers.map((c, i) => ({ id: 'cust-seed-' + (i + 1), ...c, createdAt: now }));
+    const existing = this.getCustomers();
+    const haveIds = new Set(existing.filter(c => c && c.id).map(c => c.id));
+    const merged = [...existing, ...seeded.filter(c => !haveIds.has(c.id))];
+    this.saveCustomers(merged);
   },
 
   _seedPricing() {
