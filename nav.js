@@ -157,6 +157,15 @@
 (function loadFirebaseSync() {
   function loadScript(src, cb, errCb) {
     const s = document.createElement('script');
+    // Cache-bust local scripts with the app version so a stale service-worker
+    // cache can't serve an old copy of sync.js/connection-status.js/etc. after
+    // an update (the SW matches by exact URL, so the ?v query misses the cache).
+    try {
+      const v = (window.APP_VERSION && APP_VERSION.version) || '';
+      if (v && /^\.?\//.test(src) && /\.js$/.test(src) && src.indexOf('?') === -1) {
+        src = src + '?v=' + v;
+      }
+    } catch (e) {}
     s.src = src;
     s.onload  = cb  || function(){};
     s.onerror = errCb || function(){};
@@ -316,6 +325,15 @@
   if (window.IS_TAURI) return;   // Drive not available in Tauri desktop app
   function loadScript(src, cb, errCb) {
     const s = document.createElement('script');
+    // Cache-bust local scripts with the app version so a stale service-worker
+    // cache can't serve an old copy of sync.js/connection-status.js/etc. after
+    // an update (the SW matches by exact URL, so the ?v query misses the cache).
+    try {
+      const v = (window.APP_VERSION && APP_VERSION.version) || '';
+      if (v && /^\.?\//.test(src) && /\.js$/.test(src) && src.indexOf('?') === -1) {
+        src = src + '?v=' + v;
+      }
+    } catch (e) {}
     s.src = src;
     s.onload  = cb  || function(){};
     s.onerror = errCb || function(){};

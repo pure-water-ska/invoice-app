@@ -60,7 +60,7 @@ patch('utils.js', s =>
 // request URL each release; since the SW matches by exact URL (no ignoreSearch)
 // the new query misses the cached entry and falls through to the network/bundle,
 // guaranteeing a FRESH copy on the very first launch of the new version.
-const BUST_FILES = ['utils.js', 'db.js', 'auth.js', 'idb.js'];
+const BUST_FILES = ['utils.js', 'db.js', 'auth.js', 'idb.js', 'nav.js', 'settings.js', 'connection-status.js'];
 for (const f of fs.readdirSync(ROOT)) {
   if (!f.endsWith('.html')) continue;
   patch(f, s => {
