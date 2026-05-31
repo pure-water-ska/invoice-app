@@ -1982,6 +1982,116 @@ async function runSyncDiagnostic() {
   }
 }
 
+// One-click REPAIR: read customers_v2 from the server, keep ONE doc per name
+// (preferring the deterministic cust-seed-* id), and DELETE every duplicate doc
+// directly on the server. Then set local to the deduped set. Run on one device;
+// others converge on next sync. This fixes "delete leaves a twin" definitively.
+async function forceDedupeCustomers() {
+  if (!confirm('ล้างลูกค้าที่ซ้ำกันบนเซิร์ฟเวอร์?\n\nเก็บไว้ 1 รายชื่อต่อลูกค้า (ลบสำเนาที่ id ซ้ำ).\nทำบนเครื่องเดียวก็พอ แล้วเปิดแอปใหม่ทุกเครื่อง.')) return;
+  const out = document.getElementById('syncDiagOut');
+  out.classList.remove('d-none');
+  const L = []; const paint = () => out.textContent = L.join('\n');
+  L.push('=== Dedupe customers on server ==='); paint();
+  try {
+    const colName = Sync.COLLECTIONS['wt_customers'];
+    if (!colName || !Sync._db) { L.push('❌ not ready / not a collection'); paint(); return; }
+    const col = Sync._orgRef().collection(colName);
+    const snap = await col.get({ source: 'server' });
+    L.push('server docs: ' + snap.size); paint();
+
+    const byName = new Map();
+    snap.forEach(d => {
+      const r = d.data() || {};
+      const n = r.name != null ? String(r.name) : '(no name)';
+      if (!byName.has(n)) byName.set(n, []);
+      byName.get(n).push({ id: d.id, rec: r });
+    });
+
+    const keep = []; const dropIds = [];
+    for (const [, arr] of byName) {
+      arr.sort((a, b) => (b.id.startsWith('cust-seed-') ? 1 : 0) - (a.id.startsWith('cust-seed-') ? 1 : 0));
+      keep.push(arr[0]);
+      arr.slice(1).forEach(x => dropIds.push(x.id));
+    }
+    L.push('unique names: ' + keep.length + '   duplicate docs to delete: ' + dropIds.length); paint();
+
+    // Delete duplicate docs on the server in batches
+    let batch = Sync._db.batch(), ops = 0, deleted = 0;
+    for (const id of dropIds) {
+      batch.delete(col.doc(id)); ops++; deleted++;
+      if (ops >= 400) { await batch.commit(); batch = Sync._db.batch(); ops = 0; L.push('deleted ' + deleted + '…'); paint(); }
+    }
+    if (ops > 0) await batch.commit();
+    L.push('deleted ' + deleted + ' duplicate docs from server');
+
+    // Set local to the deduped canonical set (strip sync meta fields)
+    const cleaned = keep.map(k => { const { _by, _byName, _ts, ...rec } = k.rec; return { ...rec, id: k.id }; });
+    if (window.DB) DB.saveCustomers(cleaned);
+    L.push('local set to ' + cleaned.length + ' customers');
+    L.push(''); L.push('✅ Done. Reopen the app on EVERY device. Now each customer has ONE id → delete works.');
+    paint();
+  } catch (e) { L.push('❌ ' + (e.code || '') + ' ' + (e.message || e)); paint(); }
+}
+
+// Comprehensive customer/sync analysis — dumps the complete picture so the
+// duplicate/id-mismatch situation is visible at a glance.
+async function runCustomerAnalysis() {
+  const out = document.getElementById('syncDiagOut');
+  out.classList.remove('d-none');
+  const L = []; const paint = () => out.textContent = L.join('\n');
+  L.push('=== Customer / delete analysis ==='); paint();
+  try {
+    if (typeof Sync === 'undefined' || !Sync._db || typeof DB === 'undefined') { L.push('❌ not ready'); paint(); return; }
+    L.push('app version : ' + (window.APP_VERSION ? APP_VERSION.version : '?'));
+    L.push('deviceId    : ' + Sync._deviceId);
+    const colName = Sync.COLLECTIONS['wt_customers'] || '(NOT a collection!)';
+    L.push('customers col: ' + colName);
+    L.push(''); paint();
+
+    // ── LOCAL ──
+    const local = DB.getCustomers() || [];
+    const localByName = new Map();
+    local.forEach(c => { if (c && c.name != null) { const n = String(c.name); if (!localByName.has(n)) localByName.set(n, []); localByName.get(n).push(c.id); } });
+    const localDupNames = [...localByName.entries()].filter(([, ids]) => ids.length > 1);
+    L.push('LOCAL customers : ' + local.length + '  (unique names: ' + localByName.size + ')');
+    L.push('LOCAL duplicate names: ' + localDupNames.length);
+    localDupNames.slice(0, 8).forEach(([n, ids]) => L.push('   • ' + n + ' → ' + ids.join(', ')));
+    L.push(''); paint();
+
+    // ── SERVER ──
+    if (Sync.COLLECTIONS['wt_customers']) {
+      const snap = await Sync._orgRef().collection(colName).get({ source: 'server' });
+      const srvByName = new Map(); const byDevice = {};
+      snap.forEach(d => {
+        const r = d.data() || {};
+        const n = r.name != null ? String(r.name) : '(no name)';
+        if (!srvByName.has(n)) srvByName.set(n, []);
+        srvByName.get(n).push(d.id);
+        const dev = r._byName || r._by || '?'; byDevice[dev] = (byDevice[dev] || 0) + 1;
+      });
+      const srvDupNames = [...srvByName.entries()].filter(([, ids]) => ids.length > 1);
+      L.push('SERVER ' + colName + ' docs: ' + snap.size + '  (unique names: ' + srvByName.size + ')');
+      L.push('SERVER duplicate names: ' + srvDupNames.length + (srvDupNames.length ? '  ⚠️ THIS is why delete fails' : '  ✅'));
+      srvDupNames.slice(0, 10).forEach(([n, ids]) => L.push('   • ' + n + ' → ' + ids.join(', ')));
+      L.push('SERVER docs by writer device:');
+      Object.entries(byDevice).forEach(([dev, n]) => L.push('   ' + dev + ': ' + n));
+      L.push(''); paint();
+
+      // ID match for a sample real customer (first non-empty name)
+      const sample = local.find(c => c && c.name);
+      if (sample) {
+        const serverIdsForSample = srvByName.get(String(sample.name)) || [];
+        L.push('sample "' + sample.name + '"');
+        L.push('   local id : ' + sample.id);
+        L.push('   server ids: ' + (serverIdsForSample.join(', ') || '(none)'));
+        L.push('   match: ' + (serverIdsForSample.includes(sample.id) ? 'yes' : 'NO ⚠️'));
+      }
+    }
+    L.push(''); L.push('▶ If SERVER duplicate names > 0, deleting one id leaves the twin. Tell me this number.');
+    paint();
+  } catch (e) { L.push('❌ ' + (e.code || '') + ' ' + (e.message || e)); paint(); }
+}
+
 // Real delete-path test: adds a throwaway customer through the normal DB API,
 // waits for sync, then deletes it through DB.deleteCustomer and checks whether
 // the doc actually disappears from the customers_v2 collection on the SERVER.
