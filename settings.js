@@ -1909,68 +1909,70 @@ function loadVersionInfo() {
 //     (by === deviceId) makes each device ignore the other's writes.
 //   • "Server read-back → last write by" shows which device last touched the
 //     test doc; run on A then B — B should see A's deviceId (cross-device read OK).
+let _diagUnsub = null;
+let _diagEvents = [];
 async function runSyncDiagnostic() {
   const out = document.getElementById('syncDiagOut');
   out.classList.remove('d-none');
-  const lines = [];
-  const log = (k, v) => lines.push(k.padEnd(26) + ': ' + v);
+  const head = [];
+  const log = (k, v) => head.push(k.padEnd(26) + ': ' + v);
+  const paint = () => { out.textContent = head.join('\n') + '\n\n── LIVE LISTENER (keep this open) ──\n' + _diagEvents.slice(-12).join('\n'); };
+  _diagEvents = [];
   out.textContent = 'กำลังตรวจสอบ…';
 
   try {
     log('IS_TAURI', !!window.IS_TAURI);
-    log('Sync loaded', typeof Sync !== 'undefined');
-    if (typeof Sync === 'undefined') { out.textContent = lines.join('\n') + '\n\n❌ sync.js not loaded'; return; }
+    if (typeof Sync === 'undefined') { out.textContent = '❌ sync.js not loaded'; return; }
     log('Sync.ready', Sync.ready === true);
     log('Sync._online', Sync._online);
     log('deviceId', Sync._deviceId || '(none)');
     log('orgId', (typeof FIREBASE_CONFIG !== 'undefined' ? FIREBASE_CONFIG.orgId : '?'));
-
     const fb = (typeof firebase !== 'undefined' && firebase.apps && firebase.apps.length) ? firebase : null;
     const user = fb ? fb.auth().currentUser : null;
-    log('auth uid', user ? user.uid : '(not signed in)');
-    log('auth email', user ? (user.email || '(anonymous)') : '(none)');
-    log('rules expect email', '*@' + ((typeof FIREBASE_CONFIG!=='undefined'?FIREBASE_CONFIG.orgId:'?')) + '.wt.local');
+    log('auth uid', user ? user.uid : '(none)');
+    log('auth email', user ? (user.email || '(anon)') : '(none)');
 
-    if (!fb || !Sync._db) { out.textContent = lines.join('\n') + '\n\n❌ Firestore not initialised'; return; }
-
-    // ── Server round-trip write/read ─────────────────────────────────────────
+    if (!fb || !Sync._db) { paint(); return; }
     const ref = Sync._orgRef().collection('data').doc('_diag');
-    const stamp = { by: Sync._deviceId, at: Date.now(), email: user ? user.email : null,
-                    label: 'diag-' + new Date().toISOString() };
-    log('', '');
-    log('writing test doc', '…');
-    out.textContent = lines.join('\n');
-    try {
-      await ref.set({ d: stamp, ts: firebase.firestore.FieldValue.serverTimestamp(), by: Sync._deviceId });
-      log('server WRITE', '✅ committed');
-    } catch (e) {
-      log('server WRITE', '❌ ' + (e.code || e.message));
-    }
 
-    // Force a read straight from the SERVER (bypass local cache)
+    // ── STEP 1: READ BEFORE WRITE — true cross-device read test ──────────────
+    // Shows who LAST wrote _diag. Run on A, then B: B must show A's id here.
     try {
       const snap = await ref.get({ source: 'server' });
       const d = snap.exists ? snap.data().d : null;
       if (d) {
-        log('server READ', '✅ ok');
-        log('last write by', d.by + (d.by === Sync._deviceId ? '  (THIS device)' : '  (OTHER device!)'));
-        log('last write at', new Date(d.at).toLocaleString());
-        log('last write email', d.email || '(none)');
-      } else {
-        log('server READ', '⚠️ doc empty');
-      }
-    } catch (e) {
-      log('server READ', '❌ ' + (e.code || e.message));
-    }
+        const who = d.by === Sync._deviceId ? '(this device)' : '(OTHER device ✓ cross-device read works)';
+        log('BEFORE write, last by', d.by + ' ' + who);
+        log('  …at', new Date(d.at).toLocaleTimeString());
+      } else { log('BEFORE write', 'doc empty (first run)'); }
+    } catch (e) { log('server READ', '❌ ' + (e.code || e.message)); }
 
-    log('', '');
-    lines.push('▶ Run this on BOTH devices.');
-    lines.push('  • If deviceId is the SAME on both → that is the bug.');
-    lines.push('  • Run on device A, then device B: B\'s "last write by"');
-    lines.push('    should show A\'s deviceId (cross-device read works).');
-    out.textContent = lines.join('\n');
+    // ── STEP 2: WRITE our own stamp ──────────────────────────────────────────
+    try {
+      await ref.set({ d: { by: Sync._deviceId, at: Date.now(), email: user ? user.email : null },
+                      ts: firebase.firestore.FieldValue.serverTimestamp(), by: Sync._deviceId });
+      log('server WRITE', '✅ committed at ' + new Date().toLocaleTimeString());
+    } catch (e) { log('server WRITE', '❌ ' + (e.code || e.message)); }
+
+    // ── STEP 3: LIVE LISTENER — the mechanism the app relies on ──────────────
+    // Attach onSnapshot to _diag. Keep this panel open on BOTH devices; when one
+    // device runs the diagnostic (writes), the OTHER device's listener must log
+    // the event here. If it never does (but STEP 1 read worked) → the real-time
+    // listener is broken in Tauri = the real bug.
+    if (_diagUnsub) { try { _diagUnsub(); } catch {} }
+    log('live listener', 'attached — keep open, write from other device');
+    _diagUnsub = ref.onSnapshot({ includeMetadataChanges: true }, (snap) => {
+      const d = snap.exists ? snap.data().d : null;
+      const t = new Date().toLocaleTimeString();
+      const by = d ? d.by : '?';
+      const mine = d && d.by === Sync._deviceId;
+      _diagEvents.push(`${t}  fromCache=${snap.metadata.fromCache}  by=${by}` + (mine ? '  (self)' : '  ◀ REMOTE ✓'));
+      paint();
+    }, (err) => { _diagEvents.push('listener ERROR: ' + err.code); paint(); });
+
+    paint();
   } catch (e) {
-    out.textContent = lines.join('\n') + '\n\n❌ ' + (e.message || e);
+    out.textContent = head.join('\n') + '\n\n❌ ' + (e.message || e);
   }
 }
 
