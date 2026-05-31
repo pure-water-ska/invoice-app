@@ -1982,6 +1982,40 @@ async function runSyncDiagnostic() {
   }
 }
 
+// Firestore collection delete round-trip test. Directly verifies that a doc in
+// the customers_v2 collection can be written AND deleted server-side (rules +
+// connectivity). Run on the device where deletes "don't stick".
+async function runFsDeleteTest() {
+  const out = document.getElementById('syncDiagOut');
+  out.classList.remove('d-none');
+  const L = [];
+  const paint = () => { out.textContent = L.join('\n'); };
+  L.push('=== Firestore delete round-trip (customers_v2) ==='); paint();
+  try {
+    if (typeof Sync === 'undefined' || !Sync._db) { L.push('❌ Sync/Firestore not ready'); paint(); return; }
+    const col = Sync._orgRef().collection('customers_v2');
+    const id  = '_deltest_' + Date.now();
+    L.push('1) writing temp doc ' + id + ' …'); paint();
+    await col.doc(id).set({ id, name: 'DELETE TEST', _by: Sync._deviceId, _ts: Date.now() });
+    let s = await col.doc(id).get({ source: 'server' });
+    L.push('   after write, exists on server: ' + s.exists + (s.exists ? ' ✅' : ' ❌')); paint();
+    L.push('2) deleting temp doc …'); paint();
+    await col.doc(id).delete();
+    s = await col.doc(id).get({ source: 'server' });
+    L.push('   after delete, exists on server: ' + s.exists + (s.exists ? '  ❌ DELETE BLOCKED' : '  ✅ gone')); paint();
+    // Live collection count (server)
+    const all = await col.get({ source: 'server' });
+    L.push('3) customers_v2 docs on server: ' + all.size);
+    L.push('');
+    L.push(s.exists
+      ? '⚠️ Delete did NOT persist → Firestore rules/permission block deletes.'
+      : '✅ Firestore delete works. If app deletes still return, the issue is in the app delete path, not Firestore.');
+    paint();
+  } catch (e) {
+    L.push('❌ ' + (e.code || '') + ' ' + (e.message || e)); paint();
+  }
+}
+
 // Device label — shown to other devices in sync-activity toasts. Stored in the
 // HDD-backed DB store (not synced; each device keeps its own name).
 function loadDeviceLabel() {

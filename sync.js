@@ -1368,6 +1368,15 @@ var Sync = {
               console.log(`[Sync] Bootstrap: pushing ${localArr.length} ${colName} records to Firestore`);
               await this._writeKey(lsKey, localArr);
             }
+            // CRITICAL: seed _pullIds with the bootstrapped ids. These records now
+            // exist in Firestore (just pushed), so they ARE "present at session
+            // start". Without this the listener treats every record as new-this-
+            // session and re-adds any that another device deletes → deletes never
+            // propagate on the bootstrap session (the customers_v2 migration case).
+            const ids = new Set((Array.isArray(localArr) ? localArr : []).filter(r => r && r.id).map(r => r.id));
+            this._serverIds[colName] = new Set(ids);
+            this._pullIds[colName]   = new Set(ids);
+            this._savePullIds(colName);
           } catch (be) { console.warn('[Sync] bootstrap push failed:', colName, be.message); }
         }
       } catch (e) { console.warn('[Sync] pull col:', colName, e.message); }
