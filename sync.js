@@ -269,13 +269,26 @@ var Sync = {
     const stones = this._getTombstones(name);
     if (!Object.keys(stones).length) return arr;
     const now = Date.now();
-    return arr.filter(r => {
-      if (!r || !r.id) return true;
+    const keep = [], drop = [];
+    for (const r of arr) {
+      if (!r || !r.id) { keep.push(r); continue; }
       const t = stones[r.id];
-      if (!t) return true;
-      if (now - t > this._tombstoneTTL) { this._clearTombstones(name, [r.id]); return true; }
-      return false;                           // tombstoned — drop
-    });
+      if (!t) { keep.push(r); continue; }
+      if (now - t > this._tombstoneTTL) { this._clearTombstones(name, [r.id]); keep.push(r); continue; }
+      drop.push(r);
+    }
+    // POISON GUARD: a real delete removes one/a few records. If tombstones would
+    // drop more than the cap, they are poison (e.g. an old delete-all that
+    // tombstoned the whole list) — IGNORE them and keep the data, so the server's
+    // records can never be wiped from a device on load (fixes "local=0 but
+    // server=101 / customers missing in invoice page"). Self-heals every device.
+    if (drop.length > this._MAX_AUTO_TOMBSTONE) {
+      console.warn(`[Sync] Ignoring ${drop.length} ${name} tombstones (bulk = poison) — keeping all records`);
+      // Also purge these poison tombstones so they stop interfering.
+      try { this._clearTombstones(name, drop.map(r => r.id)); } catch {}
+      return arr;
+    }
+    return keep;
   },
 
   // ── Server-confirmed IDs per array DOCUMENT ────────────────────────────────
