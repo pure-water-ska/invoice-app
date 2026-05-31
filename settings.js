@@ -1982,6 +1982,49 @@ async function runSyncDiagnostic() {
   }
 }
 
+// Real delete-path test: adds a throwaway customer through the normal DB API,
+// waits for sync, then deletes it through DB.deleteCustomer and checks whether
+// the doc actually disappears from the customers_v2 collection on the SERVER.
+// Isolates whether the APP's delete reaches Firestore (vs a listener/restore
+// re-adding it). Uses a temp record so real data is never touched.
+async function runRealDeleteTest() {
+  const out = document.getElementById('syncDiagOut');
+  out.classList.remove('d-none');
+  const L = []; const paint = () => out.textContent = L.join('\n');
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  L.push('=== Real delete-path test ==='); paint();
+  try {
+    if (typeof Sync === 'undefined' || !Sync._db || typeof DB === 'undefined') { L.push('❌ not ready'); paint(); return; }
+    const colName = Sync.COLLECTIONS['wt_customers'] || 'customers_v2';
+    const col = Sync._orgRef().collection(colName);
+    const id = 'deltest-' + Date.now();
+    L.push('colName=' + colName + '  Sync.ready=' + Sync.ready);
+
+    // 1) Add through the real API
+    DB.addCustomer({ id, name: 'ZZZ DELETE TEST', address: '', phone: '', taxId: '', brand: '', notes: [], createdAt: new Date().toISOString() });
+    L.push('added temp customer ' + id + ' (waiting 2s for sync)…'); paint();
+    await wait(2000);
+    let s = await col.doc(id).get({ source: 'server' });
+    L.push('after add → on server: ' + s.exists + (s.exists ? ' ✅' : ' ❌ (add did not sync)'));
+    paint();
+
+    // 2) Delete through the real API
+    DB.deleteCustomer(id);
+    L.push('called DB.deleteCustomer (waiting 2s for sync)…'); paint();
+    await wait(2000);
+    s = await col.doc(id).get({ source: 'server' });
+    L.push('after delete → on server: ' + s.exists + (s.exists ? '  ❌ STILL THERE (app delete not reaching Firestore)' : '  ✅ gone'));
+    L.push('local still has it: ' + DB.getCustomers().some(c => c && c.id === id));
+    L.push('_serverIds has id: ' + (Sync._serverIds[colName] ? Sync._serverIds[colName].has(id) : 'n/a'));
+    L.push('tombstoned: ' + (Sync._getTombstones(colName)[id] !== undefined));
+    paint();
+    L.push('');
+    L.push(s.exists ? '▶ App delete is NOT removing the server doc — the bug is in the write path.'
+                    : '▶ App delete DID remove it server-side — cross-device should work; if not, the other device listener is the issue.');
+    paint();
+  } catch (e) { L.push('❌ ' + (e.code || '') + ' ' + (e.message || e)); paint(); }
+}
+
 // Force-migrate: push every local customer into the customers_v2 collection,
 // reporting local count, per-record errors, and the resulting server count.
 // Both DIAGNOSES (why customers_v2 stayed at 0) and REPAIRS the migration.
