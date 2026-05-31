@@ -538,6 +538,14 @@ var Sync = {
       if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
       console.log('[Sync] Step 2: firestore()');
       this._db    = firebase.firestore();
+      // ignoreUndefinedProperties: a record with ANY undefined field makes
+      // batch.set()/set() THROW ("Unsupported field value: undefined"), which
+      // silently aborted the whole collection bootstrap — so customers_v2 stayed
+      // EMPTY (0 docs) and deletes had nothing to act on / data "came back".
+      // Messy migrated records often carry undefined fields; tell Firestore to
+      // skip them instead of throwing. Must be set before any other Firestore use.
+      try { this._db.settings({ ignoreUndefinedProperties: true }); }
+      catch (e) { console.warn('[Sync] settings(ignoreUndefinedProperties) failed:', e.message); }
       this._orgId = FIREBASE_CONFIG.orgId || 'main';
 
       // ── Enable IndexedDB offline persistence ─────────────────────────────
