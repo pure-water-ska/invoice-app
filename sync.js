@@ -43,11 +43,17 @@ var Sync = {
   COLLECTIONS: {
     'wt_invoices':  'invoices',
     'wt_payments':  'payments',
+    // Customers moved from DOCUMENTS → COLLECTIONS so each customer is its own
+    // Firestore doc. The whole-array DOCUMENT model could not delete reliably
+    // across devices (union re-added deleted records + tombstone poison). The
+    // per-record collection model (proven by invoices/payments) deletes a single
+    // doc with no clobber. Bootstrap in _pullAll pushes existing local customers
+    // into the new collection on first run; the old data/customers doc is orphaned.
+    'wt_customers': 'customers_v2',
   },
 
   // ── Small/medium collections → one Firestore document holds the whole array ─
   DOCUMENTS: {
-    'wt_customers':       'customers',
     'wt_products':        'products',
     'wt_pricing':         'pricing',
     'wt_settings':        'settings',
@@ -210,16 +216,24 @@ var Sync = {
   // Filter a Firestore snap array through active tombstones for that collection
   _applyTombstones(colName, snapDocs) {
     const stones = this._getTombstones(colName);
-    const now    = Date.now();
-    return snapDocs.filter(d => {
+    if (!Object.keys(stones).length) return snapDocs;
+    const now  = Date.now();
+    const keep = [], drop = [];
+    for (const d of snapDocs) {
       const t = stones[d.id];
-      if (!t) return true;                    // not tombstoned — keep
-      if (now - t > this._tombstoneTTL) {     // tombstone expired — allow through
-        this._clearTombstones(colName, [d.id]);
-        return true;
-      }
-      return false;                           // tombstoned — skip
-    });
+      if (!t) { keep.push(d); continue; }
+      if (now - t > this._tombstoneTTL) { this._clearTombstones(colName, [d.id]); keep.push(d); continue; }
+      drop.push(d);
+    }
+    // Poison guard (mirrors _filterArrayTombstones): never let tombstones remove
+    // a bulk number of records from a server pull — that's leftover poison, not a
+    // real delete. Keep everything and purge the poison.
+    if (drop.length > this._MAX_AUTO_TOMBSTONE) {
+      console.warn(`[Sync] Ignoring ${drop.length} ${colName} collection tombstones (bulk = poison)`);
+      try { this._clearTombstones(colName, drop.map(d => d.id)); } catch {}
+      return snapDocs;
+    }
+    return keep;
   },
 
   // Called synchronously by DB._set() BEFORE the cache is overwritten, with the
@@ -1749,7 +1763,8 @@ var Sync = {
   },
 
   _ACTIVITY_TYPE: {
-    customers:  { label: 'ลูกค้า',        icon: 'bi-people' },
+    customers:    { label: 'ลูกค้า',      icon: 'bi-people' },
+    customers_v2: { label: 'ลูกค้า',      icon: 'bi-people' },
     users_cfg:  { label: 'ผู้ใช้',         icon: 'bi-person-gear' },
     products:   { label: 'สินค้า',        icon: 'bi-box-seam' },
     pricing:    { label: 'ราคา',          icon: 'bi-tag' },
@@ -1768,7 +1783,8 @@ var Sync = {
   _recordName(typeKey, rec) {
     if (!rec) return '';
     switch (typeKey) {
-      case 'customers': return rec.name || rec.shopName || rec.id || '';
+      case 'customers':
+      case 'customers_v2': return rec.name || rec.shopName || rec.id || '';
       case 'users_cfg': return rec.name || rec.username || rec.id || '';
       case 'products':  return rec.name || rec.id || '';
       case 'pricing':   return rec.customerName || rec.name || rec.id || '';
