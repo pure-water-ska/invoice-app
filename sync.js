@@ -409,6 +409,31 @@ var Sync = {
   async _initDeviceId() {
     const IDB_KEY = 'sync_device_id';
     const LS_KEY  = 'wt_sync_device_id';
+
+    // ── Tauri: persist the device ID on the HDD-backed DB store ──────────────
+    // localStorage is wiped on every Tauri launch, and IndexedDB has proven
+    // unreliable in the WebView — so the old code regenerated a NEW id almost
+    // every launch. An unstable deviceId breaks echo-suppression: a device no
+    // longer recognises its OWN past writes, re-applies them as "remote", and
+    // re-pushes — producing a clobber war between devices where a stale full
+    // array overwrites a fresh one (changes don't stick across devices).
+    // DB._get/_set is HDD-backed in Tauri (survives the wipe) and 'wt_device_id'
+    // is NOT in DOCUMENTS/COLLECTIONS so it never syncs to Firestore.
+    if (window.IS_TAURI && window.DB) {
+      try {
+        let id = DB._getObj('wt_device_id', null);
+        if (!id || typeof id !== 'string') {
+          id = 'dev_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+          DB._set('wt_device_id', id);
+        }
+        this._deviceId = id;
+        console.log('[Sync] Device ID ready (HDD, stable):', id);
+        return;
+      } catch (e) {
+        console.warn('[Sync] HDD device-id failed, falling back:', e.message);
+      }
+    }
+
     try {
       if (typeof IDB === 'undefined') throw new Error('IDB not loaded');
       // 1. Primary source: IndexedDB (durable across localStorage.clear())
