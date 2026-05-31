@@ -1982,6 +1982,41 @@ async function runSyncDiagnostic() {
   }
 }
 
+// Force-migrate: push every local customer into the customers_v2 collection,
+// reporting local count, per-record errors, and the resulting server count.
+// Both DIAGNOSES (why customers_v2 stayed at 0) and REPAIRS the migration.
+async function forceMigrateCustomers() {
+  const out = document.getElementById('syncDiagOut');
+  out.classList.remove('d-none');
+  const L = []; const paint = () => out.textContent = L.join('\n');
+  L.push('=== Migrate customers → customers_v2 ==='); paint();
+  try {
+    if (typeof Sync === 'undefined' || !Sync._db) { L.push('❌ Sync/Firestore not ready'); paint(); return; }
+    const colName = Sync.COLLECTIONS && Sync.COLLECTIONS['wt_customers'];
+    L.push('COLLECTIONS[wt_customers] = ' + (colName || '(NOT a collection — stale sync.js!)'));
+    if (!colName) { L.push('❌ This build still treats customers as a DOCUMENT — update the app.'); paint(); return; }
+    const local = (window.DB ? DB.getCustomers() : []) || [];
+    L.push('local customers (this device): ' + local.length); paint();
+    const col = Sync._orgRef().collection(colName);
+    let ok = 0, err = 0, noId = 0, firstErr = '';
+    for (const c of local) {
+      if (!c || !c.id) { noId++; continue; }
+      try {
+        await col.doc(String(c.id)).set({ ...c, _by: Sync._deviceId, _byName: Sync._deviceName(), _ts: Date.now() });
+        ok++;
+      } catch (e) { err++; if (!firstErr) firstErr = (e.code || '') + ' ' + (e.message || e); }
+      if ((ok + err) % 20 === 0) { L[L.length] = `pushing… ok=${ok} err=${err}`; paint(); }
+    }
+    L.push(`pushed: ok=${ok}  err=${err}  no-id=${noId}`);
+    if (firstErr) L.push('first error: ' + firstErr);
+    const all = await col.get({ source: 'server' });
+    L.push('customers_v2 docs on server now: ' + all.size);
+    L.push(all.size > 0 ? '✅ Migration populated. Reopen the app; deletes will now persist.'
+                        : '⚠️ Still 0 — see error above / local count.');
+    paint();
+  } catch (e) { L.push('❌ ' + (e.code || '') + ' ' + (e.message || e)); paint(); }
+}
+
 // Firestore collection delete round-trip test. Directly verifies that a doc in
 // the customers_v2 collection can be written AND deleted server-side (rules +
 // connectivity). Run on the device where deletes "don't stick".
