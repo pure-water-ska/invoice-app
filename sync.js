@@ -264,6 +264,78 @@ var Sync = {
     });
   },
 
+  // ── Server-confirmed IDs per array DOCUMENT ────────────────────────────────
+  // Persisted in sessionStorage so they survive page navigation. A local record
+  // that is MISSING from an incoming server snapshot is a DELETION if its id was
+  // previously confirmed on the server (in this set) — vs a genuinely NEW local
+  // record (created offline, never synced) if it was not. This is what lets a
+  // delete on device A propagate to device B without B re-uploading the records.
+  _knownDocIdsKey: 'wt_sync_known_doc_ids',
+  _knownDocIds(name) {
+    try {
+      const all = JSON.parse(sessionStorage.getItem(this._knownDocIdsKey) || '{}');
+      return new Set(all[name] || []);
+    } catch { return new Set(); }
+  },
+  _setKnownDocIds(name, set) {
+    try {
+      const all = JSON.parse(sessionStorage.getItem(this._knownDocIdsKey) || '{}');
+      all[name] = [...set];
+      sessionStorage.setItem(this._knownDocIdsKey, JSON.stringify(all));
+    } catch {}
+  },
+  _hasKnownDocIds(name) {
+    try {
+      const all = JSON.parse(sessionStorage.getItem(this._knownDocIdsKey) || '{}');
+      return Array.isArray(all[name]);
+    } catch { return false; }
+  },
+
+  // Apply an authoritative server array (from _pullAll or the listener) to local
+  // storage, correctly distinguishing remote DELETIONS from local-only additions.
+  // Returns the array actually written locally.
+  _applyArrayDoc(lsKey, docName, fsVal) {
+    if (!Array.isArray(fsVal)) fsVal = [];
+    const fsIds = new Set(fsVal.filter(r => r && r.id).map(r => r.id));
+    let localArr = [];
+    try { localArr = JSON.parse(this._localRead(lsKey) || '[]'); } catch {}
+    if (!Array.isArray(localArr)) localArr = [];
+
+    const known      = this._knownDocIds(docName);
+    const haveKnown  = this._hasKnownDocIds(docName);
+    const localMissing = localArr.filter(r => r && r.id && !fsIds.has(r.id));
+
+    // A locally-present record that is NOT in the server snapshot is:
+    //   • a DELETION  → if its id was confirmed on the server before (known set)
+    //                   OR it is tombstoned (_deletions doc). Drop it.
+    //   • a NEW local → otherwise (created offline, never synced). Preserve it.
+    // On the very first apply of a session (no known set yet) we fall back to the
+    // tombstone/_deletions check only, so a fresh device can't wrongly resurrect.
+    const stones = this._getTombstones(docName);
+    const isDeleted = (id) =>
+      (haveKnown && known.has(id)) || (stones[id] !== undefined);
+    const newLocal = localMissing.filter(r => !isDeleted(r.id));
+
+    let result = newLocal.length > 0 ? [...fsVal, ...newLocal] : fsVal;
+    // Drop anything tombstoned (covers records still lingering in fsVal)
+    result = this._filterArrayTombstones(docName, result);
+
+    this._lsWrite(lsKey, result);
+    if (window.DB) DB.invalidate(lsKey);
+    const resultIds = new Set(result.filter(r => r && r.id).map(r => r.id));
+    this._setKnownDocIds(docName, resultIds);
+    this._lastDocIds[docName] = resultIds;
+    this._lastDocJson[lsKey] = JSON.stringify(result);
+
+    // If we kept genuinely-new local records, push the merged array up so the
+    // server (and other devices) converge on it.
+    if (newLocal.length > 0) {
+      this._writeKey(lsKey, result).catch(e =>
+        console.warn('[Sync] array-doc reupload failed:', docName, e.message));
+    }
+    return result;
+  },
+
   // ── Persisted server IDs — survive page reloads for archive tombstone correctness ──
   // _pullAll() only fetches the last ARCHIVE_MONTHS of invoices. Without persistence,
   // _serverIds[invoices] would only contain the recent window, so _writeKey() couldn't
@@ -1063,48 +1135,18 @@ var Sync = {
             console.log(`[Sync] Delta: skip write for ${docName} (doc ts ≤ last pull)`);
             return;
           }
-          let fsVal = doc.data().d;
-          // For array documents (users, customers, products, etc.) merge with local data
-          // so records created locally before sync was working are never lost on pull.
+          const fsVal = doc.data().d;
+          // For array documents (users, customers, products…) use the unified
+          // apply that distinguishes remote DELETIONS from local-only additions
+          // (so a delete on another device propagates and is not re-uploaded).
           if (Array.isArray(fsVal)) {
-            // Drop any records that were deleted locally but still linger in this
-            // Firestore snapshot (delete not yet propagated) — prevents the
-            // "deleted customer comes back on refresh" bug. If anything was
-            // filtered out, push the cleaned array back so Firestore agrees.
-            const filtered = this._filterArrayTombstones(docName, fsVal);
-            if (filtered.length !== fsVal.length) {
-              console.log(`[Sync] Doc pull: dropped ${fsVal.length - filtered.length} tombstoned ${docName} record(s)`);
-              fsVal = filtered;
-              this._writeKey(lsKey, fsVal).catch(e =>
-                console.warn('[Sync] tombstone re-push failed:', docName, e.message));
-            }
-            try {
-              const raw = this._localRead(lsKey);
-              const localArr = JSON.parse(raw || '[]');
-              if (Array.isArray(localArr) && localArr.length > 0) {
-                const fsIds = new Set(fsVal.filter(r => r.id).map(r => r.id));
-                // local-only records, EXCLUDING any that are tombstoned (deleted)
-                const localOnly = this._filterArrayTombstones(docName,
-                  localArr.filter(r => r.id && !fsIds.has(r.id)));
-                if (localOnly.length > 0) {
-                  console.log(`[Sync] Doc merge: keeping ${localOnly.length} local-only ${docName} records`);
-                  // Push local-only records into the Firestore doc immediately
-                  const merged = [...fsVal, ...localOnly];
-                  await this._writeKey(lsKey, merged);
-                  this._lsWrite(lsKey, merged);
-                  if (window.DB) DB.invalidate(lsKey);
-                  this._lastDocJson[lsKey] = JSON.stringify(merged); // opt ②: seed fingerprint
-                  this._lastDocIds[docName] = new Set(merged.filter(r => r && r.id).map(r => r.id));
-                  return; // skip plain fsVal write below
-                }
-              }
-            } catch {}
-            this._lastDocIds[docName] = new Set(fsVal.filter(r => r && r.id).map(r => r.id));
+            this._applyArrayDoc(lsKey, docName, fsVal);
+          } else {
+            // Object document — write as-is
+            this._lsWrite(lsKey, fsVal);
+            if (window.DB) DB.invalidate(lsKey);
+            this._lastDocJson[lsKey] = JSON.stringify(fsVal);
           }
-          // Write via _lsWrite — handles IDB overflow transparently
-          this._lsWrite(lsKey, fsVal);
-          if (window.DB) DB.invalidate(lsKey);
-          this._lastDocJson[lsKey] = JSON.stringify(fsVal); // opt ②: seed fingerprint so a re-save of pulled data is skipped
         } else {
           // Firestore doc missing → bootstrap: push local data up
           try {
@@ -1375,50 +1417,22 @@ var Sync = {
               } catch {}
             }
 
-            let fsVal = doc.data().d;
+            const fsVal = doc.data().d;
 
-            // For array documents (activity log, login log, users, etc.) MERGE
-            // local-only entries rather than wholesale overwriting.
-            // Scenario: Device A logs an activity; Device B then writes any document
-            // keyed under this same Firestore doc → Device A's listener would replace
-            // its local array with Device B's older version, silently losing A's entries.
             if (Array.isArray(fsVal)) {
-              // Drop records this device deleted but that still linger in the
-              // incoming snapshot — and re-push the cleaned array if needed.
-              const filtered = this._filterArrayTombstones(docName, fsVal);
-              if (filtered.length !== fsVal.length) {
-                fsVal = filtered;
-                this._writeKey(lsKey, fsVal).catch(e =>
-                  console.warn('[Sync] tombstone re-push (listener) failed:', docName, e.message));
-              }
-              try {
-                const raw = this._localRead(lsKey);
-                const localArr = JSON.parse(raw || '[]');
-                if (Array.isArray(localArr) && localArr.length > 0) {
-                  const fsIds    = new Set(fsVal.filter(r => r && r.id).map(r => r.id));
-                  const localOnly = this._filterArrayTombstones(docName,
-                    localArr.filter(r => r && r.id && !fsIds.has(r.id)));
-                  if (localOnly.length > 0) {
-                    // Local has entries not yet in this Firestore snapshot — merge them in
-                    // and push the merged array back so Firestore stays canonical.
-                    const merged = [...fsVal, ...localOnly];
-                    this._lsWrite(lsKey, merged);
-                    if (window.DB) DB.invalidate(lsKey);
-                    this._notifyUpdate(lsKey);
-                    // Push the merged array back to Firestore so all devices agree
-                    this._writeKey(lsKey, merged).catch(e =>
-                      console.warn('[Sync] Doc merge push failed:', docName, e.message)
-                    );
-                    return;
-                  }
-                }
-              } catch {}
+              // Unified apply: distinguishes remote DELETIONS (id was confirmed
+              // on the server before, now gone → drop it) from local-only
+              // additions (never synced → keep & re-upload). This is what makes
+              // a delete on another device actually disappear here instead of
+              // being re-uploaded, while still preserving offline-created records.
+              const before = this._lastDocJson[lsKey];
+              const result = this._applyArrayDoc(lsKey, docName, fsVal);
+              const after  = JSON.stringify(result);
+              if (after !== before) this._notifyUpdate(lsKey);
+              return;
             }
 
-            // Skip write and notification if data is identical to what _pullAll() fetched.
-            // Without this, every page load triggers a toast for each document whose
-            // last writer was another device — the listener fires with the same data
-            // _pullAll() already wrote, but there is no fingerprint check here to stop it.
+            // Object document — skip if unchanged, else write.
             const freshDocJson = JSON.stringify(fsVal);
             if (this._lastDocJson[lsKey] === freshDocJson) return;
             this._lastDocJson[lsKey] = freshDocJson;
