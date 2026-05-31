@@ -1982,6 +1982,27 @@ async function runSyncDiagnostic() {
   }
 }
 
+// Clear all deletion tombstones (local + the shared Firestore _deletions doc).
+// Recovery tool: earlier versions auto-tombstoned bulk reductions, poisoning the
+// shared _deletions doc and wiping real records on every device. Running this
+// once clears that poison so the UNION merge can restore data; afterwards only
+// small, intentional deletions are tombstoned.
+async function clearSyncDeletions() {
+  if (!confirm('รีเซ็ตรายการลบทั้งหมด?\n\nใช้เพื่อกู้ข้อมูล (ลูกค้า/ผู้ใช้) ที่หายไปจากการซิงค์ผิดพลาด ' +
+               'ข้อมูลจะถูกรวม (union) กลับมาจากทุกเครื่อง\n\nทำครั้งเดียว แล้วรีเฟรชทุกเครื่อง')) return;
+  try { localStorage.removeItem('wt_sync_tombstones'); } catch {}
+  try {
+    if (typeof Sync !== 'undefined' && Sync._db && Sync._fsDeletionsRef) {
+      await Sync._fsDeletionsRef().set({
+        d: {}, ts: firebase.firestore.FieldValue.serverTimestamp(), by: Sync._deviceId
+      });
+    }
+    Utils.showAlert('<i class="bi bi-check-circle me-1"></i>ล้างรายการลบแล้ว — รีเฟรช/เปิดแอปใหม่ทุกเครื่องเพื่อให้ข้อมูลรวมกลับมา', 'success');
+  } catch (e) {
+    Utils.showAlert('ล้มเหลว: ' + (e.message || e), 'danger');
+  }
+}
+
 // ── Update-progress helpers ────────────────────────────────────────────────
 let _updManifest = null;   // stored from checkUpdate() so installUpdate() can use it
 

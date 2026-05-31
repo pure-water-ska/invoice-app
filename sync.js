@@ -227,6 +227,14 @@ var Sync = {
   // tombstones any that were removed — and clears tombstones for re-added IDs.
   // Runs regardless of Sync.ready/_online, so a delete made offline or before
   // sync init still suppresses the record on the next pull/listener delivery.
+  // Max records a single _set may tombstone. A genuine user deletion removes one
+  // or a few records; a large drop (e.g. 8→1, 101→0) is virtually always a sync
+  // artifact / divergent-device write, NOT 100 individual deletes. Auto-
+  // tombstoning those poisoned the shared _deletions doc and wiped real data on
+  // healthy devices (observed clobber war). Cap it so only small, plausibly-real
+  // deletions propagate; bulk reductions are left to the safe UNION merge.
+  _MAX_AUTO_TOMBSTONE: 3,
+
   _recordDocDeletions(key, prevVal, nextVal) {
     const docName = this.DOCUMENTS[key];
     if (!docName) return;                 // not a synced DOCUMENT
@@ -234,16 +242,22 @@ var Sync = {
     if (!Array.isArray(prevVal) || !Array.isArray(nextVal)) return;
     const nextIds = new Set(nextVal.filter(r => r && r.id).map(r => r.id));
     const deleted = prevVal.filter(r => r && r.id && !nextIds.has(r.id)).map(r => r.id);
-    if (deleted.length > 0) {
-      this._addTombstones(docName, deleted);
-      console.log(`[Sync] Tombstoned ${deleted.length} deleted ${docName} record(s)`);
-    }
-    // A re-added ID (same id appears again) must clear its tombstone, otherwise
-    // the filter would wrongly drop the re-created record.
+
+    // A re-added ID (same id appears again) must clear its tombstone first.
     const stones  = this._getTombstones(docName);
     const readded = [...nextIds].filter(id => stones[id]);
     if (readded.length > 0) this._clearTombstones(docName, readded);
     this._lastDocIds[docName] = nextIds;
+
+    if (deleted.length === 0) return;
+    // GUARD: never auto-tombstone a bulk reduction — it's almost always a sync
+    // artifact and propagating it deletes real data on other devices.
+    if (deleted.length > this._MAX_AUTO_TOMBSTONE) {
+      console.warn(`[Sync] Skipping bulk tombstone (${deleted.length} ${docName} removed in one save) — treating as divergence, not deletion. Union merge will preserve data.`);
+      return;
+    }
+    this._addTombstones(docName, deleted);
+    console.log(`[Sync] Tombstoned ${deleted.length} deleted ${docName} record(s)`);
   },
 
   // Filter a plain array of records (DOCUMENT arrays: customers, products, …)
