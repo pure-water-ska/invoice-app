@@ -60,7 +60,7 @@ if (!window.CustomerSync) window.CustomerSync = {
     L.push('Sync._orgId         : ' + (window.Sync && Sync._orgId));
     L.push('deviceId            : ' + this._deviceId);
     L.push('un-acked ids        : ' + [...this._loadUnacked()].length);
-    L.push('local customers     : ' + (((window.DB ? DB.getCustomers() : []) || []).length));
+    L.push('local customers     : ' + ((((typeof DB !== "undefined") ? DB.getCustomers() : []) || []).length));
     // Read-path probe: compare raw cache vs what _get / getCustomers return.
     try {
       const ck = DB.K.CUSTOMERS;
@@ -116,7 +116,7 @@ if (!window.CustomerSync) window.CustomerSync = {
     // by the server (e.g. the app closed/refreshed before the write landed). This
     // guarantees a just-added customer actually reaches Firestore.
     {
-      const localNow = (window.DB ? DB.getCustomers() : []) || [];
+      const localNow = ((typeof DB !== "undefined") ? DB.getCustomers() : []) || [];
       const now = Date.now();
       const repush = localNow.filter(c => {
         if (!c || !c.id) return false;
@@ -207,7 +207,7 @@ if (!window.CustomerSync) window.CustomerSync = {
         // Apply server truth + still-un-acked local adds, WITHOUT pushing back.
         const finalList = this._retainUnacked(serverIds, unacked, list);
         DB.setLocalOnly(DB.K.CUSTOMERS, finalList);
-        const after = ((window.DB ? DB.getCustomers() : []) || []).length;
+        const after = (((typeof DB !== "undefined") ? DB.getCustomers() : []) || []).length;
         const ck = DB.K.CUSTOMERS;
         const cacheLen = (DB._cache && DB._cache[ck]) ? DB._cache[ck].length : 'none';
         const inIdb = (DB._idbKeys && typeof DB._idbKeys.has === 'function') ? DB._idbKeys.has(ck) : '?';
@@ -246,7 +246,7 @@ if (!window.CustomerSync) window.CustomerSync = {
   // list, reading their current data from the local copy. Returns the merged list.
   _retainUnacked(serverIds, unacked, baseList) {
     const list = Array.isArray(baseList) ? baseList.slice() : [];
-    const localNow = (window.DB ? DB.getCustomers() : []) || [];
+    const localNow = ((typeof DB !== "undefined") ? DB.getCustomers() : []) || [];
     const now = Date.now();
     for (const c of localNow) {
       if (!c || !c.id || serverIds.has(c.id)) continue;
