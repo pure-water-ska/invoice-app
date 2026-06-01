@@ -80,12 +80,16 @@ Open `index.html` (login page). The app works fully offline without Firebase or 
 
 Firestore bidirectional sync. Two categories of data with different Firestore layouts:
 
+> **Not handled here:** `wt_customers`, `wt_products`, `wt_pricing`, and `wt_users`
+> were removed from `COLLECTIONS`/`DOCUMENTS` and are now owned by dedicated modules
+> (see "Single-Source-of-Truth Sync Modules"). Do not re-add them here.
+
 **COLLECTIONS** — one Firestore document per record (avoids 1 MB doc limit):
 - `wt_invoices` → `invoices/` collection
 - `wt_payments` → `payments/` collection
 
 **DOCUMENTS** — entire array/object stored in one Firestore document:
-- All other keys (`wt_customers`, `wt_products`, `wt_transfer_accounts`, etc.)
+- The remaining keys (`wt_settings`, `wt_transfer_accounts`, `wt_returns`, `wt_versions`, `wt_cap_*`, `wt_inv_counter`, etc.)
 
 **NO_SYNC list** — keys explicitly excluded from Firestore sync (local-only):
 ```javascript
@@ -154,6 +158,61 @@ Multiple invoice records can share the same `invoiceNumber` — each is a separa
 - `DB.deleteInvoice(id)` deletes a single page by its unique `id`.
 - `invoices.html` shows a "X หน้า" badge and an expand chevron for multi-page invoices. Expanded sub-rows let the user view, edit, or delete individual pages. The main row's delete button removes all pages.
 - `invoice-create.html?view=NUM` / `?edit=NUM` always operates on all pages for that invoice number.
+
+### Single-Source-of-Truth Sync Modules (customers, products, pricing, users)
+
+**These four data types do NOT use the general `sync.js` engine.** They were moved
+out of `sync.js` `COLLECTIONS`/`DOCUMENTS` into dedicated per-record modules built
+on one reusable factory, because the old whole-array/tombstone sync could neither
+delete reliably across devices nor stop phantom re-uploads, and had a diff bug that
+silently dropped new adds. If you touch customer/product/pricing/user sync, work in
+these files — **not** `sync.js`:
+
+| File | Exposes | Firestore collection | localStorage key | de-dup key |
+|---|---|---|---|---|
+| `collection-sync.js` | `CollectionSync.create(cfg)` factory | — | — | — |
+| `customer-sync.js` | `window.CustomerSync` | `customers_v2` | `wt_customers` | `name` |
+| `product-sync.js` | `window.ProductSync` | `products_v2` | `wt_products` | `name` |
+| `pricing-sync.js` | `window.PricingSync` | `pricing_v2` | `wt_pricing` | `productId\|customerId\|shippingMethod` |
+| `user-sync.js` | `window.UserSync` | `users_v2` | `wt_users` | `username` |
+
+> `customer-sync.js` is hand-written (the original); the other three are thin
+> `CollectionSync.create({...})` instances. All four are loaded by `nav.js` after
+> `sync.js` and are Network-Only in `sw.js`.
+
+**The model (one rule): the Firestore collection is the single source of truth.**
+- A live `onSnapshot` listener turns each **server** snapshot into the local array
+  via `DB.setLocalOnly(key, arr)` (writes cache + HDD/localStorage but **never**
+  pushes — no echo loop). `fromCache` snapshots are trusted for content but an
+  *empty* `fromCache` snapshot is ignored (cold cache ≠ "server is empty").
+- Local writes are diffed against **`_serverFp`** (a `Map<id, fingerprint>` rebuilt
+  from each real server snapshot), **NOT** against `db`'s "previous" value — see the
+  in-place-mutation gotcha below. `upsert` = local record absent/different on the
+  server; `delete` = server has it, local no longer does. Pushed per-record in a
+  batch with `_by`/`_byName`/`_ts` metadata.
+- **Un-acked set** (`sessionStorage`, e.g. `wt_cust_unacked`): ids written locally
+  but not yet confirmed by the server. The listener retains these so a just-added
+  record can't vanish before the server acknowledges it, and re-pushes them on init.
+  An id is cleared from the set ONLY when a doc is **server-acknowledged**
+  (`!snapshot.docMetadata.hasPendingWrites`) or explicitly removed — never on a
+  pending/cached echo (clearing early was the "add disappears on refresh" bug).
+- **De-dup:** duplicate uploads (same `dedupKey`, different doc id) are collapsed to
+  the smallest doc id deterministically, and the extras deleted from the server.
+- **Bootstrap migration** (`bootstrapMigrate: true` for products/pricing/users):
+  on first run the server collection is empty (old data lived in the legacy
+  DOCUMENT), so existing local rows are pushed up. The persistent `migratedKey`
+  flag is set **only after a non-empty server snapshot confirms** the data landed —
+  never right after a possibly-failed push — so a failed migration can't trigger a
+  wipe. Customers do NOT bootstrap-migrate (their data already lived in `customers_v2`).
+- **Login (`index.html`)** must have users *before* login: it loads
+  `collection-sync.js` + `user-sync.js` and calls `UserSync.pullOnce()` — a one-shot
+  **additive** pull (merges server accounts into local, never removes) that is
+  time-boxed so it can never block or lock anyone out.
+- **Diagnostics:** the **ตรวจซิงค์** button on `customers.html` calls
+  `CustomerSync.diagnose()` (and appends `ProductSync`/`PricingSync` status) → an
+  on-screen report with a copy button showing ready state, org id, local-vs-live-
+  server counts, and a recent activity log. DevTools is disabled in release Tauri
+  builds, so this on-screen report is the primary way to see what the sync is doing.
 
 ### Auth & Permissions (`auth.js`)
 
@@ -225,7 +284,7 @@ const b64 = await Utils.compressImage(file, 900, 0.70);
 ## Key Conventions
 
 - **No reactivity:** The DOM is not auto-synced to data. After writing to DB, call render functions explicitly.
-- **New localStorage key:** Define in `DB.K.*` in `db.js`, add to the snapshot key list in `DB.snapshot()`, and add to `Sync.DOCUMENTS` (or `COLLECTIONS`) in `sync.js`. If it should never sync to Firestore, add it to `Sync.NO_SYNC` instead.
+- **New localStorage key:** Define in `DB.K.*` in `db.js`, add to the snapshot key list in `DB.snapshot()`, and add to `Sync.DOCUMENTS` (or `COLLECTIONS`) in `sync.js`. If it should never sync to Firestore, add it to `Sync.NO_SYNC` instead. **For per-record master data that must add/edit/delete reliably across devices, prefer a `CollectionSync.create({...})` instance (see "Single-Source-of-Truth Sync Modules") instead of the `sync.js` DOCUMENT/COLLECTION path — and add a `DB._set` hook + load it in `nav.js` + Network-Only in `sw.js`.**
 - **New permission:** Add to `Auth.PERMS` in `auth.js`, check with `Auth.can('key')`.
 - **Storing objects vs arrays:** Object sub-keys inside a DOCUMENT are silently clobbered when another device syncs. Give any independently-managed data its own top-level `wt_*` key (see `wt_transfer_accounts`).
 - **Never read localStorage directly in sync.js:** Always use `this._localRead(lsKey)` — it handles LZString decompression and IDB overflow transparently.
@@ -234,6 +293,37 @@ const b64 = await Utils.compressImage(file, 900, 0.70);
 - **Error logging:** Uncaught errors go to `DB.logError()` → `wt_errors`; visible in Settings → Troubleshoot.
 - **Print layout:** A5 invoice format defined with `@media print` rules in `style.css`.
 - **Date filtering:** Invoice list and sync pull use Buddhist Era dates (BE = CE + 543) via `bedate.js`. Use `Utils.parseBEToISO()` / `Utils.formatDateTH()`.
+- **`window.DB` is `undefined` — use the bare `DB`.** `db.js` declares `const DB = {…}`, a lexical global that is NOT attached to `window`. `window.Sync` and `window.CustomerSync` etc. ARE on `window` (assigned explicitly), but **`DB` is not**. Never guard with `window.DB ? DB.x() : …` — it always takes the false branch. Use bare `DB` (or `typeof DB !== 'undefined'`). This bug silently disabled the customer backstop for several releases.
+- **`DB.getX()` returns the cache array by reference — never diff against db's "prev".** `DB.addCustomer/addProduct/upsertPrice/addUser` do `const a = DB.getX(); a.push(...); DB.saveX(a)`, which mutates the cached array **in place**. So in `DB._set` the captured previous value and the new value are the *same* mutated array (`prev === next`). Any per-record diff must compare against an independent baseline (the sync modules use `_serverFp`), not against db's prev — otherwise new adds are silently never pushed.
+- **Destructive confirms must use `await Utils.confirm(...)`, never `confirm(...)`.** In the Tauri desktop app `window.confirm()` returns a Promise (truthy), so `if (!confirm(msg)) return;` never aborts and the action runs *without* waiting for Yes/No. `Utils.confirm(message, title)` returns a Promise resolving to a boolean (native blocking dialog in Tauri, `window.confirm` on web). Always `await` it and make the enclosing function `async`. For inline action strings, use `Utils.confirm(msg).then(ok => { if (ok) {…} })`.
+
+## Troubleshooting Methodology (read before debugging a reported bug)
+
+**Do NOT guess. Scope the problem with evidence first.** Several past bugs cost many
+release cycles because fixes were shipped against a guessed cause. Follow this:
+
+1. **Reproduce / observe before changing code.** Restate the exact symptom. If the
+   report is ambiguous (e.g. "add disappears", "not sync"), ask the user a *focused*
+   disambiguating question (`AskUserQuestion`) that splits the problem space — e.g.
+   "does the new record appear on the OTHER device before you refresh?" (push-side vs
+   read-side) — rather than assuming.
+2. **Get real logs, not theories.** DevTools is **disabled in release Tauri builds**,
+   so add an **on-screen diagnostic** (see the **ตรวจซิงค์** button / `*.diagnose()`
+   pattern in the sync modules) that prints state + a recent action log with a copy
+   button, ship it, and have the user paste the output. Instrument the suspect path
+   (`_logLine`) before attempting a fix. A single real log line ("`applied: cache=96
+   → getCustomers=0`") ends days of speculation.
+3. **Verify your mental model against the running code, not the repo.** Confirm the
+   user is actually on the version you fixed (`APP_VERSION` is shown on the login
+   page and Settings) before concluding a fix "didn't work". Check that the code path
+   you think runs actually runs (log it).
+4. **When the data layer is suspect, prove where the value is lost** — cache vs
+   `_get` vs the accessor vs the server — with explicit probes, before editing.
+5. **One change at a time, then re-measure.** Don't stack multiple speculative fixes
+   in one release; you won't know which mattered (or which regressed).
+
+If you cannot clearly explain *why* a change fixes the observed log/behavior, you do
+not yet understand the bug — gather more evidence instead of shipping.
 
 ## sessionStorage keys used by sync
 
@@ -241,6 +331,9 @@ const b64 = await Utils.compressImage(file, 900, 0.70);
 |---|---|
 | `wt_sync_session_pulled` | Session guard — set after first `_pullAll()`; cleared by `Auth.logout()` |
 | `wt_sync_pull_ids` | JSON map of `colName → [id, …]`; persisted `_pullIds` for listener guard |
+| `wt_cust_unacked` / `wt_prod_unacked` / `wt_price_unacked` / `wt_user_unacked` | Per-module set of record ids written locally but not yet server-acknowledged (see Single-Source-of-Truth Sync Modules) |
+
+> Per-module bootstrap flags `wt_*_v2_migrated` are stored via `DB` (HDD-backed in Tauri), not sessionStorage.
 
 ## Git Note
 
