@@ -30,10 +30,29 @@ if (!window.CustomerSync) window.CustomerSync = {
   _seeded:      false,        // first snapshot processed (suppresses startup toasts)
   _unsub:       null,
   _pending:     [],           // [ [prevArr, nextArr], … ] local diffs queued before ready
+  _PEND_KEY:    'wt_cust_unacked',   // sessionStorage: ids written locally but not yet confirmed on the server
+  _unacked:     null,         // Set<id> — local adds/edits awaiting server acknowledgement
 
   _stripMeta(r) { const { _by, _byName, _ts, ...rec } = r || {}; return rec; },
   _fp(r) { return JSON.stringify(this._stripMeta(r)); },
   _col() { return Sync._orgRef().collection(this.COL); },
+
+  // ── Un-acked local writes ─────────────────────────────────────────────────
+  // A record we wrote locally is "un-acked" until a server snapshot confirms it.
+  // The set is persisted to sessionStorage so it survives a page refresh (in the
+  // Tauri WebView sessionStorage survives F5; on the web it survives same-tab
+  // reloads).  This is what stops a just-added customer from vanishing when the
+  // listener's first snapshot — delivered before our write is acknowledged, or
+  // from a cache that didn't persist the write — arrives without that record.
+  _loadUnacked() {
+    if (this._unacked) return this._unacked;
+    try { this._unacked = new Set(JSON.parse(sessionStorage.getItem(this._PEND_KEY) || '[]')); }
+    catch { this._unacked = new Set(); }
+    return this._unacked;
+  },
+  _saveUnacked() {
+    try { sessionStorage.setItem(this._PEND_KEY, JSON.stringify([...this._loadUnacked()])); } catch {}
+  },
 
   // Called from nav.js / on sync:ready. Idempotent.
   init() {
@@ -41,11 +60,23 @@ if (!window.CustomerSync) window.CustomerSync = {
     if (typeof Sync === 'undefined' || !Sync.ready || !Sync._db || !window.firebase) return;
     this._db       = Sync._db;
     this._deviceId = Sync._deviceId;
+    this._loadUnacked();
     this._ready = true;
     this._attach();
     // Flush any local changes that happened before we were ready (in order).
     const q = this._pending.splice(0);
     q.forEach(([p, n]) => { this._pushDiff(p, n).catch(e => console.warn('[CustomerSync] queued push', e)); });
+    // Re-push records that were written locally last session but never confirmed
+    // by the server (e.g. the app closed/refreshed before the write landed). This
+    // guarantees a just-added customer actually reaches Firestore.
+    if (this._unacked.size) {
+      const localNow = (window.DB ? DB.getCustomers() : []) || [];
+      const repush = localNow.filter(c => c && c.id && this._unacked.has(c.id));
+      if (repush.length) {
+        console.log('[CustomerSync] re-pushing', repush.length, 'un-acked local record(s)');
+        this._pushDiff([], repush).catch(e => console.warn('[CustomerSync] re-push', e));
+      }
+    }
     console.log('[CustomerSync] ready');
   },
 
@@ -61,9 +92,15 @@ if (!window.CustomerSync) window.CustomerSync = {
         //   • !fromCache → the SERVER genuinely has no customers (e.g. a purge, or a
         //     brand-new project). Apply emptiness locally. We do NOT auto-migrate
         //     local→server here: that would resurrect a deliberate purge.
+        const unacked = this._loadUnacked();
+        const fromCache = snap.metadata.fromCache;
+
         if (snap.empty) {
-          if (!snap.metadata.fromCache) {
-            DB.setLocalOnly(DB.K.CUSTOMERS, []);
+          // Server genuinely empty (only trust a server snapshot, not a cold cache).
+          // Still retain any un-acked local adds so a brand-new customer isn't wiped.
+          if (!fromCache) {
+            const extra = this._retainUnacked(new Set(), unacked);
+            DB.setLocalOnly(DB.K.CUSTOMERS, extra);
             this._emit();
           }
           this._seeded = true;
@@ -89,9 +126,25 @@ if (!window.CustomerSync) window.CustomerSync = {
           list.push(arr[0].rec);
           for (let i = 1; i < arr.length; i++) dupDel.push(arr[i].docId);
         }
+        const serverIds = new Set(list.map(c => c.id));
 
-        // Apply server truth to the local copy WITHOUT pushing back.
-        DB.setLocalOnly(DB.K.CUSTOMERS, list);
+        // Confirm un-acked records that now appear on the server → drop from the set.
+        let unackedChanged = false;
+        for (const id of [...unacked]) {
+          if (serverIds.has(id)) { unacked.delete(id); unackedChanged = true; }
+        }
+        // A server snapshot that explicitly removes a record clears its un-acked
+        // flag too (it was deleted before it could be confirmed as an add).
+        if (!fromCache) {
+          snap.docChanges().forEach(ch => {
+            if (ch.type === 'removed' && unacked.delete(ch.doc.id)) unackedChanged = true;
+          });
+        }
+        if (unackedChanged) this._saveUnacked();
+
+        // Apply server truth + still-un-acked local adds, WITHOUT pushing back.
+        const finalList = this._retainUnacked(serverIds, unacked, list);
+        DB.setLocalOnly(DB.K.CUSTOMERS, finalList);
         this._emit();
 
         // Clean up duplicate server docs (idempotent; both devices delete the same ids).
@@ -120,6 +173,18 @@ if (!window.CustomerSync) window.CustomerSync = {
   _emit() {
     window.dispatchEvent(new CustomEvent('sync:updated', { detail: { key: 'wt_customers' } }));
     window.dispatchEvent(new CustomEvent('sync:pulled'));
+  },
+
+  // Append still-un-acked local records (not present in serverIds) to a server
+  // list, reading their current data from the local copy. Returns the merged list.
+  _retainUnacked(serverIds, unacked, baseList) {
+    const list = Array.isArray(baseList) ? baseList.slice() : [];
+    if (!unacked || !unacked.size) return list;
+    const localNow = (window.DB ? DB.getCustomers() : []) || [];
+    for (const c of localNow) {
+      if (c && c.id && unacked.has(c.id) && !serverIds.has(c.id)) list.push(c);
+    }
+    return list;
   },
 
   async _deleteDocs(ids) {
@@ -153,6 +218,13 @@ if (!window.CustomerSync) window.CustomerSync = {
     const upserts = nextArr.filter(r => r && r.id && prevMap.get(r.id) !== this._fp(r));
     const deletes = [...prevMap.keys()].filter(id => !nextIds.has(id));
     if (!upserts.length && !deletes.length) return;
+
+    // Mark upserts as un-acked (retained until a server snapshot confirms them);
+    // clear that flag for deletions. Persisted so a refresh can't lose a new add.
+    const unacked = this._loadUnacked();
+    upserts.forEach(r => unacked.add(r.id));
+    deletes.forEach(id => unacked.delete(id));
+    this._saveUnacked();
 
     const col = this._col();
     const meta = () => ({
