@@ -183,6 +183,9 @@ const DB = {
     if (key === this.K.PRICING && window.PricingSync) {
       try { PricingSync.onLocalChange(_prevVal, val); } catch (e) { console.warn('[DB] PricingSync.onLocalChange', e); }
     }
+    if (key === this.K.USERS && window.UserSync) {
+      try { UserSync.onLocalChange(_prevVal, val); } catch (e) { console.warn('[DB] UserSync.onLocalChange', e); }
+    }
 
     this._cache[key] = val;                      // update cache immediately
 

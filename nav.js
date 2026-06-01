@@ -249,6 +249,7 @@
               loadScript('./collection-sync.js', function() {
                 loadScript('./product-sync.js', null, function(){});
                 loadScript('./pricing-sync.js', null, function(){});
+                loadScript('./user-sync.js', null, function(){});
               }, function(){});
             }
             loadScript('./connection-status.js', function() {

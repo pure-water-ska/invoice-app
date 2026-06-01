@@ -210,6 +210,43 @@ window.CollectionSync = window.CollectionSync || {
         );
       },
 
+      // One-shot additive pull — used by the login page so server-only accounts
+      // are present BEFORE login, without waiting for the async listener. Merges
+      // server records into local (NEVER removes local-only records → can't lock
+      // anyone out). Returns the server count (or -1 on error).
+      async pullOnce() {
+        try {
+          if (typeof Sync === 'undefined' || !Sync.ready || !Sync._db) return 0;
+          if (!this._db) { this._db = Sync._db; this._deviceId = Sync._deviceId; }
+          const snap = await this._col().get();
+          if (snap.empty) return 0;
+          const byKey = new Map();
+          snap.forEach(d => {
+            const rec = this._stripMeta(d.data());
+            rec.id = rec.id || d.id;
+            let gk; try { gk = this.cfg.dedupKey ? this.cfg.dedupKey(rec) : null; } catch { gk = null; }
+            const key = (gk != null && gk !== '') ? 'k:' + gk : 'i:' + d.id;
+            if (!byKey.has(key)) byKey.set(key, []);
+            byKey.get(key).push({ docId: d.id, rec });
+          });
+          const list = [];
+          for (const arr of byKey.values()) {
+            arr.sort((a, b) => (a.docId < b.docId ? -1 : a.docId > b.docId ? 1 : 0));
+            list.push(arr[0].rec);
+          }
+          const serverIds = new Set(list.map(r => r.id));
+          const local = this._local();
+          const merged = [...list, ...local.filter(r => r && r.id && !serverIds.has(r.id))];
+          this.cfg.setLocal(merged);
+          const fp = new Map();
+          for (const r of list) { if (r && r.id) fp.set(r.id, this._fp(r)); }
+          this._serverFp = fp;
+          if (list.length) this._markMigrated();
+          this._logLine('pullOnce: server=' + list.length + ' → local=' + this._local().length);
+          return list.length;
+        } catch (e) { console.warn('[' + this.cfg.name + '] pullOnce', e); return -1; }
+      },
+
       _emit() {
         window.dispatchEvent(new CustomEvent('sync:updated', { detail: { key: this.cfg.lsKey } }));
         window.dispatchEvent(new CustomEvent('sync:pulled'));

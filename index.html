@@ -168,7 +168,18 @@
 
     window.addEventListener('sync:ready', () => {
       clearTimeout(fallback);
-      onSyncReady();
+      // Users now live in their own collection (users_v2) via user-sync.js — pull
+      // them BEFORE enabling login so accounts created on another device work.
+      // pullOnce is additive (never removes local accounts) so it can't lock out.
+      loadScript('./collection-sync.js', function() {
+        loadScript('./user-sync.js', function() {
+          const done = () => onSyncReady();
+          if (window.UserSync && UserSync.pullOnce) {
+            UserSync.pullOnce().then(done).catch(done);
+            setTimeout(done, 2500); // safety: never block login on the pull
+          } else { done(); }
+        }, onSyncReady);
+      }, onSyncReady);
     }, { once: true });
 
     function loadScript(src, cb, errCb) {

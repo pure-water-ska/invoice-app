@@ -59,7 +59,9 @@ var Sync = {
     // products_v2 / pricing_v2 collections. The old whole-array DOCUMENT sync
     // had the same in-place-mutation diff blindness that broke customer adds.
     'wt_settings':        'settings',
-    'wt_users':           'users_cfg',      // avoid name clash with Firebase auth
+    // wt_users moved to its own single-source-of-truth module (user-sync.js,
+    // users_v2). The old whole-array DOCUMENT sync shared the in-place-mutation
+    // diff bug, so a newly added user didn't reliably reach other devices.
     'wt_returns':         'returns',
     'wt_versions':        'versions',
     'wt_pay_methods':          'pay_methods',
