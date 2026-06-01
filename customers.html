@@ -496,10 +496,18 @@ async function _ensureCustomersFromFirestore() {
     try { known = new Set(JSON.parse(localStorage.getItem('wt_cust_known_ids') || '[]')); }
     catch { known = new Set(); }
 
+    const RECENT_MS = 2 * 60 * 1000;
+    const now = Date.now();
     const localOnly = local.filter(c => {
       if (!c || !c.id) return false;
       if (serverIds.has(c.id) || serverNames.has(String(c.name))) return false; // server still has it
-      return !known.has(c.id);   // keep only records never confirmed on the server
+      if (known.has(c.id)) return false;          // was on server, now gone → DELETED elsewhere
+      // Not on server and never confirmed there: keep ONLY if created very
+      // recently (a genuine new local add not yet pushed). Old + not-on-server =
+      // a delete that happened before tracking started → drop it. This both
+      // auto-fixes already-stuck deletes AND keeps brand-new local adds.
+      const t = c.createdAt ? new Date(c.createdAt).getTime() : 0;
+      return t && (now - t < RECENT_MS);
     });
     const merged = [...serverList, ...localOnly];
 
@@ -1115,9 +1123,12 @@ function saveCustomer() {
 }
 
 // ── Delete single ─────────────────────────────────────────────────────────────
-function deleteCustomer(id) {
+async function deleteCustomer(id) {
   const c = DB.getCustomerById(id);
-  if (!confirm(`ลบลูกค้า "${c.name}" ใช่หรือไม่?`)) return;
+  if (!c) return;
+  // await — window.confirm is non-blocking in Tauri, so a sync check ran the
+  // delete before the user answered (toast showed with the dialog still open).
+  if (!(await Utils.confirm(`ลบลูกค้า "${c.name}" ใช่หรือไม่?`))) return;
   DB.deleteCustomer(id);
   _selected.delete(id);
   DB.logActivity(session.userId, session.username, 'ลบลูกค้า', { customerName: c.name });

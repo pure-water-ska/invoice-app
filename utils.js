@@ -391,6 +391,20 @@ const Utils = {
     return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), delay); };
   },
 
+  // Cross-platform confirm. ⚠️ In the Tauri desktop app window.confirm() is
+  // NON-BLOCKING (it does NOT pause JS for the answer), so the old
+  // `if (!confirm()) return;` pattern ran the action immediately without waiting.
+  // Use `if (!(await Utils.confirm(msg))) return;` instead. On the web it falls
+  // back to the native (blocking) confirm.
+  confirm(message, title = 'ยืนยัน') {
+    try {
+      if (window.IS_TAURI && window.__TAURI__ && window.__TAURI__.dialog && window.__TAURI__.dialog.ask) {
+        return window.__TAURI__.dialog.ask(message, { title, type: 'warning' });
+      }
+    } catch (e) {}
+    return Promise.resolve(window.confirm(message));
+  },
+
   showAlert(msg, type = 'success', containerId = 'alertBox') {
     const el = document.getElementById(containerId);
     if (!el) return;
