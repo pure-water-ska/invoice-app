@@ -53,8 +53,11 @@ var Sync = {
 
   // ── Small/medium collections → one Firestore document holds the whole array ─
   DOCUMENTS: {
-    'wt_products':        'products',
-    'wt_pricing':         'pricing',
+    // NOTE: wt_products & wt_pricing are intentionally NOT here. Like customers,
+    // they are handled by dedicated single-source-of-truth modules
+    // (product-sync.js / pricing-sync.js via collection-sync.js) using the
+    // products_v2 / pricing_v2 collections. The old whole-array DOCUMENT sync
+    // had the same in-place-mutation diff blindness that broke customer adds.
     'wt_settings':        'settings',
     'wt_users':           'users_cfg',      // avoid name clash with Firebase auth
     'wt_returns':         'returns',

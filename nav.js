@@ -243,7 +243,14 @@
           // then connection-status.js, then sync.js
           function afterFolderSync() {
             if (window.LocalFolderSync) LocalFolderSync.init();
-            function afterSync() { loadScript('./customer-sync.js', null, function(){}); }
+            function afterSync() {
+              loadScript('./customer-sync.js', null, function(){});
+              // Generic factory + product/pricing instances (load factory first).
+              loadScript('./collection-sync.js', function() {
+                loadScript('./product-sync.js', null, function(){});
+                loadScript('./pricing-sync.js', null, function(){});
+              }, function(){});
+            }
             loadScript('./connection-status.js', function() {
               loadScript('./sync.js', afterSync, onSDKError);
             }, function() {

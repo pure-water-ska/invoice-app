@@ -99,6 +99,9 @@ self.addEventListener('fetch', (event) => {
                           url.pathname.endsWith('/nav.js') ||
                           url.pathname.endsWith('/sync.js') ||
                           url.pathname.endsWith('/customer-sync.js') ||
+                          url.pathname.endsWith('/collection-sync.js') ||
+                          url.pathname.endsWith('/product-sync.js') ||
+                          url.pathname.endsWith('/pricing-sync.js') ||
                           url.pathname.endsWith('/db.js') ||
                           url.pathname.endsWith('/connection-status.js') ||
                           url.pathname.endsWith('/settings.js');

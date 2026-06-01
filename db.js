@@ -175,6 +175,14 @@ const DB = {
     if (key === this.K.CUSTOMERS && window.CustomerSync) {
       try { CustomerSync.onLocalChange(_prevVal, val); } catch (e) { console.warn('[DB] CustomerSync.onLocalChange', e); }
     }
+    // Products & pricing use the same single-source-of-truth modules (see
+    // collection-sync.js). They are NOT in sync.js DOCUMENTS — these modules own them.
+    if (key === this.K.PRODUCTS && window.ProductSync) {
+      try { ProductSync.onLocalChange(_prevVal, val); } catch (e) { console.warn('[DB] ProductSync.onLocalChange', e); }
+    }
+    if (key === this.K.PRICING && window.PricingSync) {
+      try { PricingSync.onLocalChange(_prevVal, val); } catch (e) { console.warn('[DB] PricingSync.onLocalChange', e); }
+    }
 
     this._cache[key] = val;                      // update cache immediately
 

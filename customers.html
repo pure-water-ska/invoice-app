@@ -459,6 +459,12 @@ async function custSyncDebug() {
   let report;
   if (!window.CustomerSync) report = 'CustomerSync ยังไม่ถูกโหลด (customer-sync.js ไม่ทำงาน)';
   else { try { report = await CustomerSync.diagnose(); } catch (e) { report = 'diagnose error: ' + (e.message || e); } }
+  // Append product & pricing module status so this one button covers all three.
+  for (const [label, mod] of [['ProductSync', window.ProductSync], ['PricingSync', window.PricingSync]]) {
+    report += '\n\n===== ' + label + ' =====\n';
+    if (!mod) { report += '(not loaded)'; continue; }
+    try { report += await mod.diagnose(); } catch (e) { report += 'diagnose error: ' + (e.message || e); }
+  }
 
   document.getElementById('custDbgOverlay')?.remove();
   const ov = document.createElement('div');
