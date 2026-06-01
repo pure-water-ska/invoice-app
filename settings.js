@@ -1993,8 +1993,8 @@ async function forceDedupeCustomers() {
   const L = []; const paint = () => out.textContent = L.join('\n');
   L.push('=== Dedupe customers on server ==='); paint();
   try {
-    const colName = Sync.COLLECTIONS['wt_customers'];
-    if (!colName || !Sync._db) { L.push('❌ not ready / not a collection'); paint(); return; }
+    const colName = 'customers_v2';
+    if (!Sync._db) { L.push('❌ not ready'); paint(); return; }
     const col = Sync._orgRef().collection(colName);
     const snap = await col.get({ source: 'server' });
     L.push('server docs: ' + snap.size); paint();
@@ -2049,7 +2049,7 @@ async function purgeAllCustomers() {
     const base = Sync._orgRef();
 
     // 1) Delete every doc in the customers_v2 collection
-    const colName = (Sync.COLLECTIONS && Sync.COLLECTIONS['wt_customers']) || 'customers_v2';
+    const colName = 'customers_v2';
     const col = base.collection(colName);
     const snap = await col.get({ source: 'server' });
     let batch = Sync._db.batch(), ops = 0, deleted = 0;
@@ -2101,7 +2101,7 @@ async function runCustomerAnalysis() {
     if (typeof Sync === 'undefined' || !Sync._db || typeof DB === 'undefined') { L.push('❌ not ready'); paint(); return; }
     L.push('app version : ' + (window.APP_VERSION ? APP_VERSION.version : '?'));
     L.push('deviceId    : ' + Sync._deviceId);
-    const colName = Sync.COLLECTIONS['wt_customers'] || '(NOT a collection!)';
+    const colName = 'customers_v2';
     L.push('customers col: ' + colName);
     L.push(''); paint();
 
@@ -2116,7 +2116,7 @@ async function runCustomerAnalysis() {
     L.push(''); paint();
 
     // ── SERVER ──
-    if (Sync.COLLECTIONS['wt_customers']) {
+    if (Sync._db) {
       const snap = await Sync._orgRef().collection(colName).get({ source: 'server' });
       const srvByName = new Map(); const byDevice = {};
       snap.forEach(d => {
@@ -2162,7 +2162,7 @@ async function runRealDeleteTest() {
   L.push('=== Real delete-path test ==='); paint();
   try {
     if (typeof Sync === 'undefined' || !Sync._db || typeof DB === 'undefined') { L.push('❌ not ready'); paint(); return; }
-    const colName = Sync.COLLECTIONS['wt_customers'] || 'customers_v2';
+    const colName = 'customers_v2';
     const col = Sync._orgRef().collection(colName);
     const id = 'deltest-' + Date.now();
     L.push('colName=' + colName + '  Sync.ready=' + Sync.ready);
@@ -2202,9 +2202,8 @@ async function forceMigrateCustomers() {
   L.push('=== Migrate customers → customers_v2 ==='); paint();
   try {
     if (typeof Sync === 'undefined' || !Sync._db) { L.push('❌ Sync/Firestore not ready'); paint(); return; }
-    const colName = Sync.COLLECTIONS && Sync.COLLECTIONS['wt_customers'];
-    L.push('COLLECTIONS[wt_customers] = ' + (colName || '(NOT a collection — stale sync.js!)'));
-    if (!colName) { L.push('❌ This build still treats customers as a DOCUMENT — update the app.'); paint(); return; }
+    const colName = 'customers_v2';
+    L.push('customers collection: ' + colName);
     const local = (window.DB ? DB.getCustomers() : []) || [];
     L.push('local customers (this device): ' + local.length); paint();
 

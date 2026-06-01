@@ -48,11 +48,11 @@ Open `index.html` (login page). The app works fully offline without Firebase or 
 |---|---|---|
 | `INVOICES` | `wt_invoices` | Invoice records (array) |
 | `PAYMENTS` | `wt_payments` | Payment records (array) |
-| `CUSTOMERS` | `wt_customers` | Customer list |
-| `PRODUCTS` | `wt_products` | Product catalogue |
-| `PRICING` | `wt_pricing` | Per-customer pricing rules |
+| `CUSTOMERS` | `wt_customers` | Customer list — **owned by `customer-sync.js`** (not `sync.js`) |
+| `PRODUCTS` | `wt_products` | Product catalogue — **owned by `product-sync.js`** (not `sync.js`) |
+| `PRICING` | `wt_pricing` | Per-customer pricing rules — **owned by `pricing-sync.js`** (not `sync.js`) |
 | `SETTINGS` | `wt_settings` | App settings object |
-| `USERS` | `wt_users` | User accounts |
+| `USERS` | `wt_users` | User accounts — **owned by `user-sync.js`** (not `sync.js`) |
 | `RETURNS` | `wt_returns` | Return/credit records |
 | `VERSIONS` | `wt_versions` | Version notes |
 | `PAY_METHODS` | `wt_pay_methods` | Payment method list |
