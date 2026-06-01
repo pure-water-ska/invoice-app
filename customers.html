@@ -454,13 +454,42 @@ function _ensureCustomersFromFirestore() {
   render();
 }
 
-// Sync diagnostic — shows whether customer pushes are reaching Firestore.
+// Sync diagnostic — shows whether customer pushes/pulls are working, with a copy button.
 async function custSyncDebug() {
-  if (!window.CustomerSync) { alert('CustomerSync ยังไม่ถูกโหลด (customer-sync.js ไม่ทำงาน)'); return; }
   let report;
-  try { report = await CustomerSync.diagnose(); }
-  catch (e) { report = 'diagnose error: ' + (e.message || e); }
-  alert(report);
+  if (!window.CustomerSync) report = 'CustomerSync ยังไม่ถูกโหลด (customer-sync.js ไม่ทำงาน)';
+  else { try { report = await CustomerSync.diagnose(); } catch (e) { report = 'diagnose error: ' + (e.message || e); } }
+
+  document.getElementById('custDbgOverlay')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'custDbgOverlay';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:16px;';
+  ov.innerHTML = `
+    <div style="background:#fff;border-radius:12px;max-width:640px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;font-family:'Sarabun',sans-serif">
+      <div style="padding:12px 16px;background:#0dcaf0;color:#053;display:flex;align-items:center;gap:8px">
+        <i class="bi bi-bug"></i><strong>ตรวจสอบการซิงค์ลูกค้า</strong>
+        <button id="custDbgClose" style="margin-left:auto;border:none;background:none;font-size:20px;cursor:pointer">&times;</button>
+      </div>
+      <textarea id="custDbgText" readonly style="flex:1;margin:0;border:none;padding:12px 16px;font:13px/1.5 monospace;resize:none;white-space:pre;overflow:auto;min-height:300px"></textarea>
+      <div style="padding:10px 16px;display:flex;gap:8px;border-top:1px solid #eee">
+        <button id="custDbgCopy" class="btn btn-primary btn-sm"><i class="bi bi-clipboard me-1"></i>คัดลอก</button>
+        <button id="custDbgClose2" class="btn btn-secondary btn-sm">ปิด</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  document.getElementById('custDbgText').value = report;
+  const close = () => ov.remove();
+  document.getElementById('custDbgClose').onclick = close;
+  document.getElementById('custDbgClose2').onclick = close;
+  ov.onclick = (e) => { if (e.target === ov) close(); };
+  document.getElementById('custDbgCopy').onclick = async () => {
+    const ta = document.getElementById('custDbgText');
+    let ok = false;
+    try { await navigator.clipboard.writeText(ta.value); ok = true; } catch {}
+    if (!ok) { try { ta.removeAttribute('readonly'); ta.select(); ok = document.execCommand('copy'); ta.setAttribute('readonly',''); } catch {} }
+    const btn = document.getElementById('custDbgCopy');
+    btn.innerHTML = ok ? '<i class="bi bi-check2 me-1"></i>คัดลอกแล้ว' : 'คัดลอกไม่ได้ — เลือกแล้วกด Ctrl+C';
+  };
 }
 
 function render() {

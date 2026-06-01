@@ -136,14 +136,18 @@ if (!window.CustomerSync) window.CustomerSync = {
         //     local→server here: that would resurrect a deliberate purge.
         const unacked = this._loadUnacked();
         const fromCache = snap.metadata.fromCache;
+        this._logLine(`snapshot: size=${snap.size} empty=${snap.empty} fromCache=${fromCache}`);
 
         if (snap.empty) {
           // Server genuinely empty (only trust a server snapshot, not a cold cache).
           // Still retain any un-acked local adds so a brand-new customer isn't wiped.
           if (!fromCache) {
             const extra = this._retainUnacked(new Set(), unacked);
+            this._logLine(`SERVER EMPTY (!fromCache) → applying ${extra.length} (retained only)`);
             DB.setLocalOnly(DB.K.CUSTOMERS, extra);
             this._emit();
+          } else {
+            this._logLine('empty fromCache → ignored (no wipe)');
           }
           this._seeded = true;
           return;
@@ -193,6 +197,8 @@ if (!window.CustomerSync) window.CustomerSync = {
         // Apply server truth + still-un-acked local adds, WITHOUT pushing back.
         const finalList = this._retainUnacked(serverIds, unacked, list);
         DB.setLocalOnly(DB.K.CUSTOMERS, finalList);
+        const after = ((window.DB ? DB.getCustomers() : []) || []).length;
+        this._logLine(`applied: server=${list.length} final=${finalList.length} → DB.getCustomers=${after}`);
         this._emit();
 
         // Clean up duplicate server docs (idempotent; both devices delete the same ids).
