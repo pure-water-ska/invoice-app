@@ -244,6 +244,32 @@ const DB = {
     if (window.LocalFolderSync) LocalFolderSync.queueWrite(key, val);
   },
 
+  // ── Local-only write: persist to cache + durable storage WITHOUT syncing ────
+  // Used by on-open reconcilers (e.g. customers.html _ensureCustomersFromFirestore)
+  // that apply *server truth* to the local copy. Pushing here would re-upload every
+  // record with a fresh _ts, making the other device's listener fire "modified",
+  // show an "edited" toast, run its own reconcile, and push back — an infinite
+  // ping-pong that also drowns out genuine deletes. So: update local only, never
+  // call Sync.push(). (Genuine user adds/deletes still go through _set → push.)
+  setLocalOnly(key, val) {
+    this._cache[key] = val;
+    if (window.IS_TAURI) {
+      try { sessionStorage.setItem('wt_hdd_shadow_' + key, JSON.stringify(val)); } catch {}
+      if (this._tauri.dataDir) this._tauri.write(key, val);
+      if (window.LocalFolderSync) LocalFolderSync.queueWrite(key, val);
+      return;
+    }
+    if (this._idbKeys.has(key)) {
+      if (window.IDB) IDB.data.set(key, val).catch(e => console.error('[DB] IDB local-only write failed', key, e));
+    } else {
+      try {
+        const json = JSON.stringify(val);
+        localStorage.setItem(key, (typeof LZString !== 'undefined') ? LZString.compressToUTF16(json) : json);
+      } catch (e) { console.warn('[DB] setLocalOnly write failed', key, e); }
+    }
+    if (window.LocalFolderSync) LocalFolderSync.queueWrite(key, val);
+  },
+
   // ── Storage quota handlers (banners removed — overflow handled silently) ────
   _warnQuota(key) {
     console.warn('[DB] quota: localStorage + IDB both full for key:', key);

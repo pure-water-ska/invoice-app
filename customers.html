@@ -522,9 +522,13 @@ async function _ensureCustomersFromFirestore() {
     const curIds = new Set(local.filter(c => c && c.id).map(c => c.id));
     const changed = merged.length !== local.length || merged.some(c => !curIds.has(c.id)) || dupIdsToDelete.length > 0;
     if (changed) {
-      DB.saveCustomers(merged);
+      // LOCAL-ONLY write: applies server truth to the local copy WITHOUT pushing
+      // back to Firestore. Pushing here re-uploaded every record with a fresh _ts,
+      // which made the other device fire "modified" → "edited" toast → its own
+      // reconcile → push back: an infinite ping-pong that also lost real deletes.
+      DB.setLocalOnly(DB.K.CUSTOMERS, merged);
       _custPage = 1; render();
-      console.log('[customers] reconciled from Firestore → ' + merged.length);
+      console.log('[customers] reconciled from Firestore (local-only) → ' + merged.length);
     }
   } catch (e) { console.warn('[customers] ensure-from-firestore failed', e); }
 }
