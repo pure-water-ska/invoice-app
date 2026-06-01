@@ -32,6 +32,9 @@ if (!window.CustomerSync) window.CustomerSync = {
   _pending:     [],           // [ [prevArr, nextArr], … ] local diffs queued before ready
   _PEND_KEY:    'wt_cust_unacked',   // sessionStorage: ids written locally but not yet confirmed on the server
   _unacked:     null,         // Set<id> — local adds/edits awaiting server acknowledgement
+  _RECENT_MS:   5 * 60 * 1000, // durable backstop: a local record created within this window
+                               // and not yet on the server is kept + re-pushed, even if the
+                               // sessionStorage un-acked set was lost (e.g. full app restart).
 
   _stripMeta(r) { const { _by, _byName, _ts, ...rec } = r || {}; return rec; },
   _fp(r) { return JSON.stringify(this._stripMeta(r)); },
@@ -69,11 +72,17 @@ if (!window.CustomerSync) window.CustomerSync = {
     // Re-push records that were written locally last session but never confirmed
     // by the server (e.g. the app closed/refreshed before the write landed). This
     // guarantees a just-added customer actually reaches Firestore.
-    if (this._unacked.size) {
+    {
       const localNow = (window.DB ? DB.getCustomers() : []) || [];
-      const repush = localNow.filter(c => c && c.id && this._unacked.has(c.id));
+      const now = Date.now();
+      const repush = localNow.filter(c => {
+        if (!c || !c.id) return false;
+        if (this._unacked.has(c.id)) return true;
+        const t = c.createdAt ? new Date(c.createdAt).getTime() : 0;
+        return t && (now - t < this._RECENT_MS);   // durable backstop
+      });
       if (repush.length) {
-        console.log('[CustomerSync] re-pushing', repush.length, 'un-acked local record(s)');
+        console.log('[CustomerSync] re-pushing', repush.length, 'un-confirmed local record(s)');
         this._pushDiff([], repush).catch(e => console.warn('[CustomerSync] re-push', e));
       }
     }
@@ -112,9 +121,13 @@ if (!window.CustomerSync) window.CustomerSync = {
         // smallest doc id — deterministic, so every device picks the same one —
         // and the extras are deleted from the server to stop them resyncing.
         const byName = new Map();
+        const serverAckedIds = new Set();   // ids whose doc is confirmed BY THE SERVER (not a local pending write)
         snap.forEach(d => {
           const rec = this._stripMeta(d.data());
           rec.id = rec.id || d.id;
+          // A doc with hasPendingWrites is only our own local write echoed back —
+          // NOT server confirmation. Only count server-acked docs as "confirmed".
+          if (!d.metadata.hasPendingWrites) serverAckedIds.add(rec.id);
           const key = rec.name != null ? 'n:' + String(rec.name) : 'i:' + d.id;
           if (!byName.has(key)) byName.set(key, []);
           byName.get(key).push({ docId: d.id, rec });
@@ -128,10 +141,12 @@ if (!window.CustomerSync) window.CustomerSync = {
         }
         const serverIds = new Set(list.map(c => c.id));
 
-        // Confirm un-acked records that now appear on the server → drop from the set.
+        // Confirm un-acked records ONLY once the SERVER has acknowledged them
+        // (doc present without pendingWrites). Clearing on a pending/cached echo
+        // was the bug: a refresh before the real server write lost the record.
         let unackedChanged = false;
         for (const id of [...unacked]) {
-          if (serverIds.has(id)) { unacked.delete(id); unackedChanged = true; }
+          if (serverAckedIds.has(id)) { unacked.delete(id); unackedChanged = true; }
         }
         // A server snapshot that explicitly removes a record clears its un-acked
         // flag too (it was deleted before it could be confirmed as an add).
@@ -179,10 +194,14 @@ if (!window.CustomerSync) window.CustomerSync = {
   // list, reading their current data from the local copy. Returns the merged list.
   _retainUnacked(serverIds, unacked, baseList) {
     const list = Array.isArray(baseList) ? baseList.slice() : [];
-    if (!unacked || !unacked.size) return list;
     const localNow = (window.DB ? DB.getCustomers() : []) || [];
+    const now = Date.now();
     for (const c of localNow) {
-      if (c && c.id && unacked.has(c.id) && !serverIds.has(c.id)) list.push(c);
+      if (!c || !c.id || serverIds.has(c.id)) continue;
+      const isUnacked = unacked && unacked.has(c.id);
+      const t = c.createdAt ? new Date(c.createdAt).getTime() : 0;
+      const isRecent = t && (now - t < this._RECENT_MS);   // durable backstop for un-acked adds
+      if (isUnacked || isRecent) list.push(c);
     }
     return list;
   },
