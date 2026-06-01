@@ -32,10 +32,9 @@ if (!window.CustomerSync) window.CustomerSync = {
   _pending:     [],           // [ [prevArr, nextArr], … ] local diffs queued before ready
   _PEND_KEY:    'wt_cust_unacked',   // sessionStorage: ids written locally but not yet confirmed on the server
   _unacked:     null,         // Set<id> — local adds/edits awaiting server acknowledgement
-  _RECENT_MS:   5 * 60 * 1000, // durable backstop: a local record created within this window
-                               // and not yet on the server is kept + re-pushed, even if the
-                               // sessionStorage un-acked set was lost (e.g. full app restart).
-
+  _serverFp:    new Map(),    // id → JSON fingerprint of what the SERVER currently holds. Local
+                              // changes are diffed against THIS (not db's prev), because addCustomer
+                              // mutates the cached array in place, making db's prev === next.
   _log:         [],           // diagnostic ring buffer (see diagnose())
 
   _stripMeta(r) { const { _by, _byName, _ts, ...rec } = r || {}; return rec; },
@@ -111,16 +110,16 @@ if (!window.CustomerSync) window.CustomerSync = {
     this._attach();
     // Flush any local changes that happened before we were ready (in order).
     const q = this._pending.splice(0);
-    q.forEach(([p, n]) => { this._pushDiff(p, n).catch(e => console.warn('[CustomerSync] queued push', e)); });
-    // Re-push records that were written locally last session but never confirmed
-    // by the server (e.g. the app closed/refreshed before the write landed). This
-    // guarantees a just-added customer actually reaches Firestore.
+    q.forEach(n => { this._pushLocal(n).catch(e => console.warn('[CustomerSync] queued push', e)); });
+    // Re-push records written locally last session but never confirmed by the
+    // server (sessionStorage un-acked set survives F5). Guarantees a just-added
+    // customer actually reaches Firestore even if the prior attempt was interrupted.
     if (this._unacked.size) {
       const localNow = ((typeof DB !== "undefined") ? DB.getCustomers() : []) || [];
       const repush = localNow.filter(c => c && c.id && this._unacked.has(c.id));
       if (repush.length) {
-        console.log('[CustomerSync] re-pushing', repush.length, 'un-acked local record(s)');
-        this._pushDiff([], repush).catch(e => console.warn('[CustomerSync] re-push', e));
+        this._logLine('re-pushing ' + repush.length + ' un-acked local record(s)');
+        this._commit(repush, []).catch(e => console.warn('[CustomerSync] re-push', e));
       }
     }
     console.log('[CustomerSync] ready');
@@ -198,6 +197,14 @@ if (!window.CustomerSync) window.CustomerSync = {
         }
         if (unackedChanged) this._saveUnacked();
 
+        // Maintain the server fingerprint map from genuine SERVER snapshots only
+        // (not a cold cache). onLocalChange diffs against this to decide what to push.
+        if (!fromCache) {
+          const fp = new Map();
+          for (const c of list) { if (c && c.id) fp.set(c.id, this._fp(c)); }
+          this._serverFp = fp;
+        }
+
         // Apply server truth + still-un-acked local adds, WITHOUT pushing back.
         const finalList = this._retainUnacked(serverIds, unacked, list);
         DB.setLocalOnly(DB.K.CUSTOMERS, finalList);
@@ -266,34 +273,40 @@ if (!window.CustomerSync) window.CustomerSync = {
   },
 
   // ── Local change → Firestore (called by DB._set on every customer write) ────
-  // prev/next are the customer arrays before/after the write. Because the local
-  // copy is kept equal to the server by the listener, prev reflects server state,
-  // so an id present in prev but absent in next is a genuine user deletion.
+  // We IGNORE db's `prev`: addCustomer/saveCustomers mutate the cached array in
+  // place (a = getCustomers(); a.push(c); saveCustomers(a)), so by the time _set
+  // runs, db's prev === next and a naive diff sees no change. Instead we diff the
+  // new array against _serverFp (what the server actually holds), which is the
+  // reliable source of "what changed".
   onLocalChange(prev, next) {
-    const pn = Array.isArray(prev) ? prev.length : 0;
     const nn = Array.isArray(next) ? next.length : 0;
-    this._logLine(`onLocalChange prev=${pn} next=${nn} ready=${this._ready}`);
-    this._pushDiff(prev, next).catch(e => this._logLine('push REJECTED: ' + (e.code || '') + ' ' + (e.message || e)));
+    this._logLine(`onLocalChange next=${nn} ready=${this._ready}`);
+    this._pushLocal(next).catch(e => this._logLine('push REJECTED: ' + (e.code || '') + ' ' + (e.message || e)));
   },
 
-  async _pushDiff(prev, next) {
-    if (!this._ready) { this._pending.push([prev, next]); this._logLine('not ready → queued diff'); return; }
-    const prevArr = Array.isArray(prev) ? prev : [];
-    const nextArr = Array.isArray(next) ? next : [];
-    const prevMap = new Map(prevArr.filter(r => r && r.id).map(r => [r.id, this._fp(r)]));
-    const nextIds = new Set(nextArr.filter(r => r && r.id).map(r => r.id));
+  async _pushLocal(next) {
+    if (!this._ready) { this._pending.push(next); this._logLine('not ready → queued'); return; }
+    const nextArr  = Array.isArray(next) ? next : [];
+    const nextById = new Map(nextArr.filter(r => r && r.id).map(r => [r.id, r]));
+    const fp = this._serverFp || new Map();
 
-    const upserts = nextArr.filter(r => r && r.id && prevMap.get(r.id) !== this._fp(r));
-    const deletes = [...prevMap.keys()].filter(id => !nextIds.has(id));
+    // Upsert: in the local array but the server has no copy / a different copy.
+    const upserts = nextArr.filter(r => r && r.id && fp.get(r.id) !== this._fp(r));
+    // Delete: the server has it but the local array no longer does.
+    const deletes = [...fp.keys()].filter(id => !nextById.has(id));
     if (!upserts.length && !deletes.length) return;
 
-    // Mark upserts as un-acked (retained until a server snapshot confirms them);
-    // clear that flag for deletions. Persisted so a refresh can't lose a new add.
+    // Mark upserts un-acked (retained until the server confirms); clear on delete.
     const unacked = this._loadUnacked();
     upserts.forEach(r => unacked.add(r.id));
     deletes.forEach(id => unacked.delete(id));
     this._saveUnacked();
 
+    await this._commit(upserts, deletes);
+  },
+
+  async _commit(upserts, deletes) {
+    if (!upserts.length && !deletes.length) return;
     const col = this._col();
     const meta = () => ({
       _by: this._deviceId,
@@ -301,14 +314,14 @@ if (!window.CustomerSync) window.CustomerSync = {
       _ts: firebase.firestore.FieldValue.serverTimestamp(),
     });
     let batch = this._db.batch(), ops = 0;
-    const commit = async () => { await batch.commit(); batch = this._db.batch(); ops = 0; };
+    const flush = async () => { await batch.commit(); batch = this._db.batch(); ops = 0; };
     for (const r of upserts) {
       batch.set(col.doc(r.id), { ...this._stripMeta(r), ...meta() }, { merge: true });
-      if (++ops >= 450) await commit();
+      if (++ops >= 450) await flush();
     }
     for (const id of deletes) {
       batch.delete(col.doc(id));
-      if (++ops >= 450) await commit();
+      if (++ops >= 450) await flush();
     }
     if (ops > 0) {
       this._logLine(`committing ${upserts.length} upsert, ${deletes.length} delete …`);
