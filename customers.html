@@ -65,6 +65,9 @@
   <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h5 class="mb-0 fw-bold"><i class="bi bi-people me-2 text-primary"></i>ฐานข้อมูลลูกค้า</h5>
     <div class="d-flex gap-2 flex-wrap">
+      <button class="btn btn-outline-info btn-sm" onclick="custSyncDebug()" title="ตรวจสอบการซิงค์">
+        <i class="bi bi-bug me-1"></i>ตรวจซิงค์
+      </button>
       <button class="btn btn-outline-secondary btn-sm" id="selModeBtn" onclick="toggleSelMode()">
         <i class="bi bi-check2-square me-1"></i>เลือก
       </button>
@@ -449,6 +452,15 @@ window.addEventListener('sync:ready',  () => { _ensureCustomersFromFirestore(); 
 function _ensureCustomersFromFirestore() {
   try { if (window.CustomerSync && !CustomerSync._ready) CustomerSync.init(); } catch {}
   render();
+}
+
+// Sync diagnostic — shows whether customer pushes are reaching Firestore.
+async function custSyncDebug() {
+  if (!window.CustomerSync) { alert('CustomerSync ยังไม่ถูกโหลด (customer-sync.js ไม่ทำงาน)'); return; }
+  let report;
+  try { report = await CustomerSync.diagnose(); }
+  catch (e) { report = 'diagnose error: ' + (e.message || e); }
+  alert(report);
 }
 
 function render() {

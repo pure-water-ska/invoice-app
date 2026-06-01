@@ -36,9 +36,41 @@ if (!window.CustomerSync) window.CustomerSync = {
                                // and not yet on the server is kept + re-pushed, even if the
                                // sessionStorage un-acked set was lost (e.g. full app restart).
 
+  _log:         [],           // diagnostic ring buffer (see diagnose())
+
   _stripMeta(r) { const { _by, _byName, _ts, ...rec } = r || {}; return rec; },
   _fp(r) { return JSON.stringify(this._stripMeta(r)); },
   _col() { return Sync._orgRef().collection(this.COL); },
+
+  _logLine(msg) {
+    const line = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '  ' + msg;
+    this._log.push(line);
+    if (this._log.length > 40) this._log.shift();
+    console.log('[CustomerSync]', msg);
+  },
+
+  // On-screen diagnostic (DevTools is disabled in release Tauri builds). Returns a
+  // text report including a LIVE server count so we can see whether pushes land.
+  async diagnose() {
+    const L = [];
+    L.push('CustomerSync._ready : ' + this._ready);
+    L.push('Sync defined        : ' + (typeof Sync !== 'undefined'));
+    L.push('Sync.ready          : ' + (window.Sync && Sync.ready));
+    L.push('Sync._db            : ' + !!(window.Sync && Sync._db));
+    L.push('Sync._orgId         : ' + (window.Sync && Sync._orgId));
+    L.push('deviceId            : ' + this._deviceId);
+    L.push('un-acked ids        : ' + [...this._loadUnacked()].length);
+    L.push('local customers     : ' + (((window.DB ? DB.getCustomers() : []) || []).length));
+    try {
+      const snap = await this._col().get();
+      L.push('SERVER customers    : ' + snap.size + '  (live get from customers_v2)');
+    } catch (e) {
+      L.push('SERVER get ERROR    : ' + (e.code || '') + ' ' + (e.message || e));
+    }
+    L.push('— recent activity —');
+    L.push(...(this._log.length ? this._log.slice(-18) : ['(no activity logged)']));
+    return L.join('\n');
+  },
 
   // ── Un-acked local writes ─────────────────────────────────────────────────
   // A record we wrote locally is "un-acked" until a server snapshot confirms it.
@@ -65,6 +97,7 @@ if (!window.CustomerSync) window.CustomerSync = {
     this._deviceId = Sync._deviceId;
     this._loadUnacked();
     this._ready = true;
+    this._logLine('init: ready (orgId=' + Sync._orgId + ')');
     this._attach();
     // Flush any local changes that happened before we were ready (in order).
     const q = this._pending.splice(0);
@@ -224,11 +257,14 @@ if (!window.CustomerSync) window.CustomerSync = {
   // copy is kept equal to the server by the listener, prev reflects server state,
   // so an id present in prev but absent in next is a genuine user deletion.
   onLocalChange(prev, next) {
-    this._pushDiff(prev, next).catch(e => console.warn('[CustomerSync] push', e));
+    const pn = Array.isArray(prev) ? prev.length : 0;
+    const nn = Array.isArray(next) ? next.length : 0;
+    this._logLine(`onLocalChange prev=${pn} next=${nn} ready=${this._ready}`);
+    this._pushDiff(prev, next).catch(e => this._logLine('push REJECTED: ' + (e.code || '') + ' ' + (e.message || e)));
   },
 
   async _pushDiff(prev, next) {
-    if (!this._ready) { this._pending.push([prev, next]); return; }
+    if (!this._ready) { this._pending.push([prev, next]); this._logLine('not ready → queued diff'); return; }
     const prevArr = Array.isArray(prev) ? prev : [];
     const nextArr = Array.isArray(next) ? next : [];
     const prevMap = new Map(prevArr.filter(r => r && r.id).map(r => [r.id, this._fp(r)]));
@@ -261,8 +297,11 @@ if (!window.CustomerSync) window.CustomerSync = {
       batch.delete(col.doc(id));
       if (++ops >= 450) await commit();
     }
-    if (ops > 0) await batch.commit();
-    console.log(`[CustomerSync] pushed ${upserts.length} upsert, ${deletes.length} delete`);
+    if (ops > 0) {
+      this._logLine(`committing ${upserts.length} upsert, ${deletes.length} delete …`);
+      await batch.commit();
+      this._logLine(`commit OK (${upserts.length} upsert, ${deletes.length} delete)`);
+    }
   },
 };
 
