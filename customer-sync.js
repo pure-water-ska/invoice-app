@@ -61,6 +61,16 @@ if (!window.CustomerSync) window.CustomerSync = {
     L.push('deviceId            : ' + this._deviceId);
     L.push('un-acked ids        : ' + [...this._loadUnacked()].length);
     L.push('local customers     : ' + (((window.DB ? DB.getCustomers() : []) || []).length));
+    // Read-path probe: compare raw cache vs what _get / getCustomers return.
+    try {
+      const ck = DB.K.CUSTOMERS;
+      const cacheArr = DB._cache ? DB._cache[ck] : undefined;
+      L.push('cache[CUST]         : ' + (Array.isArray(cacheArr) ? cacheArr.length : ('not-array:' + typeof cacheArr)));
+      let g; try { g = DB._get(ck); } catch (e) { g = 'throw:' + e.message; }
+      L.push('_get(CUST)          : ' + (Array.isArray(g) ? g.length : ('not-array:' + (g && g.slice ? g.slice(0,40) : typeof g))));
+      L.push('getCustomers type   : ' + (() => { const r = DB.getCustomers(); return Array.isArray(r) ? ('array len ' + r.length) : (typeof r + ' = ' + JSON.stringify(r).slice(0,40)); })());
+      L.push('_get src            : ' + DB._get.toString().replace(/\s+/g, ' ').slice(0, 170));
+    } catch (e) { L.push('probe error: ' + (e.message || e)); }
     try {
       const snap = await this._col().get();
       L.push('SERVER customers    : ' + snap.size + '  (live get from customers_v2)');
