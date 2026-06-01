@@ -162,10 +162,18 @@ const DB = {
     // whether Sync is ready (push) or the write is queued (enqueue). This is the
     // authoritative deletion-detection point that fixes "deleted record comes
     // back on refresh" for array DOCUMENTS (customers, products, users, …).
+    const _hadPrev = Object.prototype.hasOwnProperty.call(this._cache, key);
+    const _prevVal = _hadPrev ? this._cache[key] : undefined;
     if (window.Sync && typeof Sync._recordDocDeletions === 'function') {
-      const _prev = Object.prototype.hasOwnProperty.call(this._cache, key)
-        ? this._cache[key] : undefined;
-      try { Sync._recordDocDeletions(key, _prev, val); } catch {}
+      try { Sync._recordDocDeletions(key, _prevVal, val); } catch {}
+    }
+
+    // ── Customers: handled by the dedicated single-source-of-truth module ──────
+    // customer-sync.js (not the general sync.js COLLECTIONS path) diffs prev→next
+    // and pushes per-record upserts/deletes to customers_v2. We pass the OLD cache
+    // value so it can compute exactly which records changed or were deleted.
+    if (key === this.K.CUSTOMERS && window.CustomerSync) {
+      try { CustomerSync.onLocalChange(_prevVal, val); } catch (e) { console.warn('[DB] CustomerSync.onLocalChange', e); }
     }
 
     this._cache[key] = val;                      // update cache immediately

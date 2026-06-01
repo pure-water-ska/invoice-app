@@ -440,97 +440,15 @@ window.addEventListener('sync:ready',  () => { _ensureCustomersFromFirestore(); 
 // the server reliably, regardless of pull/listener guard timing. It only ADDS
 // (union) — local-only records (e.g. a just-added one not yet pushed) are kept,
 // so nothing is lost. Deletions are handled live by the sync listener.
-async function _ensureCustomersFromFirestore() {
-  try {
-    if (typeof Sync === 'undefined' || !Sync._db || !Sync.COLLECTIONS) return;
-    const colName = Sync.COLLECTIONS['wt_customers'] || 'customers_v2';
-    const col = Sync._orgRef().collection(colName);
-    const snap = await col.get();
-    if (snap.empty) {
-      // server empty: nothing to pull. (Don't wipe local — local-only adds will sync up.)
-      return;
-    }
-
-    // Group server docs by name. For each name keep ONE doc — deterministically
-    // the smallest id so EVERY device picks the same one — and DELETE the rest
-    // from the server. This cleans duplicate uploads at the source so they stop
-    // resyncing and piling up (194→97), and both devices converge identically.
-    const byName = new Map();   // name → [{id, rec}]
-    snap.forEach(d => {
-      const r = d.data() || {}; const { _by, _byName, _ts, ...rec } = r;
-      const n = rec.name != null ? String(rec.name) : d.id;
-      if (!byName.has(n)) byName.set(n, []);
-      byName.get(n).push({ id: d.id, rec: { ...rec, id: rec.id || d.id } });
-    });
-
-    const serverList = [];
-    const dupIdsToDelete = [];
-    for (const [, arr] of byName) {
-      arr.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-      serverList.push(arr[0].rec);                 // keep smallest-id doc
-      for (let i = 1; i < arr.length; i++) dupIdsToDelete.push(arr[i].id);
-    }
-
-    // Delete duplicate docs on the server (batched). Safe + idempotent.
-    if (dupIdsToDelete.length > 0) {
-      try {
-        let batch = Sync._db.batch(), ops = 0;
-        for (const id of dupIdsToDelete) {
-          batch.delete(col.doc(id)); if (++ops >= 400) { await batch.commit(); batch = Sync._db.batch(); ops = 0; }
-        }
-        if (ops > 0) await batch.commit();
-        if (Sync._serverIds && Sync._serverIds[colName]) dupIdsToDelete.forEach(id => Sync._serverIds[colName].delete(id));
-        console.log('[customers] removed ' + dupIdsToDelete.length + ' duplicate server docs');
-      } catch (e) { console.warn('[customers] dup cleanup failed', e); }
-    }
-
-    const serverIds   = new Set(serverList.map(c => c.id));
-    const serverNames = new Set(serverList.map(c => String(c.name)));
-    const local = DB.getCustomers();
-
-    // "Ever seen on the server" id set (persisted) reliably distinguishes:
-    //   • DELETED on another device → it WAS on the server before (in known) but
-    //     is gone now → DROP it (so deletes propagate, even of just-added ones); vs
-    //   • brand-new local add not yet pushed → NEVER on the server → KEEP it.
-    let known;
-    try { known = new Set(JSON.parse(localStorage.getItem('wt_cust_known_ids') || '[]')); }
-    catch { known = new Set(); }
-
-    const RECENT_MS = 2 * 60 * 1000;
-    const now = Date.now();
-    const localOnly = local.filter(c => {
-      if (!c || !c.id) return false;
-      if (serverIds.has(c.id) || serverNames.has(String(c.name))) return false; // server still has it
-      if (known.has(c.id)) return false;          // was on server, now gone → DELETED elsewhere
-      // Not on server and never confirmed there: keep ONLY if created very
-      // recently (a genuine new local add not yet pushed). Old + not-on-server =
-      // a delete that happened before tracking started → drop it. This both
-      // auto-fixes already-stuck deletes AND keeps brand-new local adds.
-      const t = c.createdAt ? new Date(c.createdAt).getTime() : 0;
-      return t && (now - t < RECENT_MS);
-    });
-    const merged = [...serverList, ...localOnly];
-
-    // Persist the "ever seen on server" set = current server ids ONLY. We do NOT
-    // add the kept local-only ids: a record only becomes "known" once it's truly
-    // confirmed on the server, so a never-synced local add is never wrongly
-    // dropped (no data loss). A record enters `known` on the reconcile where it
-    // first appears in serverIds; if it later vanishes from the server it's a
-    // delete → dropped next time. (Live deletes are handled by the listener.)
-    try { localStorage.setItem('wt_cust_known_ids', JSON.stringify([...serverIds])); } catch {}
-
-    const curIds = new Set(local.filter(c => c && c.id).map(c => c.id));
-    const changed = merged.length !== local.length || merged.some(c => !curIds.has(c.id)) || dupIdsToDelete.length > 0;
-    if (changed) {
-      // LOCAL-ONLY write: applies server truth to the local copy WITHOUT pushing
-      // back to Firestore. Pushing here re-uploaded every record with a fresh _ts,
-      // which made the other device fire "modified" → "edited" toast → its own
-      // reconcile → push back: an infinite ping-pong that also lost real deletes.
-      DB.setLocalOnly(DB.K.CUSTOMERS, merged);
-      _custPage = 1; render();
-      console.log('[customers] reconciled from Firestore (local-only) → ' + merged.length);
-    }
-  } catch (e) { console.warn('[customers] ensure-from-firestore failed', e); }
+// Customer sync is now owned entirely by customer-sync.js (window.CustomerSync),
+// which keeps the local copy equal to the customers_v2 Firestore collection
+// (server = single source of truth) and emits 'sync:updated' / 'sync:pulled' on
+// every change. This page only renders; the old reconcile (tombstones / known-ids
+// / recency / union) was removed because it competed with the module and kept
+// resurrecting deletes and firing phantom "edited" toasts.
+function _ensureCustomersFromFirestore() {
+  try { if (window.CustomerSync && !CustomerSync._ready) CustomerSync.init(); } catch {}
+  render();
 }
 
 function render() {

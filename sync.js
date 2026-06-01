@@ -43,13 +43,12 @@ var Sync = {
   COLLECTIONS: {
     'wt_invoices':  'invoices',
     'wt_payments':  'payments',
-    // Customers moved from DOCUMENTS → COLLECTIONS so each customer is its own
-    // Firestore doc. The whole-array DOCUMENT model could not delete reliably
-    // across devices (union re-added deleted records + tombstone poison). The
-    // per-record collection model (proven by invoices/payments) deletes a single
-    // doc with no clobber. Bootstrap in _pullAll pushes existing local customers
-    // into the new collection on first run; the old data/customers doc is orphaned.
-    'wt_customers': 'customers_v2',
+    // NOTE: wt_customers is intentionally NOT here. Customer sync is handled by a
+    // dedicated, self-contained module (customer-sync.js) using the customers_v2
+    // collection where the Firestore snapshot is the SINGLE source of truth — no
+    // tombstones, no _serverIds, no reconcile/known-ids. The general sync.js
+    // machinery (tombstones + union merge + _writeKey diff) fought itself for
+    // customers and could neither delete reliably nor stop phantom re-uploads.
   },
 
   // ── Small/medium collections → one Firestore document holds the whole array ─

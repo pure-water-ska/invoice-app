@@ -243,10 +243,11 @@
           // then connection-status.js, then sync.js
           function afterFolderSync() {
             if (window.LocalFolderSync) LocalFolderSync.init();
+            function afterSync() { loadScript('./customer-sync.js', null, function(){}); }
             loadScript('./connection-status.js', function() {
-              loadScript('./sync.js', null, onSDKError);
+              loadScript('./sync.js', afterSync, onSDKError);
             }, function() {
-              loadScript('./sync.js', null, onSDKError);
+              loadScript('./sync.js', afterSync, onSDKError);
             });
           }
           if (!window.LocalFolderSync) {
