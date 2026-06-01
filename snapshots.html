@@ -206,10 +206,10 @@ function renderSnaps() {
 }
 
 // ─── Create ────────────────────────────────────────────────────────────────────
-function createSnapshot() {
+async function createSnapshot() {
   const btn = document.getElementById('createBtn');
   const snaps = DB.getSnapshots();
-  if (snaps.length >= 3 && !confirm('มี Snapshot ครบ 3 รายการแล้ว\nระบบจะลบ Snapshot เก่าที่สุดออก ยืนยันหรือไม่?')) return;
+  if (snaps.length >= 3 && !await Utils.confirm('มี Snapshot ครบ 3 รายการแล้ว\nระบบจะลบ Snapshot เก่าที่สุดออก ยืนยันหรือไม่?')) return;
 
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลังสร้าง...';
@@ -275,8 +275,8 @@ function exportSnap(id) {
 }
 
 // ─── Delete ────────────────────────────────────────────────────────────────────
-function deleteSnap(id) {
-  if (!confirm('ลบ Snapshot นี้?')) return;
+async function deleteSnap(id) {
+  if (!await Utils.confirm('ลบ Snapshot นี้?')) return;
   DB.deleteSnapshot(id);
   DB.logActivity(session.userId, session.username, 'ลบ Snapshot', { id });
   refreshStorageInfo();

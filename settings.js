@@ -200,7 +200,7 @@ async function lfsWriteAll() {
 
 async function lfsRestore() {
   if (!window.LocalFolderSync) return;
-  const confirmed = confirm(
+  const confirmed = await Utils.confirm(
     'Restore จากโฟลเดอร์?\n\n' +
     'ข้อมูลทุกอย่างในระบบจะถูกแทนที่ด้วยไฟล์จากโฟลเดอร์ที่เลือก\n' +
     'แนะนำให้ Export Backup ก่อน!\n\n' +
@@ -240,7 +240,7 @@ async function lfsRestore() {
 
 async function lfsDisconnect() {
   if (!window.LocalFolderSync) return;
-  if (!confirm('ยกเลิกการเชื่อมต่อโฟลเดอร์?\n\nข้อมูลในโฟลเดอร์จะไม่ถูกลบ แค่หยุดซิงค์เท่านั้น')) return;
+  if (!await Utils.confirm('ยกเลิกการเชื่อมต่อโฟลเดอร์?\n\nข้อมูลในโฟลเดอร์จะไม่ถูกลบ แค่หยุดซิงค์เท่านั้น')) return;
   await LocalFolderSync.disconnect();
   Utils.showAlert('ยกเลิกการเชื่อมต่อโฟลเดอร์แล้ว', 'info');
   renderLocalFolderCard();
@@ -563,7 +563,7 @@ function updateCleanupPreview() {
   }
 }
 
-function runStorageCleanup() {
+async function runStorageCleanup() {
   const logsChecked  = document.getElementById('scLogs')?.checked  ?? false;
   const priceChecked = document.getElementById('scPrice')?.checked ?? false;
   if (!logsChecked && !priceChecked) {
@@ -576,7 +576,7 @@ function runStorageCleanup() {
     const keepN = parseInt(document.getElementById('scPriceKeep')?.value || '500', 10);
     lines.push(`• ประวัติราคา (เก็บล่าสุด ${keepN.toLocaleString('th-TH')} รายการ)`);
   }
-  if (!confirm(`จะล้างข้อมูลต่อไปนี้:\n\n${lines.join('\n')}\n\nยืนยันหรือไม่?`)) return;
+  if (!await Utils.confirm(`จะล้างข้อมูลต่อไปนี้:\n\n${lines.join('\n')}\n\nยืนยันหรือไม่?`)) return;
 
   let freed = 0;
 
@@ -620,9 +620,9 @@ function renderLogCounts() {
 }
 
 /* ─── Archive Logs ──────────────────────────────────────────────────────── */
-function archiveLogs() {
+async function archiveLogs() {
   const arch = DB.getActivityArchive ? DB.getActivityArchive() : [];
-  if (!confirm(`ย้าย Activity Log ที่เก่ากว่า 6 เดือนไปยัง Archive?\n(Archive ปัจจุบัน: ${arch.length} รายการ)`)) return;
+  if (!await Utils.confirm(`ย้าย Activity Log ที่เก่ากว่า 6 เดือนไปยัง Archive?\n(Archive ปัจจุบัน: ${arch.length} รายการ)`)) return;
   const result = DB.archiveOldLogs(6);
   if (result.archived === 0) {
     Utils.showAlert('ไม่มี Log ที่เก่ากว่า 6 เดือน', 'info'); return;
@@ -767,10 +767,10 @@ async function importData(input, mode) {
   const file = input.files[0];
   if (!file) return;
   const modeLabel = mode === 'overwrite' ? 'เขียนทับข้อมูลทั้งหมด ⚠️' : 'เพิ่มข้อมูลใหม่ (Merge)';
-  if (!confirm(`Import ไฟล์: "${file.name}"\nโหมด: ${modeLabel}\n\nดำเนินการต่อหรือไม่?`)) {
+  if (!await Utils.confirm(`Import ไฟล์: "${file.name}"\nโหมด: ${modeLabel}\n\nดำเนินการต่อหรือไม่?`)) {
     input.value = ''; return;
   }
-  if (mode === 'overwrite' && !confirm('⚠️ ยืนยันอีกครั้ง — ข้อมูลเดิมทั้งหมดจะถูกแทนที่!')) {
+  if (mode === 'overwrite' && !await Utils.confirm('⚠️ ยืนยันอีกครั้ง — ข้อมูลเดิมทั้งหมดจะถูกแทนที่!')) {
     input.value = ''; return;
   }
 
@@ -1126,7 +1126,7 @@ async function fsPushAll() {
     el.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Firestore ยังไม่ได้เชื่อมต่อ';
     return;
   }
-  if (!confirm('อัปโหลดข้อมูลทั้งหมดจากเครื่องนี้ไป Firestore?\nจะเขียนทับข้อมูลบน Firestore ด้วยข้อมูลจากเครื่องนี้')) return;
+  if (!await Utils.confirm('อัปโหลดข้อมูลทั้งหมดจากเครื่องนี้ไป Firestore?\nจะเขียนทับข้อมูลบน Firestore ด้วยข้อมูลจากเครื่องนี้')) return;
   const btnSync = document.getElementById('btnFsSync');
   btn.disabled = true; if (btnSync) btnSync.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลัง Push...';
@@ -1220,7 +1220,7 @@ async function drivePullAll() {
     el.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>กรุณาเชื่อมต่อ Google Drive ก่อน';
     return;
   }
-  if (!confirm('Pull All จะดึงข้อมูลจาก Drive มาเขียนทับ localStorage ในเครื่องนี้\nยืนยันหรือไม่?')) return;
+  if (!await Utils.confirm('Pull All จะดึงข้อมูลจาก Drive มาเขียนทับ localStorage ในเครื่องนี้\nยืนยันหรือไม่?')) return;
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลัง Pull...';
   el.className = 'alert alert-info small py-2 mb-2';
@@ -1263,9 +1263,9 @@ async function driveSignIn() {
   }
 }
 
-function driveSignOut() {
+async function driveSignOut() {
   if (window.IS_TAURI) return;
-  if (!confirm('ออกจากระบบ Google Drive?\n(ไฟล์ที่อัปโหลดแล้วยังอยู่ใน Drive)')) return;
+  if (!await Utils.confirm('ออกจากระบบ Google Drive?\n(ไฟล์ที่อัปโหลดแล้วยังอยู่ใน Drive)')) return;
   DriveStore.signOut();
   updateDriveUI(false);
 }
@@ -1293,7 +1293,7 @@ function esc(s) {
 }
 
 async function driveDeleteFile(driveId, filename) {
-  if (!confirm(`ลบไฟล์ "${filename}" ออกจาก Google Drive?\nไฟล์จะหายถาวร`)) return;
+  if (!await Utils.confirm(`ลบไฟล์ "${filename}" ออกจาก Google Drive?\nไฟล์จะหายถาวร`)) return;
   try {
     await DriveStore.deleteFile(driveId);
     await refreshDriveStats();
@@ -1422,7 +1422,7 @@ async function migratePaymentImages() {
 async function runArchive() {
   const btn = document.getElementById('btnRunArchive');
   const el  = document.getElementById('archivePreview');
-  if (!confirm('ยืนยันการ Archive ใบกำกับ?\nใบกำกับที่ชำระครบและอายุเกิน 3 เดือนจะถูกลบออกจากเครื่อง')) return;
+  if (!await Utils.confirm('ยืนยันการ Archive ใบกำกับ?\nใบกำกับที่ชำระครบและอายุเกิน 3 เดือนจะถูกลบออกจากเครื่อง')) return;
 
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลัง Archive...';
@@ -1503,8 +1503,8 @@ async function importZip(input, mode) {
   const file = input.files[0];
   if (!file) return;
   const modeLabel = mode === 'overwrite' ? 'เขียนทับข้อมูลทั้งหมด ⚠️' : 'เพิ่มข้อมูลใหม่ (Merge)';
-  if (!confirm(`Import ZIP: "${file.name}"\nโหมด: ${modeLabel}\n\nดำเนินการต่อหรือไม่?`)) { input.value = ''; return; }
-  if (mode === 'overwrite' && !confirm('⚠️ ยืนยันอีกครั้ง — ข้อมูลเดิมทั้งหมดจะถูกแทนที่!')) { input.value = ''; return; }
+  if (!await Utils.confirm(`Import ZIP: "${file.name}"\nโหมด: ${modeLabel}\n\nดำเนินการต่อหรือไม่?`)) { input.value = ''; return; }
+  if (mode === 'overwrite' && !await Utils.confirm('⚠️ ยืนยันอีกครั้ง — ข้อมูลเดิมทั้งหมดจะถูกแทนที่!')) { input.value = ''; return; }
 
   try {
     Utils.showProgress('อ่านไฟล์ ZIP…', 5);
@@ -1588,8 +1588,8 @@ async function importZip(input, mode) {
 
 /* ─── Danger Zone ───────────────────────────────────────────────────────── */
 async function clearAllData() {
-  if (!confirm('⚠️ ล้างข้อมูลทั้งหมด?\nการกระทำนี้ไม่สามารถกู้คืนได้!')) return;
-  if (!confirm('ยืนยันอีกครั้ง — ลบข้อมูลทุกอย่างจริงหรือไม่?')) return;
+  if (!await Utils.confirm('⚠️ ล้างข้อมูลทั้งหมด?\nการกระทำนี้ไม่สามารถกู้คืนได้!')) return;
+  if (!await Utils.confirm('ยืนยันอีกครั้ง — ลบข้อมูลทุกอย่างจริงหรือไม่?')) return;
 
   // Disable button to prevent double-click or navigation during async ops
   const btn = document.querySelector('[onclick="clearAllData()"]');
@@ -1741,8 +1741,8 @@ function exportErrorLog() {
   Utils.showAlert('Export Error Log สำเร็จ');
 }
 
-function clearErrorLog() {
-  if (!confirm(`ล้าง Error Log ทั้งหมด ${DB.getErrors().length} รายการ?`)) return;
+async function clearErrorLog() {
+  if (!await Utils.confirm(`ล้าง Error Log ทั้งหมด ${DB.getErrors().length} รายการ?`)) return;
   DB.clearErrors();
   DB.logActivity(session.userId, session.username, 'ล้าง Error Log', {});
   renderErrorLog();
@@ -1987,7 +1987,7 @@ async function runSyncDiagnostic() {
 // directly on the server. Then set local to the deduped set. Run on one device;
 // others converge on next sync. This fixes "delete leaves a twin" definitively.
 async function forceDedupeCustomers() {
-  if (!confirm('ล้างลูกค้าที่ซ้ำกันบนเซิร์ฟเวอร์?\n\nเก็บไว้ 1 รายชื่อต่อลูกค้า (ลบสำเนาที่ id ซ้ำ).\nทำบนเครื่องเดียวก็พอ แล้วเปิดแอปใหม่ทุกเครื่อง.')) return;
+  if (!await Utils.confirm('ล้างลูกค้าที่ซ้ำกันบนเซิร์ฟเวอร์?\n\nเก็บไว้ 1 รายชื่อต่อลูกค้า (ลบสำเนาที่ id ซ้ำ).\nทำบนเครื่องเดียวก็พอ แล้วเปิดแอปใหม่ทุกเครื่อง.')) return;
   const out = document.getElementById('syncDiagOut');
   out.classList.remove('d-none');
   const L = []; const paint = () => out.textContent = L.join('\n');
@@ -2038,8 +2038,8 @@ async function forceDedupeCustomers() {
 // the app no longer auto-seeds customers, after this they stay gone — including
 // after a reinstall (the server has none to sync down).
 async function purgeAllCustomers() {
-  if (!confirm('⚠️ ลบลูกค้าทั้งหมดถาวร ออกจากเซิร์ฟเวอร์และทุกอุปกรณ์?\n\nใช้ไม่ได้ย้อนกลับ. ใบกำกับ/การชำระเงินยังอยู่.')) return;
-  if (!confirm('ยืนยันอีกครั้ง — ลบลูกค้าทั้งหมดถาวร?')) return;
+  if (!await Utils.confirm('⚠️ ลบลูกค้าทั้งหมดถาวร ออกจากเซิร์ฟเวอร์และทุกอุปกรณ์?\n\nใช้ไม่ได้ย้อนกลับ. ใบกำกับ/การชำระเงินยังอยู่.')) return;
+  if (!await Utils.confirm('ยืนยันอีกครั้ง — ลบลูกค้าทั้งหมดถาวร?')) return;
   const out = document.getElementById('syncDiagOut');
   out.classList.remove('d-none');
   const L = []; const paint = () => out.textContent = L.join('\n');
@@ -2324,7 +2324,7 @@ window.addEventListener('DOMContentLoaded', () => { try { DB.ready.then(loadDevi
 // once clears that poison so the UNION merge can restore data; afterwards only
 // small, intentional deletions are tombstoned.
 async function clearSyncDeletions() {
-  if (!confirm('ซ่อมการซิงค์ / รีเซ็ต?\n\n' +
+  if (!await Utils.confirm('ซ่อมการซิงค์ / รีเซ็ต?\n\n' +
                '• ล้างคิวค้าง + รายการลบ + สถานะซิงค์ในเครื่องนี้\n' +
                '• ดึงข้อมูลใหม่ทั้งหมดจากเซิร์ฟเวอร์ แล้วรวม (union)\n\n' +
                'แนะนำ: กดที่ "เครื่องที่ข้อมูลครบ" ก่อน จากนั้นเปิดแอปใหม่ทุกเครื่อง')) return;

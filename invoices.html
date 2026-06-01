@@ -589,12 +589,12 @@ function render() {
     </div>`;
 }
 
-function deleteInvoice(num, pageCount) {
+async function deleteInvoice(num, pageCount) {
   const pc  = pageCount || DB.getInvoicesByNumber(num).length || 1;
   const msg = pc > 1
     ? `ลบใบกำกับ "${num}" ทั้ง ${pc} หน้า และข้อมูลทั้งหมดใช่หรือไม่?\nการลบไม่สามารถกู้คืนได้`
     : `ลบใบกำกับ "${num}" และข้อมูลทั้งหมดใช่หรือไม่?\nการลบไม่สามารถกู้คืนได้`;
-  if (!confirm(msg)) return;
+  if (!await Utils.confirm(msg)) return;
   const all = DB.getInvoices().filter(i => i.invoiceNumber !== num);
   DB.saveInvoices(all);
   DB.removeCapDeductionsByInvoice(num);
@@ -610,15 +610,15 @@ function toggleInvExpand(num) {
   render();
 }
 
-function deleteInvoicePage(pageId, invoiceNumber, pageNum) {
+async function deleteInvoicePage(pageId, invoiceNumber, pageNum) {
   // If this is the last page, delete the whole invoice instead
   const remaining = DB.getInvoicesByNumber(invoiceNumber);
   if (remaining.length <= 1) {
-    if (!confirm(`ลบใบกำกับ "${invoiceNumber}" ใช่หรือไม่?\n(หน้า ${pageNum} เป็นหน้าสุดท้าย — จะลบใบกำกับนี้ทั้งหมด)\nการลบไม่สามารถกู้คืนได้`)) return;
+    if (!await Utils.confirm(`ลบใบกำกับ "${invoiceNumber}" ใช่หรือไม่?\n(หน้า ${pageNum} เป็นหน้าสุดท้าย — จะลบใบกำกับนี้ทั้งหมด)\nการลบไม่สามารถกู้คืนได้`)) return;
     deleteInvoice(invoiceNumber, 1);
     return;
   }
-  if (!confirm(`ลบหน้า ${pageNum} ของใบกำกับ "${invoiceNumber}" ใช่หรือไม่?\nการลบไม่สามารถกู้คืนได้`)) return;
+  if (!await Utils.confirm(`ลบหน้า ${pageNum} ของใบกำกับ "${invoiceNumber}" ใช่หรือไม่?\nการลบไม่สามารถกู้คืนได้`)) return;
   DB.deleteInvoice(pageId);
   DB.logActivity(session.userId, session.username, 'ลบหน้าใบกำกับ', { invoiceNumber, pageId, pageNum });
   Utils.showAlert(`ลบหน้า ${pageNum} ของ ${invoiceNumber} แล้ว`, 'warning');

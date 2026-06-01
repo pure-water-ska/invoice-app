@@ -56,6 +56,7 @@
         </form>
       </div>
     </div>
+    <div class="text-center text-muted mt-2" id="loginVersion" style="font-size:11px"></div>
   </div>
 </div>
 
@@ -77,6 +78,11 @@
   DB.init();
   const cfg = DB.getSettings();
   document.getElementById('companySubtitle').textContent = cfg.companyName || '';
+  // Show app version on the login page
+  try {
+    const vEl = document.getElementById('loginVersion');
+    if (vEl && typeof APP_VERSION !== 'undefined') vEl.textContent = APP_VERSION.label || ('เวอร์ชัน ' + APP_VERSION.version);
+  } catch {}
 
   // ── Restore-pending banner: shown after an unclean browser close ─────────────
   (function() {

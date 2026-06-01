@@ -1465,8 +1465,8 @@ function confirmCancelPayment() {
   render();
 }
 
-function deletePayment(payId, invNum) {
-  if (!confirm('ลบรายการชำระนี้ใช่หรือไม่?')) return;
+async function deletePayment(payId, invNum) {
+  if (!await Utils.confirm('ลบรายการชำระนี้ใช่หรือไม่?')) return;
   DB.deletePayment(payId);
   DB.logActivity(session.userId, session.username, 'ลบรายการชำระ', { invoiceNumber: invNum });
   refreshSummary(invNum);

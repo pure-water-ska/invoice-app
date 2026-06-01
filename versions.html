@@ -435,8 +435,8 @@ function saveVersion() {
   render();
 }
 
-function deleteVersion(id) {
-  if (!confirm('ลบรายการนี้ใช่หรือไม่?')) return;
+async function deleteVersion(id) {
+  if (!await Utils.confirm('ลบรายการนี้ใช่หรือไม่?')) return;
   DB.deleteVersion(id);
   DB.logActivity(session.userId, session.username, 'ลบฉลากขวด', {});
   Utils.showAlert('ลบแล้ว','info');

@@ -148,7 +148,7 @@ function _doRun() {
       parseErrors++;
       storageChecks.push(_checkItem('error',
         `JSON เสียหาย (parse error): <code>${k}</code>`,
-        '', { label: 'ลบ key นี้', action: `if(confirm('ลบ ${k}?')){localStorage.removeItem('${k}');runDiagnostics();}` }
+        '', { label: 'ลบ key นี้', action: `Utils.confirm('ลบ ${k}?').then(function(ok){if(ok){localStorage.removeItem('${k}');runDiagnostics();}})` }
       ));
     }
   }
@@ -183,8 +183,8 @@ function _doRun() {
 
   // Payments without invoices
   const orphanPay = payments.filter(p => !invNums.has(p.invoiceNumber));
-  window._fixOrphanPayments = function() {
-    if (!confirm(`ลบรายการชำระ ${orphanPay.length} รายการที่ไม่มีใบกำกับ?`)) return;
+  window._fixOrphanPayments = async function() {
+    if (!await Utils.confirm(`ลบรายการชำระ ${orphanPay.length} รายการที่ไม่มีใบกำกับ?`)) return;
     DB.savePayments(DB.getPayments().filter(p => invNums.has(p.invoiceNumber)));
     DB.logActivity(session.userId, session.username, 'ลบ orphan payments', { count: orphanPay.length });
     Utils.showAlert(`ลบแล้ว ${orphanPay.length} รายการ`, 'success');
@@ -207,8 +207,8 @@ function _doRun() {
 
   // Orphan pricing (product deleted)
   const orphanPricing = pricing.filter(p => !prodIds.has(p.productId));
-  window._fixOrphanPricing = function() {
-    if (!confirm(`ลบรายการราคา ${orphanPricing.length} รายการที่ไม่มีสินค้า?`)) return;
+  window._fixOrphanPricing = async function() {
+    if (!await Utils.confirm(`ลบรายการราคา ${orphanPricing.length} รายการที่ไม่มีสินค้า?`)) return;
     DB.savePricing(DB.getPricing().filter(p => prodIds.has(p.productId)));
     DB.logActivity(session.userId, session.username, 'ลบ orphan pricing', { count: orphanPricing.length });
     Utils.showAlert(`ลบแล้ว ${orphanPricing.length} รายการ`, 'success');
@@ -223,8 +223,8 @@ function _doRun() {
 
   // Cap deductions without invoice
   const orphanCapDeduct = capDeductions.filter(d => d.invoiceNumber && !invNums.has(d.invoiceNumber));
-  window._fixOrphanCapDeduct = function() {
-    if (!confirm(`ลบรายการหักฝาขวด ${orphanCapDeduct.length} รายการที่ไม่มีใบกำกับ?`)) return;
+  window._fixOrphanCapDeduct = async function() {
+    if (!await Utils.confirm(`ลบรายการหักฝาขวด ${orphanCapDeduct.length} รายการที่ไม่มีใบกำกับ?`)) return;
     DB.saveCapDeductions(DB.getCapDeductions().filter(d => !d.invoiceNumber || invNums.has(d.invoiceNumber)));
     DB.logActivity(session.userId, session.username, 'ลบ orphan cap deductions', { count: orphanCapDeduct.length });
     Utils.showAlert(`ลบแล้ว ${orphanCapDeduct.length} รายการ`, 'success');
@@ -284,7 +284,7 @@ function _doRun() {
       errors.length >= 20 ? 'warning' : 'info',
       `พบข้อผิดพลาด JavaScript <strong>${errors.length}</strong> รายการ`,
       '',
-      { label: 'ล้าง Error Log', action: "if(confirm('ล้าง Error Log ทั้งหมด?')){DB.clearErrors();Utils.showAlert('ล้าง Error Log แล้ว','success');runDiagnostics();}" }
+      { label: 'ล้าง Error Log', action: "Utils.confirm('ล้าง Error Log ทั้งหมด?').then(function(ok){if(ok){DB.clearErrors();Utils.showAlert('ล้าง Error Log แล้ว','success');runDiagnostics();}})" }
     ));
     const errRows = errors.slice(0, 25).map(e => `
       <tr>

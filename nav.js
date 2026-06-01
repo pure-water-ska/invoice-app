@@ -474,7 +474,7 @@ const Nav = {
           <span id="syncStatusBadge" class="badge bg-secondary ms-2 py-1 px-2"
                 style="font-size:10px;cursor:pointer" title="คลิก: ดึงข้อมูลจาก Cloud | Shift+คลิก: อัปโหลดทุกอย่างขึ้น Cloud"
                 onclick="if(!window.Sync||!Sync.ready)return;
-                  if(event.shiftKey){if(confirm('อัปโหลดข้อมูลทั้งหมดจากเครื่องนี้ขึ้น Cloud ใช่หรือไม่?'))Sync.pushAll().then(()=>{if(typeof render==='function')render();});}
+                  if(event.shiftKey){Utils.confirm('อัปโหลดข้อมูลทั้งหมดจากเครื่องนี้ขึ้น Cloud ใช่หรือไม่?').then(function(ok){if(ok)Sync.pushAll().then(()=>{if(typeof render==='function')render();});});}
                   else{Sync.pull().then(()=>{if(typeof render==='function')render();});}">⏳ Sync</span>
         </li>
         ${window.IS_TAURI ? '' : `<li class="nav-item me-1" id="driveBadgeItem" style="display:none">

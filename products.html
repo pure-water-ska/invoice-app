@@ -179,9 +179,9 @@ function saveProduct() {
   render();
 }
 
-function deleteProduct(id) {
+async function deleteProduct(id) {
   const p = DB.getProductById(id);
-  if (!confirm(`ลบสินค้า "${p.name}" ใช่หรือไม่?`)) return;
+  if (!await Utils.confirm(`ลบสินค้า "${p.name}" ใช่หรือไม่?`)) return;
   DB.deleteProduct(id);
   DB.logActivity(session.userId, session.username, 'ลบสินค้า', { productName: p.name });
   Utils.showAlert('ลบสินค้าแล้ว', 'info');

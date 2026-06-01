@@ -370,8 +370,8 @@ function openHistModal(productId, customerId, shippingMethod) {
   histModal.show();
 }
 
-function deletePrice(id) {
-  if (!confirm('ลบราคานี้ใช่หรือไม่?')) return;
+async function deletePrice(id) {
+  if (!await Utils.confirm('ลบราคานี้ใช่หรือไม่?')) return;
   DB.deletePrice(id);
   Utils.showAlert('ลบราคาแล้ว', 'info');
   render();

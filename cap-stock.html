@@ -367,22 +367,22 @@ function openLightboxSrc(src) {
   document.getElementById('lightbox').style.display = 'flex';
 }
 
-function clearAllDeductions() {
-  if (!confirm('ลบประวัติการตัดออกทั้งหมดใช่หรือไม่?\n(ยอดรับเข้าจะยังคงอยู่)')) return;
+async function clearAllDeductions() {
+  if (!await Utils.confirm('ลบประวัติการตัดออกทั้งหมดใช่หรือไม่?\n(ยอดรับเข้าจะยังคงอยู่)')) return;
   DB.saveCapDeductions([]);
   DB.logActivity(session.userId, session.username, 'ล้างประวัติตัดสต๊อกฝาขวด', {});
   Utils.showAlert('ล้างประวัติการตัดออกทั้งหมดแล้ว', 'warning');
   renderOverview();
 }
 
-function syncDeductions() {
+async function syncDeductions() {
   const colors = DB.getCapColors();
   if (!colors.length) { Utils.showAlert('ยังไม่มีสีฝา — กรุณาตั้งค่าสีฝาและผูกสินค้าก่อน', 'warning'); return; }
 
   const linked = colors.filter(c => c.productIds && c.productIds.length);
   if (!linked.length) { Utils.showAlert('ยังไม่มีสีฝาที่ผูกกับสินค้า — ไปที่แท็บ "จัดการสีฝา" เพื่อผูกสินค้า', 'warning'); return; }
 
-  if (!confirm('Sync จะลบประวัติตัดออกทั้งหมดแล้วคำนวณใหม่จากใบกำกับทุกใบในระบบ\nยืนยันดำเนินการ?')) return;
+  if (!await Utils.confirm('Sync จะลบประวัติตัดออกทั้งหมดแล้วคำนวณใหม่จากใบกำกับทุกใบในระบบ\nยืนยันดำเนินการ?')) return;
 
   // Clear existing deductions
   DB.saveCapDeductions([]);
@@ -431,8 +431,8 @@ function syncDeductions() {
   renderOverview();
 }
 
-function deleteReceipt(id) {
-  if (!confirm('ลบรายการรับเข้านี้ใช่หรือไม่?')) return;
+async function deleteReceipt(id) {
+  if (!await Utils.confirm('ลบรายการรับเข้านี้ใช่หรือไม่?')) return;
   DB.deleteCapReceipt(id);
   DB.logActivity(session.userId, session.username, 'ลบรายการรับฝาขวด', { id });
   renderOverview();
@@ -673,9 +673,9 @@ function saveColor() {
   populateColorFilters();
 }
 
-function deleteColor(id) {
+async function deleteColor(id) {
   const c = DB.getCapColors().find(x => x.id === id);
-  if (!confirm(`ลบสี "${c?.color}" ใช่หรือไม่?\nประวัติรับเข้าและตัดออกจะยังคงอยู่`)) return;
+  if (!await Utils.confirm(`ลบสี "${c?.color}" ใช่หรือไม่?\nประวัติรับเข้าและตัดออกจะยังคงอยู่`)) return;
   DB.deleteCapColor(id);
   renderColorList();
   populateColorFilters();

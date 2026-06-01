@@ -595,8 +595,8 @@ async function doPrint() {
   }
 }
 
-function deleteThis() {
-  if (!confirm(`ลบใบกำกับ "${currentInvNum}" ใช่หรือไม่?`)) return;
+async function deleteThis() {
+  if (!await Utils.confirm(`ลบใบกำกับ "${currentInvNum}" ใช่หรือไม่?`)) return;
   const all = DB.getInvoices().filter(i => i.invoiceNumber !== currentInvNum);
   DB.saveInvoices(all);
   DB.removeCapDeductionsByInvoice(currentInvNum);
@@ -1174,7 +1174,7 @@ async function saveInvoice(shouldPrint = false) {
     const lines = capWarnings.map(w =>
       `• ${w.color}: สต๊อก ${Utils.formatNumber(w.currentStock)} → ${Utils.formatNumber(w.afterStock)} ลัง (ขั้นต่ำ ${Utils.formatNumber(w.minQty)} ลัง)`
     ).join('\n');
-    if (!confirm(`⚠️ สต๊อกฝาขวดต่ำกว่าขั้นต่ำที่กำหนด!\n\n${lines}\n\nยืนยันบันทึกใบกำกับต่อไปหรือไม่?`)) return;
+    if (!await Utils.confirm(`⚠️ สต๊อกฝาขวดต่ำกว่าขั้นต่ำที่กำหนด!\n\n${lines}\n\nยืนยันบันทึกใบกำกับต่อไปหรือไม่?`)) return;
   }
 
   const totalAmount = activeItems.reduce((s, item) => s + calcTotal(item), 0);
@@ -1396,7 +1396,7 @@ async function saveInvoiceEdit(shouldPrint = false) {
     const lines = capWarningsEdit.map(w =>
       `• ${w.color}: สต๊อก ${Utils.formatNumber(w.currentStock)} → ${Utils.formatNumber(w.afterStock)} ลัง (ขั้นต่ำ ${Utils.formatNumber(w.minQty)} ลัง)`
     ).join('\n');
-    if (!confirm(`⚠️ สต๊อกฝาขวดต่ำกว่าขั้นต่ำที่กำหนด!\n\n${lines}\n\nยืนยันบันทึกการแก้ไขต่อไปหรือไม่?`)) return;
+    if (!await Utils.confirm(`⚠️ สต๊อกฝาขวดต่ำกว่าขั้นต่ำที่กำหนด!\n\n${lines}\n\nยืนยันบันทึกการแก้ไขต่อไปหรือไม่?`)) return;
   }
 
   const existingPages = DB.getInvoices().filter(i => i.invoiceNumber === currentInvNum);

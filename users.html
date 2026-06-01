@@ -384,9 +384,9 @@ function toggleActive(id, active) {
   render();
 }
 
-function deleteUser(id) {
+async function deleteUser(id) {
   const u = DB.getUserById(id);
-  if (!confirm(`ลบผู้ใช้ "${u.name}" (${u.username}) ใช่หรือไม่?`)) return;
+  if (!await Utils.confirm(`ลบผู้ใช้ "${u.name}" (${u.username}) ใช่หรือไม่?`)) return;
   DB.deleteUser(id);
   DB.logActivity(session.userId, session.username, 'ลบผู้ใช้', { targetUser: u.username });
   Utils.showAlert('ลบผู้ใช้แล้ว', 'info');

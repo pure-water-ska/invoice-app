@@ -597,8 +597,8 @@ function viewReturn(id) {
 }
 
 // ── Delete ───────────────────────────────────────────────────────────────────
-function deleteReturn(id) {
-  if (!confirm('ลบรายการคืนสินค้านี้?')) return;
+async function deleteReturn(id) {
+  if (!await Utils.confirm('ลบรายการคืนสินค้านี้?')) return;
   DB.deleteReturn(id);
   DB.logActivity(session.userId, session.username, 'ลบรายการคืน', { id });
   render();
