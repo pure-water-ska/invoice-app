@@ -487,9 +487,20 @@ async function _ensureCustomersFromFirestore() {
     const serverIds   = new Set(serverList.map(c => c.id));
     const serverNames = new Set(serverList.map(c => String(c.name)));
     const local = DB.getCustomers();
-    // Keep genuinely local-only records (not on server by id AND by name) so a
-    // just-added, not-yet-synced customer isn't lost.
-    const localOnly = local.filter(c => c && c.id && !serverIds.has(c.id) && !serverNames.has(String(c.name)));
+    // The server is authoritative. A local record NOT on the server is either:
+    //   • a customer you JUST added here that hasn't pushed yet → KEEP (grace
+    //     window), so a brand-new add isn't lost; OR
+    //   • a customer DELETED on another device → DROP, so deletions made while
+    //     this device was closed are reflected on open.
+    // We distinguish by createdAt: recent = keep, old = deleted-elsewhere.
+    const RECENT_MS = 2 * 60 * 1000;
+    const now = Date.now();
+    const localOnly = local.filter(c => {
+      if (!c || !c.id) return false;
+      if (serverIds.has(c.id) || serverNames.has(String(c.name))) return false; // server has it
+      const t = c.createdAt ? new Date(c.createdAt).getTime() : 0;
+      return t && (now - t < RECENT_MS);   // keep only very recent local-only adds
+    });
     const merged = [...serverList, ...localOnly];
 
     const curIds = new Set(local.filter(c => c && c.id).map(c => c.id));
