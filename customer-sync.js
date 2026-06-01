@@ -198,7 +198,10 @@ if (!window.CustomerSync) window.CustomerSync = {
         const finalList = this._retainUnacked(serverIds, unacked, list);
         DB.setLocalOnly(DB.K.CUSTOMERS, finalList);
         const after = ((window.DB ? DB.getCustomers() : []) || []).length;
-        this._logLine(`applied: server=${list.length} final=${finalList.length} → DB.getCustomers=${after}`);
+        const ck = DB.K.CUSTOMERS;
+        const cacheLen = (DB._cache && DB._cache[ck]) ? DB._cache[ck].length : 'none';
+        const inIdb = (DB._idbKeys && typeof DB._idbKeys.has === 'function') ? DB._idbKeys.has(ck) : '?';
+        this._logLine(`applied: server=${list.length} final=${finalList.length} key=${ck} cache=${cacheLen} idb=${inIdb} → getCustomers=${after}`);
         this._emit();
 
         // Clean up duplicate server docs (idempotent; both devices delete the same ids).
