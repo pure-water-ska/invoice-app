@@ -136,7 +136,7 @@
 </div>
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
-<script src="utils.js?v=1.0.68"></script><script src="db.js?v=1.0.68"></script><script src="auth.js?v=1.0.68"></script><script src="nav.js?v=1.0.68"></script><script src="idb.js?v=1.0.68"></script>
+<script src="utils.js?v=1.0.69"></script><script src="db.js?v=1.0.69"></script><script src="auth.js?v=1.0.69"></script><script src="nav.js?v=1.0.69"></script><script src="idb.js?v=1.0.69"></script>
 <script src="drive-config.js" onerror="window.GOOGLE_CLIENT_ID=''"></script>
 <script src="drive-store.js"></script>
 <script>
@@ -203,20 +203,29 @@ async function processPDF(file) {
       const text = Object.keys(lineMap).map(Number).sort((a,b)=>b-a)
         .map(y => lineMap[y].sort((a,b)=>a.x-b.x).map(i=>i.s).join(' ').trim())
         .filter(l => l.length > 0).join('\n');
-      if (text.trim().length < 10) {
-        document.getElementById('invoiceCards').insertAdjacentHTML('beforeend',
-          `<div class="alert alert-warning mb-3"><i class="bi bi-exclamation-triangle me-1"></i>
-           <strong>${esc(file.name)}</strong> หน้า ${pn}: อ่านข้อความได้ ${text.trim().length} ตัวอักษร (น้อยเกินไป) —
-           อาจเป็น PDF สแกน/ภาพถ่ายที่ไม่มี text layer. ลองใช้ Adobe Acrobat ทำ OCR ก่อน import.</div>`);
-        continue;
-      }
-      // Extract customer name from filename: remove extension, then strip numbers & special chars
-      const fileHint = file.name
-        .replace(/\.pdf$/i, '')
+      // Extract from filename BEFORE stripping numbers:
+      //   invoice number — raw pattern e.g. 030569-001
+      //   customer hint  — Thai/alpha chars after stripping digits & special chars
+      const fileNameBase = file.name.replace(/\.pdf$/i, '');
+      const mNumFromFile = fileNameBase.match(/\b(\d{6}-\d{3,4})\b/);
+      const fileHint = fileNameBase
         .replace(/[^ก-๙a-zA-Z\s]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
+
       const parsed = parseInvoice(text, fileHint);
+
+      // Fallback: use filename invoice number if text didn't yield one
+      // (scanned/image PDFs have no text layer so text-based parse returns '')
+      if (!parsed.invoiceNumber && mNumFromFile) {
+        parsed.invoiceNumber = mNumFromFile[1];
+        parsed.fields.invoiceNumber = true;
+      }
+
+      // For scanned PDFs show a soft note (not a blocker — card still renders)
+      if (text.trim().length < 10) {
+        parsed._scanned = true; // flag used by renderCard to show a note
+      }
       const ci     = _cards.length;
       _cards.push({
         ...parsed, saved: false,
@@ -226,7 +235,7 @@ async function processPDF(file) {
         _canvasH:       canvas.height,
         _totalPdfPages: pdf.numPages,
       });
-      renderCard(parsed, ci, file.name, pn, pdf.numPages, pageImageUrl);
+      renderCard(parsed, ci, file.name, pn, pdf.numPages, pageImageUrl, parsed._scanned);
     }
   } catch (err) {
     const errEl = document.createElement('div');
@@ -355,7 +364,7 @@ function confBadge(f) {
   return `<span class="badge bg-${cls}">${lbl} (${detected}/${total})</span>`;
 }
 
-function renderCard(data, ci, fname, pn, totalPdf, pageImageUrl) {
+function renderCard(data, ci, fname, pn, totalPdf, pageImageUrl, scanned) {
   const wrap = document.createElement('div');
   wrap.className = 'card mb-4'; wrap.id = `card_${ci}`;
   wrap.innerHTML = `
@@ -368,6 +377,7 @@ function renderCard(data, ci, fname, pn, totalPdf, pageImageUrl) {
       </label>
     </div>
     ${confBadge(data.fields)}
+    ${scanned ? `<span class="badge bg-secondary"><i class="bi bi-image me-1"></i>PDF สแกน — กรอกยอดเงินเอง</span>` : ''}
   </div>
   <div class="d-flex gap-2">
     <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#raw_${ci}">
