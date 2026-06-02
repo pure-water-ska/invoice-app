@@ -1105,6 +1105,13 @@ var Sync = {
     // DB.init() deliberately wiped, triggering the storage-full banner.
     // DB._cache (above) serves reads; HDD JSON files are the durable store.
     if (window.IS_TAURI) {
+      // Shadow-write to sessionStorage BEFORE the async HDD write so that a
+      // page navigation that happens before the HDD write completes doesn't lose
+      // the data. DB._tauri.init() applies shadows on startup and clears them
+      // once the HDD file is confirmed — same pattern as DB._set().
+      // Without this, _pullAll() / listener writes survive in cache for the
+      // current page but vanish on the next page load if navigation was fast.
+      try { sessionStorage.setItem('wt_hdd_shadow_' + lsKey, JSON.stringify(data)); } catch {}
       if (window.DB && DB._tauri && DB._tauri.dataDir) DB._tauri.write(lsKey, data);
       return;
     }
