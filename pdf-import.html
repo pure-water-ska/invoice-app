@@ -612,14 +612,6 @@ async function _doSave() {
   if (total > 0) setProgress(false);
   let msg = `บันทึกสำเร็จ ${saved} ใบ`;
   if (errors.length) msg += `<br><small>${errors.map(e => `⚠️ ${e}`).join('<br>')}</small>`;
-  // Diagnostic: show sync state so we can confirm whether invoices will reach other devices
-  if (saved > 0) {
-    const sr = window.Sync;
-    const syncInfo = sr
-      ? `Sync ready=${sr.ready} online=${sr._online !== false} pending=${!!sr._pushDebounce?.['wt_invoices']}`
-      : 'Sync: not loaded yet';
-    msg += `<br><small class="text-muted">${syncInfo}</small>`;
-  }
   Utils.showAlert(msg, saved ? 'success' : 'warning');
   updateSaveBtn();
 }
@@ -641,26 +633,38 @@ function sanitizeFilename(s) {
   return String(s||'').replace(/[\\/:*?"<>|\x00-\x1f]/g,'_').replace(/_+/g,'_').trim();
 }
 
-async function savePdfBlob(blob, filename) {
+// Compress a data-URL image to a smaller JPEG data-URL for Firestore storage.
+async function compressDataUrl(dataUrl, maxPx, quality) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      let w = img.width, h = img.height;
+      if (w > maxPx || h > maxPx) {
+        const ratio = Math.min(maxPx / w, maxPx / h);
+        w = Math.round(w * ratio); h = Math.round(h * ratio);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = () => resolve(dataUrl); // fallback: keep original
+    img.src = dataUrl;
+  });
+}
+
+// Save PDF blob to the locally-selected pdf_dir folder (no download fallback).
+async function savePdfToLocalFolder(blob, filename) {
   try {
     const handle = await IDB.get('pdf_dir');
-    if (handle) {
-      const perm = await handle.requestPermission({ mode: 'readwrite' });
-      if (perm === 'granted') {
-        const fh = await handle.getFileHandle(filename, { create: true });
-        const w  = await fh.createWritable();
-        await w.write(blob); await w.close();
-        return true;
-      }
-    }
-  } catch(e) { console.warn('PDF folder save:', e); }
-  // Fallback: browser download
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = filename;
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 3000);
-  return false;
+    if (!handle) return false;
+    const perm = await handle.requestPermission({ mode: 'readwrite' });
+    if (perm !== 'granted') return false;
+    const fh = await handle.getFileHandle(filename, { create: true });
+    const w  = await fh.createWritable();
+    await w.write(blob); await w.close();
+    return true;
+  } catch(e) { console.warn('[PDF] local folder save:', e); return false; }
 }
 
 async function savePdfForCard(ci, d) {
@@ -668,6 +672,7 @@ async function savePdfForCard(ci, d) {
   const fn = sanitizeFilename(d.customerName || 'unknown') + '_' +
              sanitizeFilename(d.invoiceNumber) + '.pdf';
 
+  // Build blob (original single-page PDF, or re-rendered from canvas image)
   let blob;
   if (card._buf) {
     blob = new Blob([card._buf], { type: 'application/pdf' });
@@ -682,34 +687,50 @@ async function savePdfForCard(ci, d) {
     blob = pdf.output('blob');
   }
 
-  // ── 1. อัปโหลดไปยัง Google Drive (ถ้า sign in แล้ว) ──────────────────────
-  if (window.DriveStore?.ready) {
+  // ── 1. Firestore pdf_pages — primary cross-device storage ────────────────
+  // Compress the rendered page image to JPEG and store in pdf_pages/{invoiceNumber}.
+  // All devices can read this — no Drive login or local folder needed.
+  if (window.Sync?.ready && card._pageImageUrl) {
     try {
-      const meta = await DriveStore.upload(blob, fn, {
+      const compressed = await compressDataUrl(card._pageImageUrl, 1400, 0.78);
+      await Sync._orgRef().collection('pdf_pages').doc(d.invoiceNumber).set({
+        image:         compressed,
         invoiceNumber: d.invoiceNumber,
-        customerId:    d.customerId,
-        type:          'pdf',
+        uploadedAt:    firebase.firestore.FieldValue.serverTimestamp(),
+        _by:           Sync._deviceId,
       });
-      console.log('[Drive] PDF uploaded:', fn, meta.driveId);
-      // บันทึก driveId ไว้กับใบกำกับด้วย (สำหรับดึงกลับมาใช้)
-      try {
-        const invs = DB.getInvoices();
-        const inv  = invs.find(i => i.invoiceNumber === d.invoiceNumber);
-        if (inv) {
-          inv.driveFileId   = meta.driveId;
-          inv.driveFileName = fn;
-          inv.driveUploadAt = meta.uploadedAt;
-          DB._set('wt_invoices', invs);
-        }
-      } catch(e) { console.warn('[Drive] meta save:', e); }
-      return; // Drive ได้แล้ว ไม่ต้อง save local
-    } catch (e) {
-      console.warn('[Drive] upload failed — falling back to local:', e.message);
+      // Mark invoice so the PDF button knows to load from Firestore
+      const invs = DB.getInvoices();
+      const inv  = invs.find(i => i.invoiceNumber === d.invoiceNumber);
+      if (inv && !inv.hasPdfPage) {
+        inv.hasPdfPage = true;
+        DB._set('wt_invoices', invs);
+      }
+      console.log('[PdfPage] stored in Firestore:', d.invoiceNumber);
+    } catch(e) {
+      console.warn('[PdfPage] Firestore upload failed:', e.message);
     }
   }
 
-  // ── 2. Fallback → บันทึก local (เหมือนเดิม) ─────────────────────────────
-  await savePdfBlob(blob, fn);
+  // ── 2. Google Drive — full PDF (if signed in) ─────────────────────────────
+  if (window.DriveStore?.ready) {
+    try {
+      const meta = await DriveStore.upload(blob, fn, {
+        invoiceNumber: d.invoiceNumber, customerId: d.customerId, type: 'pdf',
+      });
+      const invs = DB.getInvoices();
+      const inv  = invs.find(i => i.invoiceNumber === d.invoiceNumber);
+      if (inv) {
+        inv.driveFileId = meta.driveId; inv.driveFileName = fn;
+        inv.driveUploadAt = meta.uploadedAt;
+        DB._set('wt_invoices', invs);
+      }
+      return; // Drive stored — skip local folder
+    } catch(e) { console.warn('[Drive] upload failed:', e.message); }
+  }
+
+  // ── 3. Local folder backup (no auto-download) ─────────────────────────────
+  await savePdfToLocalFolder(blob, fn);
 }
 
 // Convert ISO date (CE) → DD/MM/YYYY display in BE year

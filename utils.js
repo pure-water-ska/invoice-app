@@ -160,7 +160,7 @@ const LZString = (function () {
 
 const APP_VERSION = {
   version: '1.0.71',
-  date: '2026-06-02T10:50:12.810Z',
+  date: '2026-06-02T11:21:38.245Z',
   label: 'v1.0.71 (2 มิ.ย. 2569)',
 };
 

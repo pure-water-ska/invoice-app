@@ -328,31 +328,56 @@ function sanitizeFilename(s) {
   return String(s||'').replace(/[:*?"<>|\x00-\x1f]/g,'_').replace(/_+/g,'_').trim();
 }
 
+let _pdfModal = null;
 async function viewPdfInvoice(num) {
   const inv = _pdfInvMap[num];
   if (!inv) return;
-  // Drive-backed PDF
+
+  // ── 1. Google Drive (full PDF) ────────────────────────────────────────────
   if (inv.driveFileId) {
     window.open('https://drive.google.com/file/d/' + inv.driveFileId + '/view', '_blank');
     return;
   }
-  // Local IDB directory
+
+  // ── 2. Firestore pdf_pages (cross-device image) ───────────────────────────
+  if (inv.hasPdfPage && window.Sync?.ready) {
+    if (!_pdfModal) _pdfModal = new bootstrap.Modal(document.getElementById('pdfPageModal'));
+    document.getElementById('pdfPageTitle').textContent = 'PDF ใบกำกับ ' + num;
+    document.getElementById('pdfPageBody').innerHTML =
+      '<div class="text-center py-4"><div class="spinner-border text-primary"></div><div class="mt-2 text-muted">กำลังโหลด...</div></div>';
+    _pdfModal.show();
+    try {
+      const doc = await Sync._orgRef().collection('pdf_pages').doc(num).get();
+      if (doc.exists && doc.data().image) {
+        document.getElementById('pdfPageBody').innerHTML =
+          `<img src="${doc.data().image}" style="width:100%;height:auto;display:block;" alt="PDF ${num}">`;
+      } else {
+        document.getElementById('pdfPageBody').innerHTML =
+          '<p class="text-muted text-center py-3">ไม่พบภาพ PDF ในระบบ</p>';
+      }
+    } catch(e) {
+      document.getElementById('pdfPageBody').innerHTML =
+        `<p class="text-danger text-center py-3">โหลดล้มเหลว: ${e.message}</p>`;
+    }
+    return;
+  }
+
+  // ── 3. Local folder (same device only) ───────────────────────────────────
   try {
     const handle = await IDB.get('pdf_dir');
-    if (!handle) { alert('ไม่พบโฟลเดอร์ PDF ที่บันทึกไว้\nกรุณาตั้งค่าโฟลเดอร์ในหน้าเชื่อมต่อ'); return; }
+    if (!handle) { Utils.showAlert('ไม่พบไฟล์ PDF — อาจยังไม่ได้ sync ขึ้น Firestore', 'warning'); return; }
     const perm = await handle.requestPermission({ mode: 'read' });
-    if (perm !== 'granted') { alert('ไม่ได้รับสิทธิ์เข้าถึงโฟลเดอร์ PDF'); return; }
+    if (perm !== 'granted') { Utils.showAlert('ไม่ได้รับสิทธิ์เข้าถึงโฟลเดอร์ PDF', 'warning'); return; }
     const custName = inv.customerName || (DB.getCustomers().find(c => c.id === inv.customerId)?.name) || 'unknown';
     const fn = sanitizeFilename(custName) + '_' + sanitizeFilename(num) + '.pdf';
     const fileHandle = await handle.getFileHandle(fn);
     const file = await fileHandle.getFile();
     const url = URL.createObjectURL(file);
     const w = window.open(url, '_blank');
-    if (!w) { alert('กรุณาอนุญาต popup เพื่อดู PDF'); }
+    if (!w) Utils.showAlert('กรุณาอนุญาต popup เพื่อดู PDF', 'warning');
     setTimeout(() => URL.revokeObjectURL(url), 120000);
   } catch(e) {
-    console.error('[viewPdfInvoice]', e);
-    alert('ไม่พบไฟล์ PDF: ' + (e.message || e));
+    Utils.showAlert('ไม่พบไฟล์ PDF: ' + (e.message || e), 'danger');
   }
 }
 
@@ -655,5 +680,18 @@ async function loadArchiveInvoices() {
   }
 }
 </script>
+
+<!-- PDF Page Viewer Modal -->
+<div class="modal fade" id="pdfPageModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title fw-semibold" id="pdfPageTitle">PDF ใบกำกับ</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0" id="pdfPageBody"></div>
+    </div>
+  </div>
+</div>
 </body>
 </html>
