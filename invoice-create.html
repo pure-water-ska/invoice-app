@@ -148,7 +148,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.75"></script><script src="db.js?v=1.0.75"></script><script src="auth.js?v=1.0.75"></script><script src="nav.js?v=1.0.75"></script><script src="idb.js?v=1.0.75"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.76"></script><script src="db.js?v=1.0.76"></script><script src="auth.js?v=1.0.76"></script><script src="nav.js?v=1.0.76"></script><script src="idb.js?v=1.0.76"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -551,8 +551,16 @@ async function loadView(invNum) {
   document.getElementById('saveBtnRow').style.display = 'none';
   document.querySelectorAll('#toolbarBtns .save-btn').forEach(b => b.remove());
 
-  const pages = DB.getInvoices().filter(i => i.invoiceNumber === invNum);
-  if (pages.length === 0) { Utils.showAlert('ไม่พบใบกำกับ', 'danger'); return; }
+  // Retry up to 4 s — Firestore listener may briefly overwrite cache before
+  // _startInit runs, or Tauri HDD init may still be settling on first load.
+  let pages = DB.getInvoices().filter(i => i.invoiceNumber === invNum);
+  if (!pages.length) {
+    for (let t = 0; t < 8 && !pages.length; t++) {
+      await new Promise(r => setTimeout(r, 500));
+      pages = DB.getInvoices().filter(i => i.invoiceNumber === invNum);
+    }
+  }
+  if (pages.length === 0) { Utils.showAlert(`ไม่พบใบกำกับ ${invNum}`, 'danger'); return; }
 
   document.getElementById('toolbarBtns').innerHTML = `
     <button class="btn btn-outline-secondary btn-sm" onclick="history.back()"><i class="bi bi-arrow-left me-1"></i>กลับ</button>
@@ -1270,10 +1278,12 @@ async function saveInvoice(shouldPrint = false) {
   const _fn = PdfGen.sanitize(_cust ? _cust.name : 'unknown') + '_' + PdfGen.sanitize(invNumber) + '.pdf';
   // If Sync not yet ready, schedule a retry push once it initialises so the
   // invoice reaches Firestore even when saved immediately after page load.
-  if (!window.Sync?.ready) {
-    const retryPush = () => { if (window.Sync?.ready) Sync.push('wt_invoices', DB.getInvoices()); };
+  const _syncReadyAtSave = window.Sync?.ready;
+  if (!_syncReadyAtSave) {
+    console.warn('[saveInvoice] Sync not ready at save time — scheduling retry push');
+    const retryPush = () => { if (window.Sync?.ready) { console.log('[saveInvoice] retry push fired'); Sync.push('wt_invoices', DB.getInvoices()); } };
     window.addEventListener('sync:ready', retryPush, { once: true });
-    setTimeout(retryPush, 5000); // fallback if event never fires
+    setTimeout(retryPush, 5000);
   }
 
   Utils.showAlert('<i class="bi bi-hourglass-split me-1"></i>กำลังสร้าง PDF...', 'info');
@@ -1378,7 +1388,7 @@ function _showEditConflictBanner(type, remotePage) {
 }
 
 // ── EDIT MODE (load existing invoice into form) ───────────────────────────────
-function loadEdit(invNum) {
+async function loadEdit(invNum) {
   editMode = true;
   currentInvNum = invNum;
   document.getElementById('pageTitle').textContent = `แก้ไขใบกำกับ: ${invNum}`;
@@ -1386,8 +1396,15 @@ function loadEdit(invNum) {
   document.getElementById('editTable').style.display = '';
   document.getElementById('saveBtnRow').style.display = '';  // show in edit mode
 
-  const pages = DB.getInvoices().filter(i => i.invoiceNumber === invNum);
-  if (!pages.length) { Utils.showAlert('ไม่พบใบกำกับ', 'danger'); return; }
+  // Retry up to 4 s (same race-condition guard as loadView)
+  let pages = DB.getInvoices().filter(i => i.invoiceNumber === invNum);
+  if (!pages.length) {
+    for (let t = 0; t < 8 && !pages.length; t++) {
+      await new Promise(r => setTimeout(r, 500));
+      pages = DB.getInvoices().filter(i => i.invoiceNumber === invNum);
+    }
+  }
+  if (!pages.length) { Utils.showAlert(`ไม่พบใบกำกับ ${invNum}`, 'danger'); return; }
 
   const first = pages[0];
   // Snapshot the current editCount — any remote update that increments this triggers the conflict banner

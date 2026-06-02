@@ -859,8 +859,12 @@ const DB = {
       });
     }
     const cfg = this.getSettings();
-    if (cfg.showHeader === undefined) {
-      this.saveSettings({ ...cfg, showHeader: true });
+    // One-time migration: reset showHeader to false (new default is hidden).
+    // Store flag inside settings so it survives Tauri HDD wiping localStorage.
+    if (!cfg._headerDefaultV2) {
+      this.saveSettings({ ...cfg, showHeader: false, _headerDefaultV2: true });
+    } else if (cfg.showHeader === undefined) {
+      this.saveSettings({ ...cfg, showHeader: false });
     }
     if (!cfg.autoBackup) {
       this.saveSettings({ ...cfg, autoBackup: { enabled: true, interval: 'daily', lastBackupAt: null } });
