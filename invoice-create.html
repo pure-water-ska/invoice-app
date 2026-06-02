@@ -148,7 +148,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.73"></script><script src="db.js?v=1.0.73"></script><script src="auth.js?v=1.0.73"></script><script src="nav.js?v=1.0.73"></script><script src="idb.js?v=1.0.73"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.74"></script><script src="db.js?v=1.0.74"></script><script src="auth.js?v=1.0.74"></script><script src="nav.js?v=1.0.74"></script><script src="idb.js?v=1.0.74"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -255,23 +255,42 @@ body{margin:0;padding:0;background:#fff;font-family:'Sarabun','TH Sarabun New',s
     try {
       const { blob, firstPageJpeg } = await this._buildBlob(bodyHtml);
 
-      // ── 1. Firestore pdf_pages — primary cross-device storage ──────────────
-      if (invoiceNumber && window.Sync?.ready && firstPageJpeg) {
+      // ── 1. Always mark hasPdfPage on the invoice (button always shows) ────────
+      if (invoiceNumber) {
         try {
-          await Sync._orgRef().collection('pdf_pages').doc(invoiceNumber).set({
-            image:         firstPageJpeg,
-            invoiceNumber: invoiceNumber,
-            uploadedAt:    firebase.firestore.FieldValue.serverTimestamp(),
-            _by:           Sync._deviceId,
-          });
-          // Mark invoice so PDF button on other devices knows to load from Firestore
           const invs = DB.getInvoices();
           const inv  = invs.find(i => i.invoiceNumber === invoiceNumber);
           if (inv && !inv.hasPdfPage) {
             inv.hasPdfPage = true;
             DB._set('wt_invoices', invs);
           }
-        } catch(e) { console.warn('[PdfPage] Firestore upload failed:', e.message); }
+        } catch(e) { console.warn('[PdfPage] hasPdfPage set failed:', e.message); }
+      }
+
+      // ── 2. Firestore pdf_pages — cross-device image storage ─────────────────
+      // Use Date.now() instead of FieldValue.serverTimestamp() to avoid dependency
+      // on the firebase global which may not be initialized at call time.
+      if (invoiceNumber && firstPageJpeg) {
+        const uploadPage = async () => {
+          if (!window.Sync?.ready) return; // called again after sync:ready if needed
+          try {
+            await Sync._orgRef().collection('pdf_pages').doc(invoiceNumber).set({
+              image:         firstPageJpeg,
+              invoiceNumber: invoiceNumber,
+              uploadedAt:    new Date().toISOString(),
+              _by:           Sync._deviceId,
+            });
+            console.log('[PdfPage] stored in Firestore:', invoiceNumber);
+          } catch(e) { console.warn('[PdfPage] Firestore upload failed:', e.message); }
+        };
+        if (window.Sync?.ready) {
+          uploadPage();
+        } else {
+          // Sync not ready yet — retry once it initialises
+          window.addEventListener('sync:ready', uploadPage, { once: true });
+          // Fallback: try after 5s even without the event
+          setTimeout(() => { if (!window.Sync?.ready) return; uploadPage(); }, 5000);
+        }
       }
 
       // ── 2. Local folder backup (no auto-download) ──────────────────────────
@@ -1249,8 +1268,16 @@ async function saveInvoice(shouldPrint = false) {
     });
   });
   const _fn = PdfGen.sanitize(_cust ? _cust.name : 'unknown') + '_' + PdfGen.sanitize(invNumber) + '.pdf';
+  // If Sync not yet ready, schedule a retry push once it initialises so the
+  // invoice reaches Firestore even when saved immediately after page load.
+  if (!window.Sync?.ready) {
+    const retryPush = () => { if (window.Sync?.ready) Sync.push('wt_invoices', DB.getInvoices()); };
+    window.addEventListener('sync:ready', retryPush, { once: true });
+    setTimeout(retryPush, 5000); // fallback if event never fires
+  }
+
   Utils.showAlert('<i class="bi bi-hourglass-split me-1"></i>กำลังสร้าง PDF...', 'info');
-  await PdfGen.run(_pdfBody, _fn);
+  await PdfGen.run(_pdfBody, _fn, invNumber);
   // Mark PDF as fresh so doPrint() can skip regeneration
   try { sessionStorage.setItem('freshPdf', JSON.stringify({ inv: invNumber, file: _fn })); } catch(e) {}
   // Signal view mode to auto-print if requested

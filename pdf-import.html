@@ -136,7 +136,7 @@
 </div>
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
-<script src="utils.js?v=1.0.73"></script><script src="db.js?v=1.0.73"></script><script src="auth.js?v=1.0.73"></script><script src="nav.js?v=1.0.73"></script><script src="idb.js?v=1.0.73"></script>
+<script src="utils.js?v=1.0.74"></script><script src="db.js?v=1.0.74"></script><script src="auth.js?v=1.0.74"></script><script src="nav.js?v=1.0.74"></script><script src="idb.js?v=1.0.74"></script>
 <script src="drive-config.js" onerror="window.GOOGLE_CLIENT_ID=''"></script>
 <script src="drive-store.js"></script>
 <script>
@@ -688,27 +688,22 @@ async function savePdfForCard(ci, d) {
   }
 
   // ── 1. Firestore pdf_pages — primary cross-device storage ────────────────
-  // Compress the rendered page image to JPEG and store in pdf_pages/{invoiceNumber}.
-  // All devices can read this — no Drive login or local folder needed.
-  if (window.Sync?.ready && card._pageImageUrl) {
+  // Always mark hasPdfPage first so the PDF button shows even if Firestore upload fails.
+  if (card._pageImageUrl) {
     try {
-      const compressed = await compressDataUrl(card._pageImageUrl, 1400, 0.78);
-      await Sync._orgRef().collection('pdf_pages').doc(d.invoiceNumber).set({
-        image:         compressed,
-        invoiceNumber: d.invoiceNumber,
-        uploadedAt:    firebase.firestore.FieldValue.serverTimestamp(),
-        _by:           Sync._deviceId,
-      });
-      // Mark invoice so the PDF button knows to load from Firestore
       const invs = DB.getInvoices();
       const inv  = invs.find(i => i.invoiceNumber === d.invoiceNumber);
-      if (inv && !inv.hasPdfPage) {
-        inv.hasPdfPage = true;
-        DB._set('wt_invoices', invs);
-      }
-      console.log('[PdfPage] stored in Firestore:', d.invoiceNumber);
-    } catch(e) {
-      console.warn('[PdfPage] Firestore upload failed:', e.message);
+      if (inv && !inv.hasPdfPage) { inv.hasPdfPage = true; DB._set('wt_invoices', invs); }
+    } catch(e) { console.warn('[PdfPage] hasPdfPage set:', e.message); }
+
+    if (window.Sync?.ready) {
+      try {
+        const compressed = await compressDataUrl(card._pageImageUrl, 1400, 0.78);
+        await Sync._orgRef().collection('pdf_pages').doc(d.invoiceNumber).set({
+          image: compressed, invoiceNumber: d.invoiceNumber,
+          uploadedAt: new Date().toISOString(), _by: Sync._deviceId,
+        });
+      } catch(e) { console.warn('[PdfPage] Firestore upload failed:', e.message); }
     }
   }
 
