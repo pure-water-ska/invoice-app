@@ -1324,6 +1324,7 @@ var Sync = {
           try {
             const raw = this._localRead(lsKey);
             const localArr = JSON.parse(raw || '[]');
+            console.log(`[Sync] _pullAll merge ${colName}: local=${localArr.length} fs=${snap.docs.length}`);
             if (Array.isArray(localArr) && localArr.length > 0) {
               const fsIds          = new Set(snap.docs.map(d => d.id));
               const stones         = this._getTombstones(colName);

@@ -205,7 +205,9 @@ const DB = {
       // Sync to Firestore (queued if sync.js not ready yet — flushed on init)
       if (window.Sync) {
         if (Sync.ready) Sync.push(key, val);
-        else Sync._enqueue(key, val);
+        else { console.warn('[DB] Sync loaded but not ready — enqueuing', key); Sync._enqueue(key, val); }
+      } else {
+        console.warn('[DB] Sync not loaded at _set time — push dropped for', key);
       }
       return;
     }
