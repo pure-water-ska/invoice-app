@@ -144,7 +144,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.74"></script><script src="db.js?v=1.0.74"></script><script src="auth.js?v=1.0.74"></script><script src="nav.js?v=1.0.74"></script><script src="idb.js?v=1.0.74"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.75"></script><script src="db.js?v=1.0.75"></script><script src="auth.js?v=1.0.75"></script><script src="nav.js?v=1.0.75"></script><script src="idb.js?v=1.0.75"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -326,6 +326,11 @@ const _pdfInvMap = {};
 
 function sanitizeFilename(s) {
   return String(s||'').replace(/[:*?"<>|\x00-\x1f]/g,'_').replace(/_+/g,'_').trim();
+}
+
+function printInvoice(num) {
+  try { sessionStorage.setItem('autoPrint', num); } catch {}
+  location.href = 'invoice-create.html?view=' + num;
 }
 
 let _pdfModal = null;
@@ -548,7 +553,7 @@ function render() {
       <td class="text-center"><span class="badge ${si.cls}">${si.label}</span></td>
       <td class="text-center sel-action-cell${_selMode ? ' d-none' : ''}">
         <div class="btn-group btn-group-sm">
-          <a class="btn btn-outline-primary" href="invoice-create.html?view=${inv.invoiceNumber}" title="ดู/พิมพ์"><i class="bi bi-eye"></i></a>
+          <button class="btn btn-outline-primary" onclick="printInvoice('${inv.invoiceNumber}')" title="พิมพ์"><i class="bi bi-printer"></i></button>
           ${(inv.importedFrom === 'pdf' || inv.hasPdfPage) ? `<button class="btn btn-outline-danger" onclick="viewPdfInvoice('${inv.invoiceNumber}')" title="ดูไฟล์ PDF"><i class="bi bi-file-earmark-pdf"></i></button>` : ''}
           <a class="btn btn-outline-warning" href="invoice-create.html?edit=${inv.invoiceNumber}" title="แก้ไข"><i class="bi bi-pencil"></i></a>
           <a class="btn btn-outline-success" href="payments.html?inv=${inv.invoiceNumber}" title="ชำระเงิน"><i class="bi bi-cash-coin"></i></a>

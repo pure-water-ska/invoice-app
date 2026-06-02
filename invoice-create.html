@@ -148,7 +148,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.74"></script><script src="db.js?v=1.0.74"></script><script src="auth.js?v=1.0.74"></script><script src="nav.js?v=1.0.74"></script><script src="idb.js?v=1.0.74"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.75"></script><script src="db.js?v=1.0.75"></script><script src="auth.js?v=1.0.75"></script><script src="nav.js?v=1.0.75"></script><script src="idb.js?v=1.0.75"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -1280,10 +1280,16 @@ async function saveInvoice(shouldPrint = false) {
   await PdfGen.run(_pdfBody, _fn, invNumber);
   // Mark PDF as fresh so doPrint() can skip regeneration
   try { sessionStorage.setItem('freshPdf', JSON.stringify({ inv: invNumber, file: _fn })); } catch(e) {}
-  // Signal view mode to auto-print if requested
-  if (shouldPrint) { try { sessionStorage.setItem('autoPrint', invNumber); } catch(e) {} }
 
-  setTimeout(() => { location.href = 'invoice-create.html?view=' + invNumber; }, 1500);
+  if (shouldPrint) {
+    // "บันทึก & พิมพ์" — navigate to view mode to trigger auto-print
+    try { sessionStorage.setItem('autoPrint', invNumber); } catch(e) {}
+    setTimeout(() => { location.href = 'invoice-create.html?view=' + invNumber; }, 1500);
+  } else {
+    // "บันทึก PDF" — go straight to invoice list to avoid race condition
+    // where Tauri HDD write hasn't completed when ?view= calls DB.getInvoices()
+    setTimeout(() => { location.href = 'invoices.html'; }, 1000);
+  }
 }
 
 // ── CAP STOCK MIN-QTY CHECK (called before saving) ──────────────────────────
