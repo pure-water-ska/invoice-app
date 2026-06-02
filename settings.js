@@ -1955,10 +1955,29 @@ async function runSyncDiagnostic() {
       log(docName + ' count', 'local=' + localN + '  server=' + serverN +
           (localN === serverN ? '  ✓match' : '  ✗DIFFER'));
     }
+    log('orgId', Sync._orgId || '(none)');
     log('', '');
     await countDoc('customers', 'wt_customers');
     await countDoc('users_cfg', 'wt_users');
     await countDoc('products',  'wt_products');
+
+    // ── INVOICES (COLLECTIONS) ─────────────────────────────────────────────────
+    try {
+      const localInvN = (() => { try { return JSON.parse(Sync._localRead('wt_invoices') || '[]').length; } catch { return '?'; } })();
+      const cutoff = new Date(Date.now() - 6 * 30.44 * 24 * 3600 * 1000).toISOString();
+      const fsSnap = await base.collection('invoices').where('createdAt', '>=', cutoff).get({ source: 'server' });
+      const fsN = fsSnap.size;
+      log('invoices (local)', localInvN);
+      log('invoices (Firestore 6mo)', fsN + (localInvN === fsN ? '  ✓match' : '  ✗DIFFER ← sync issue'));
+      // Show the 3 most recent local invoices
+      try {
+        const invs = DB.getInvoices().slice(0, 3);
+        invs.forEach((inv, i) => {
+          const inFs = fsSnap.docs.some(d => d.id === inv.id);
+          log(`  recent[${i}] ${inv.invoiceNumber}`, (inFs ? '✓ in Firestore' : '✗ NOT in Firestore') + '  id=' + (inv.id || '?').slice(-6));
+        });
+      } catch {}
+    } catch (e) { log('invoices Firestore', 'ERR ' + (e.code || e.message)); }
 
     // ── LIVE listener on the REAL customers + users docs ─────────────────────
     // Keep this open on device B; add/delete a customer or user on device A.
