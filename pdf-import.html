@@ -136,7 +136,7 @@
 </div>
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
-<script src="utils.js?v=1.0.67"></script><script src="db.js?v=1.0.67"></script><script src="auth.js?v=1.0.67"></script><script src="nav.js?v=1.0.67"></script><script src="idb.js?v=1.0.67"></script>
+<script src="utils.js?v=1.0.68"></script><script src="db.js?v=1.0.68"></script><script src="auth.js?v=1.0.68"></script><script src="nav.js?v=1.0.68"></script><script src="idb.js?v=1.0.68"></script>
 <script src="drive-config.js" onerror="window.GOOGLE_CLIENT_ID=''"></script>
 <script src="drive-store.js"></script>
 <script>
@@ -203,7 +203,13 @@ async function processPDF(file) {
       const text = Object.keys(lineMap).map(Number).sort((a,b)=>b-a)
         .map(y => lineMap[y].sort((a,b)=>a.x-b.x).map(i=>i.s).join(' ').trim())
         .filter(l => l.length > 0).join('\n');
-      if (text.trim().length < 10) continue;
+      if (text.trim().length < 10) {
+        document.getElementById('invoiceCards').insertAdjacentHTML('beforeend',
+          `<div class="alert alert-warning mb-3"><i class="bi bi-exclamation-triangle me-1"></i>
+           <strong>${esc(file.name)}</strong> หน้า ${pn}: อ่านข้อความได้ ${text.trim().length} ตัวอักษร (น้อยเกินไป) —
+           อาจเป็น PDF สแกน/ภาพถ่ายที่ไม่มี text layer. ลองใช้ Adobe Acrobat ทำ OCR ก่อน import.</div>`);
+        continue;
+      }
       // Extract customer name from filename: remove extension, then strip numbers & special chars
       const fileHint = file.name
         .replace(/\.pdf$/i, '')
@@ -223,9 +229,12 @@ async function processPDF(file) {
       renderCard(parsed, ci, file.name, pn, pdf.numPages, pageImageUrl);
     }
   } catch (err) {
-    document.getElementById('invoiceCards').insertAdjacentHTML('beforeend',
-      `<div class="alert alert-danger mb-3"><i class="bi bi-exclamation-triangle me-1"></i>
-       อ่านไฟล์ <strong>${esc(file.name)}</strong> ไม่สำเร็จ: ${esc(err.message)}</div>`);
+    const errEl = document.createElement('div');
+    errEl.className = 'alert alert-danger mb-3';
+    errEl.innerHTML = `<i class="bi bi-exclamation-triangle me-1"></i>
+       อ่านไฟล์ <strong>${esc(file.name)}</strong> ไม่สำเร็จ: ${esc(err.message)}`;
+    document.getElementById('invoiceCards').appendChild(errEl);
+    errEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 }
 
