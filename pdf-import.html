@@ -136,7 +136,7 @@
 </div>
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
-<script src="utils.js?v=1.0.66"></script><script src="db.js?v=1.0.66"></script><script src="auth.js?v=1.0.66"></script><script src="nav.js?v=1.0.66"></script><script src="idb.js?v=1.0.66"></script>
+<script src="utils.js?v=1.0.67"></script><script src="db.js?v=1.0.67"></script><script src="auth.js?v=1.0.67"></script><script src="nav.js?v=1.0.67"></script><script src="idb.js?v=1.0.67"></script>
 <script src="drive-config.js" onerror="window.GOOGLE_CLIENT_ID=''"></script>
 <script src="drive-store.js"></script>
 <script>
@@ -150,9 +150,9 @@ Nav.render('pdf-import');
 let _cards = [];
 let _custs  = [];
 
-window.addEventListener('DOMContentLoaded', () => {
-  _custs = DB.getCustomers();
-});
+// _custs is refreshed at the start of handleFiles() so it always reflects
+// the latest CustomerSync snapshot rather than a one-time DOMContentLoaded
+// snapshot that fires before the Firestore listener has delivered data.
 
 /* ─── File Handling ─────────────────────────────────────────────────────── */
 function handleDrop(e) {
@@ -164,6 +164,7 @@ function handleDrop(e) {
 }
 
 async function handleFiles(filesInput) {
+  _custs = DB.getCustomers(); // refresh before parsing so auto-detect uses current data
   const files = Array.from(filesInput);
   const total = files.length;
   document.getElementById('clearBtn').classList.remove('d-none');
@@ -709,7 +710,7 @@ function closeCard(ci) {
 
 // Find customer by exact name
 function findCustByName(name) {
-  return _custs.find(c => c.name === name.trim()) || null;
+  return DB.getCustomers().find(c => c.name === name.trim()) || null;
 }
 
 async function saveSingleCard(ci) {
