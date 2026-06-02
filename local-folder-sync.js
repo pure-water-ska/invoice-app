@@ -198,6 +198,11 @@ if (!window.LocalFolderSync) {
       // Re-request permission on an existing handle.
       // Must be called from a user-gesture handler.
       async reconnect() {
+        // If init() hasn't populated _handle yet (race on settings load), reload
+        // it from IDB so the reconnect button works even during that window.
+        if (!_handle && window.IDB) {
+          try { _handle = await IDB.get(IDB_HANDLE_KEY); } catch {}
+        }
         if (!_handle) throw new Error('No folder selected — call selectFolder() first');
         _permOk = await _requestPerm(_handle);
         if (_permOk) {

@@ -640,7 +640,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.80"></script><script src="db.js?v=1.0.80"></script><script src="auth.js?v=1.0.80"></script><script src="nav.js?v=1.0.80"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.81"></script><script src="db.js?v=1.0.81"></script><script src="auth.js?v=1.0.81"></script><script src="nav.js?v=1.0.81"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -1239,7 +1239,6 @@ function openLightboxSrc(src) {
 function renderExistingPayments(invNum) {
   const payments = DB.getPaymentsByInvoice(invNum);
   const el = document.getElementById('existingPayments');
-  if (!payments.length) { el.innerHTML = ''; return; }
 
   const isAdmin = Auth.isAdmin();
 
@@ -1248,15 +1247,25 @@ function renderExistingPayments(invNum) {
   // Fallback: check legacy per-payment signedImage for older records
   const legacySigned = payments.find(p => p.signedImage)?.signedImage || '';
   const signedSrc = inv?.signedImage || legacySigned;
-  const signedHtml = signedSrc
-    ? `<div class="mb-3 pb-2 border-bottom">
-         <div class="small fw-semibold text-success mb-1">
-           <i class="bi bi-file-earmark-check me-1"></i>ใบกำกับที่ลูกค้าเซ็นรับแล้ว
-         </div>
-         ${_imgTagHtml(signedSrc, 'pay-hist-img', 'ใบกำกับเซ็น')}
-       </div>` : '';
+  const canUploadSigned = Auth.can('payment_add') || Auth.can('payment_edit') || Auth.isAdmin();
+  const signedHtml = `
+    <div class="mb-3 pb-2 border-bottom">
+      <div class="d-flex align-items-center justify-content-between mb-1">
+        <div class="small fw-semibold ${signedSrc ? 'text-success' : 'text-muted'}">
+          <i class="bi bi-file-earmark-check me-1"></i>ใบกำกับที่ลูกค้าเซ็นรับแล้ว
+        </div>
+        ${canUploadSigned ? `<button class="btn btn-sm ${signedSrc ? 'btn-outline-secondary' : 'btn-outline-success'}"
+          onclick="uploadSignedInvoice('${invNum}')" title="${signedSrc ? 'เปลี่ยนรูปเซ็น' : 'อัปโหลดรูปเซ็น'}">
+          <i class="bi bi-${signedSrc ? 'arrow-repeat' : 'upload'} me-1"></i>${signedSrc ? 'เปลี่ยน' : 'อัปโหลด'}
+        </button>` : ''}
+      </div>
+      ${signedSrc
+        ? _imgTagHtml(signedSrc, 'pay-hist-img', 'ใบกำกับเซ็น')
+        : `<div class="text-muted small fst-italic">ยังไม่มีรูปใบกำกับที่เซ็น</div>`}
+    </div>`;
 
   el.innerHTML = `<h6 class="fw-semibold">ประวัติการชำระ</h6>` + signedHtml +
+    (payments.length ? '' : `<div class="text-muted small fst-italic mb-2">ยังไม่มีรายการชำระ</div>`) +
     payments.map((p, pi) => {
       const isCancelled = !!p.cancelled;
       const imgs = [
@@ -1426,6 +1435,35 @@ async function confirmImageUpdate() {
   imgUpdateModal.hide();
   renderExistingPayments(invNum);
   Utils.showAlert(`<i class="bi bi-image me-1 text-primary"></i>บันทึกรูป<strong>${typeLabel}</strong>เรียบร้อย`, 'success', 'modalAlert');
+}
+
+// ── Signed invoice upload (independent of any payment record) ───────────────────
+// The signed-invoice image lives on the INVOICE record (inv.signedImage), so it
+// can be uploaded even before any payment exists. Uses a transient file input.
+function uploadSignedInvoice(invNum) {
+  const inv = DB.getInvoices().find(i => i.invoiceNumber === invNum);
+  if (!inv) { Utils.showAlert('ไม่พบใบกำกับ ' + invNum, 'warning'); return; }
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*,.pdf';
+  input.onchange = async () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    try {
+      Utils.showAlert('<i class="bi bi-hourglass-split me-1"></i>กำลังบันทึกรูป...', 'info');
+      let signedSrc = await Utils.compressImage(file, 1400, 0.82);
+      if (window.DriveStore && DriveStore.ready && signedSrc.startsWith('data:')) {
+        try { signedSrc = await _drvUpload(signedSrc, `signed_${invNum}_${Date.now()}.jpg`); } catch {}
+      }
+      DB.updateInvoice(inv.id, { signedImage: signedSrc });
+      DB.logActivity(session.userId, session.username, 'บันทึกรูปใบกำกับเซ็น', { invoiceNumber: invNum });
+      renderExistingPayments(invNum);
+      Utils.showAlert('<i class="bi bi-file-earmark-check me-1 text-success"></i>บันทึกรูปใบกำกับที่เซ็นแล้วเรียบร้อย', 'success');
+    } catch (e) {
+      Utils.showAlert('บันทึกรูปล้มเหลว: ' + (e.message || e), 'danger');
+    }
+  };
+  input.click();
 }
 
 // ── Cancel Payment ────────────────────────────────────────────────────────────

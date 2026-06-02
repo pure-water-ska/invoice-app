@@ -143,6 +143,25 @@ function renderLocalFolderCard() {
     btnRestore.classList.remove('d-none');
     btnDisconnect.classList.remove('d-none');
   } else {
+    // FALLBACK: getStatus() says no handle, but LocalFolderSync.init() reads the
+    // handle from IDB asynchronously and may not have finished (or its
+    // localfolder:connected event fired before this card registered a listener).
+    // Read the handle DIRECTLY from IDB — the same robust approach the PDF-folder
+    // card uses (initFolderSettings) — so a persisted folder never shows as "gone".
+    if (window.IDB) {
+      IDB.get('local_folder_handle').then(h => {
+        if (h && h.name) {
+          nameEl.value = h.name;
+          badgeEl.textContent = '⚠ ต้องการสิทธิ์';
+          badgeEl.className   = 'badge bg-warning text-dark';
+          statusEl.innerHTML  = `โฟลเดอร์ <strong>${h.name}</strong> ต้องการสิทธิ์ใหม่ — กด <em>เชื่อมต่อใหม่</em>`;
+          btnReconnect.classList.remove('d-none');
+          btnWriteAll.classList.add('d-none');
+          btnRestore.classList.remove('d-none');
+          btnDisconnect.classList.remove('d-none');
+        }
+      }).catch(() => {});
+    }
     badgeEl.textContent = 'ไม่ได้เชื่อมต่อ';
     badgeEl.className   = 'badge bg-secondary text-white';
     statusEl.textContent = 'เลือกโฟลเดอร์เพื่อเริ่มซิงค์อัตโนมัติ';
