@@ -148,7 +148,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.71"></script><script src="db.js?v=1.0.71"></script><script src="auth.js?v=1.0.71"></script><script src="nav.js?v=1.0.71"></script><script src="idb.js?v=1.0.71"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.72"></script><script src="db.js?v=1.0.72"></script><script src="auth.js?v=1.0.72"></script><script src="nav.js?v=1.0.72"></script><script src="idb.js?v=1.0.72"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -197,10 +197,8 @@ body{margin:0;padding:0;background:#fff;font-family:'Sarabun','TH Sarabun New',s
       iframe.contentDocument.open();
       iframe.contentDocument.write(this._wrapHtml(bodyHtml));
       iframe.contentDocument.close();
-      // Wait for fonts + layout
       await new Promise(r => setTimeout(r, 1200));
       const body = iframe.contentDocument.body;
-      // Use at least A5_H so footer stays at bottom; multi-page invoices grow beyond A5_H
       iframe.style.height = Math.max(body.scrollHeight, A5_H) + 'px';
 
       const canvas = await html2canvas(body, {
@@ -212,12 +210,18 @@ body{margin:0;padding:0;background:#fff;font-family:'Sarabun','TH Sarabun New',s
       const pdf  = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a5' });
       const pdfW = pdf.internal.pageSize.getWidth();
       const pdfH = pdf.internal.pageSize.getHeight();
-      // Height of one A5 page in canvas pixels
       const a5PxH = Math.round(canvas.width * (pdfH / pdfW));
+
+      // Capture first-page image for Firestore cross-device viewing
+      const firstSlice = document.createElement('canvas');
+      firstSlice.width = canvas.width;
+      firstSlice.height = Math.min(a5PxH, canvas.height);
+      firstSlice.getContext('2d').drawImage(canvas, 0, 0, canvas.width, firstSlice.height, 0, 0, canvas.width, firstSlice.height);
+      const firstPageJpeg = firstSlice.toDataURL('image/jpeg', 0.82);
 
       let yOff = 0, pageNum = 0;
       while (yOff < canvas.height) {
-        if (canvas.height - yOff < 15) break; // skip near-empty trailing slice
+        if (canvas.height - yOff < 15) break;
         if (pageNum > 0) pdf.addPage();
         const sliceH = Math.min(a5PxH, canvas.height - yOff);
         const tmp = document.createElement('canvas');
@@ -228,42 +232,55 @@ body{margin:0;padding:0;background:#fff;font-family:'Sarabun','TH Sarabun New',s
         pdf.addImage(tmp.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, pdfW, pdfH);
         yOff += a5PxH; pageNum++;
       }
-      return pdf.output('blob');
+      return { blob: pdf.output('blob'), firstPageJpeg };
     } finally {
       document.body.removeChild(iframe);
     }
   },
 
-  async _saveBlob(blob, filename) {
+  async _saveToLocalFolder(blob, filename) {
     try {
       const handle = await IDB.get('pdf_dir');
-      if (handle) {
-        const perm = await handle.requestPermission({ mode: 'readwrite' });
-        if (perm === 'granted') {
-          const fh = await handle.getFileHandle(filename, { create: true });
-          const w  = await fh.createWritable();
-          await w.write(blob); await w.close();
-          return true;
-        }
-      }
-    } catch(e) { console.warn('PDF folder save:', e); }
-    // Fallback: browser download
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = filename;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 3000);
-    return false;
+      if (!handle) return false;
+      const perm = await handle.requestPermission({ mode: 'readwrite' });
+      if (perm !== 'granted') return false;
+      const fh = await handle.getFileHandle(filename, { create: true });
+      const w  = await fh.createWritable();
+      await w.write(blob); await w.close();
+      return true;
+    } catch(e) { console.warn('PDF folder save:', e); return false; }
   },
 
-  async run(bodyHtml, filename) {
+  async run(bodyHtml, filename, invoiceNumber) {
     try {
-      const blob   = await this._buildBlob(bodyHtml);
-      const toDir  = await this._saveBlob(blob, filename);
+      const { blob, firstPageJpeg } = await this._buildBlob(bodyHtml);
+
+      // ── 1. Firestore pdf_pages — primary cross-device storage ──────────────
+      if (invoiceNumber && window.Sync?.ready && firstPageJpeg) {
+        try {
+          await Sync._orgRef().collection('pdf_pages').doc(invoiceNumber).set({
+            image:         firstPageJpeg,
+            invoiceNumber: invoiceNumber,
+            uploadedAt:    firebase.firestore.FieldValue.serverTimestamp(),
+            _by:           Sync._deviceId,
+          });
+          // Mark invoice so PDF button on other devices knows to load from Firestore
+          const invs = DB.getInvoices();
+          const inv  = invs.find(i => i.invoiceNumber === invoiceNumber);
+          if (inv && !inv.hasPdfPage) {
+            inv.hasPdfPage = true;
+            DB._set('wt_invoices', invs);
+          }
+        } catch(e) { console.warn('[PdfPage] Firestore upload failed:', e.message); }
+      }
+
+      // ── 2. Local folder backup (no auto-download) ──────────────────────────
+      const toDir = await this._saveToLocalFolder(blob, filename);
+
       Utils.showAlert(
         `<i class="bi bi-file-earmark-pdf me-1 text-danger"></i>` +
         `บันทึก PDF: <strong>${filename}</strong>` +
-        (toDir ? '' : ' (ดาวน์โหลด)')
+        (toDir ? '' : '')
       );
       return { ok: true, toDir };
     } catch(e) {
@@ -591,7 +608,7 @@ async function doPrint() {
         _pdfBody += buildInvoicePage(page, cust, cfg, page.page, totalPages, ct, reprintCount, editCount);
       });
     });
-    PdfGen.run(_pdfBody, _fn).catch(e => console.warn('PDF save error:', e));
+    PdfGen.run(_pdfBody, _fn, currentInvNum).catch(e => console.warn('PDF save error:', e));
   }
 }
 
