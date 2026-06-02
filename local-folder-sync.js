@@ -28,8 +28,9 @@ if (!window.LocalFolderSync) {
     var IDB_HANDLE_KEY = 'local_folder_handle';
     var DEBOUNCE_MS    = 3000;
 
-    var _handle = null;   // FileSystemDirectoryHandle or null
-    var _permOk = false;  // true once permission granted
+    var _handle   = null;   // FileSystemDirectoryHandle or null
+    var _permOk   = false;  // true once permission granted
+    var _initDone = false;  // guard: init() runs only once per page load
     var _queue  = {};     // pending writes: { key: value }
     var _timer  = null;   // debounce handle
 
@@ -110,10 +111,20 @@ if (!window.LocalFolderSync) {
       // Load persisted handle, check permission, attach sync event listeners.
       // Called once by nav.js after idb.js is confirmed loaded.
       async init() {
+        if (_initDone) return;          // nav.js may call init() multiple times
+        _initDone = true;
         if (!window.showDirectoryPicker) return;
         if (!window.IDB)                 return;
 
-        try { _handle = await IDB.get(IDB_HANDLE_KEY); } catch (e) { _handle = null; }
+        // Only overwrite _handle if IDB read succeeds — an IDB error must not
+        // silently clear a handle that was just selected this session.
+        try {
+          const h = await IDB.get(IDB_HANDLE_KEY);
+          _handle = h; // null if never set; valid handle if previously saved
+        } catch (e) {
+          // IDB unavailable — keep _handle as-is (null on fresh load)
+          console.warn('[LocalFolderSync] IDB read failed:', e && e.message);
+        }
 
         if (_handle) {
           // queryPermission does NOT need a user gesture — safe on page load.

@@ -205,9 +205,10 @@ const DB = {
       // Sync to Firestore (queued if sync.js not ready yet — flushed on init)
       if (window.Sync) {
         if (Sync.ready) Sync.push(key, val);
-        else { console.warn('[DB] Sync loaded but not ready — enqueuing', key); Sync._enqueue(key, val); }
-      } else {
-        console.warn('[DB] Sync not loaded at _set time — push dropped for', key);
+        else Sync._enqueue(key, val);
+      } else if (key === 'wt_invoices' || key === 'wt_payments') {
+        // Sync not loaded yet — log to error log so it appears in Settings → Troubleshoot
+        try { this.logError(new Error('[Sync] window.Sync undefined at _set — push dropped for ' + key), 'db._set'); } catch {}
       }
       return;
     }
