@@ -272,12 +272,6 @@
           </div>
         </div>
 
-        <hr>
-        <h6 class="fw-semibold mb-2"><i class="bi bi-file-earmark-image me-1 text-success"></i>ใบกำกับที่ลูกค้าเซ็นรับแล้ว</h6>
-        <p class="text-muted small mb-2">บันทึกภาพใบกำกับสินค้าที่ลูกค้าเซนต์แล้ว</p>
-        <input type="file" id="paySignedImage" class="form-control mb-2" accept="image/*,.pdf"
-               onchange="loadPayImage(this,'signedImagePreview')">
-        <div id="signedImagePreview" class="d-flex gap-2 flex-wrap"></div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
@@ -334,7 +328,6 @@
           <select id="imgUpdateType" class="form-select">
             <option value="transfer">สลิปโอนเงิน</option>
             <option value="cheque">รูปเช็ค</option>
-            <option value="signed">ใบกำกับที่เซ็นแล้ว</option>
           </select>
         </div>
 
@@ -640,7 +633,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.81"></script><script src="db.js?v=1.0.81"></script><script src="auth.js?v=1.0.81"></script><script src="nav.js?v=1.0.81"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.82"></script><script src="db.js?v=1.0.82"></script><script src="auth.js?v=1.0.82"></script><script src="nav.js?v=1.0.82"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -978,10 +971,12 @@ function openPayModal(invNum, custId) {
   document.getElementById('pendingPaymentsList').style.display    = 'none';
   document.getElementById('pendingPaymentsContainer').innerHTML   = '';
   payImages = { transfer: '', cheque: '', signed: '' };
-  ['transferImagePreview','chequeImagePreview','signedImagePreview'].forEach(id =>
-    document.getElementById(id).innerHTML = '');
-  ['payTransferImage','payChequeImage','paySignedImage'].forEach(id =>
-    document.getElementById(id).value = '');
+  ['transferImagePreview','chequeImagePreview'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.innerHTML = '';
+  });
+  ['payTransferImage','payChequeImage'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
 
   buildMethodSelect();
   buildCashCollectorSelect();
@@ -1001,15 +996,8 @@ function openPayModal(invNum, custId) {
   window._currentInvDate = inv?.createdAt ? inv.createdAt.slice(0,10) : '';
   checkPayDate();
 
-  // Pre-load signed image from invoice if one was already uploaded before
-  if (inv?.signedImage) {
-    payImages.signed = inv.signedImage;
-    const prev = document.getElementById('signedImagePreview');
-    prev.innerHTML = _imgTagHtml(inv.signedImage, 'pay-hist-img', 'ใบกำกับเซ็น') +
-      `<button class="btn btn-sm btn-outline-danger ms-1 align-self-start"
-         onclick="clearPayImage('signedImagePreview','paySignedImage')">
-         <i class="bi bi-x-lg"></i></button>`;
-  }
+  // Signed-invoice image is shown + uploaded in the renderExistingPayments
+  // section now (independent of adding a payment), so no preload here.
 
   renderExistingPayments(invNum);
   payModal.show();
@@ -1196,7 +1184,6 @@ async function loadPayImage(input, previewId) {
   const b64 = await Utils.compressImage(file, 1200, 0.82);
   if (previewId === 'transferImagePreview') payImages.transfer = b64;
   else if (previewId === 'chequeImagePreview')  payImages.cheque  = b64;
-  else if (previewId === 'signedImagePreview')  payImages.signed  = b64;
   document.getElementById(previewId).innerHTML =
     `<img src="${b64}" class="img-thumb" onclick="openLightboxSrc('${previewId}')">
      <button class="btn btn-sm btn-outline-danger align-self-start"
@@ -1208,7 +1195,6 @@ function clearPayImage(previewId, inputId) {
   document.getElementById(inputId).value = '';
   if (previewId === 'transferImagePreview') payImages.transfer = '';
   else if (previewId === 'chequeImagePreview')  payImages.cheque  = '';
-  else if (previewId === 'signedImagePreview')  payImages.signed  = '';
 }
 
 function openLightbox(previewId) {
@@ -1656,10 +1642,12 @@ function addPaymentEntry() {
   document.getElementById('payChequeBank').value     = '';
   if (_fpCheqDate) _fpCheqDate.clear(); else document.getElementById('payChequeDate').value = '';
   payImages = { transfer: '', cheque: '', signed: '' };
-  ['transferImagePreview','chequeImagePreview','signedImagePreview'].forEach(id =>
-    document.getElementById(id).innerHTML = '');
-  ['payTransferImage','payChequeImage','paySignedImage'].forEach(id =>
-    document.getElementById(id).value = '');
+  ['transferImagePreview','chequeImagePreview'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.innerHTML = '';
+  });
+  ['payTransferImage','payChequeImage'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
   onMethodChange();
   renderPendingPayments();
 }
@@ -1713,18 +1701,7 @@ async function doSaveAllPayments(payments) {
   const total       = parseFloat(inv?.totalAmount) || 0;
   const alreadyPaid = DB.getInvoicePaidAmount(invNum);
 
-  // Save signedImage once on the invoice (not per-payment)
-  if (payImages.signed && inv) {
-    let signedSrc = payImages.signed;
-    // Upload to Drive if available
-    if (window.DriveStore && DriveStore.ready && signedSrc.startsWith('data:')) {
-      const ts = Date.now();
-      try { signedSrc = await _drvUpload(signedSrc, `signed_${invNum}_${ts}.jpg`); } catch {}
-    }
-    DB.updateInvoice(inv.id, { signedImage: signedSrc });
-    DB.logActivity(session.userId, session.username, 'บันทึกรูปใบกำกับเซ็น',
-      { invoiceNumber: invNum });
-  }
+  // (signed-invoice image is saved independently via uploadSignedInvoice())
 
   let newPaid = alreadyPaid;
   for (const data of payments) {
