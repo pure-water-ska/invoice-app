@@ -118,6 +118,15 @@ if (!window.LocalFolderSync) {
         if (_handle) {
           // queryPermission does NOT need a user gesture — safe on page load.
           _permOk = await _checkPerm(_handle);
+          // Notify UI so settings card re-renders with the persisted folder name.
+          // Without this, renderLocalFolderCard() runs before init() completes and
+          // sees _handle=null, showing "ไม่ได้เชื่อมต่อ" even though a folder was saved.
+          if (_permOk) {
+            window.dispatchEvent(new CustomEvent('localfolder:connected', { detail: { name: _handle.name } }));
+          } else {
+            // Handle exists but permission lapsed — show "⚠ ต้องการสิทธิ์" with folder name
+            window.dispatchEvent(new CustomEvent('localfolder:permissionlost'));
+          }
         }
 
         // After a full Firestore pull write everything to the folder.
