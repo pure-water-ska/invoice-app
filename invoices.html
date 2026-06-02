@@ -144,7 +144,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.72"></script><script src="db.js?v=1.0.72"></script><script src="auth.js?v=1.0.72"></script><script src="nav.js?v=1.0.72"></script><script src="idb.js?v=1.0.72"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.73"></script><script src="db.js?v=1.0.73"></script><script src="auth.js?v=1.0.73"></script><script src="nav.js?v=1.0.73"></script><script src="idb.js?v=1.0.73"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -477,7 +477,7 @@ function render() {
   });
 
   // Rebuild PDF map for current filtered list
-  list.forEach(inv => { if (inv.importedFrom === 'pdf') _pdfInvMap[inv.invoiceNumber] = inv; });
+  list.forEach(inv => { if (inv.importedFrom === 'pdf' || inv.hasPdfPage) _pdfInvMap[inv.invoiceNumber] = inv; });
 
   // Summary totals (all filtered, not just current page)
   let sumTotal = 0, sumPaid = 0;
@@ -549,7 +549,7 @@ function render() {
       <td class="text-center sel-action-cell${_selMode ? ' d-none' : ''}">
         <div class="btn-group btn-group-sm">
           <a class="btn btn-outline-primary" href="invoice-create.html?view=${inv.invoiceNumber}" title="ดู/พิมพ์"><i class="bi bi-eye"></i></a>
-          ${inv.importedFrom === 'pdf' ? `<button class="btn btn-outline-danger" onclick="viewPdfInvoice('${inv.invoiceNumber}')" title="ดูไฟล์ PDF ต้นฉบับ"><i class="bi bi-file-earmark-pdf"></i></button>` : ''}
+          ${(inv.importedFrom === 'pdf' || inv.hasPdfPage) ? `<button class="btn btn-outline-danger" onclick="viewPdfInvoice('${inv.invoiceNumber}')" title="ดูไฟล์ PDF"><i class="bi bi-file-earmark-pdf"></i></button>` : ''}
           <a class="btn btn-outline-warning" href="invoice-create.html?edit=${inv.invoiceNumber}" title="แก้ไข"><i class="bi bi-pencil"></i></a>
           <a class="btn btn-outline-success" href="payments.html?inv=${inv.invoiceNumber}" title="ชำระเงิน"><i class="bi bi-cash-coin"></i></a>
           <button class="btn btn-outline-danger" onclick="deleteInvoice('${inv.invoiceNumber}',${pages})"

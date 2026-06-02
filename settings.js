@@ -253,7 +253,7 @@ function loadCompanySettings() {
   document.getElementById('address').value      = cfg.address     || '';
   document.getElementById('phone').value        = cfg.phone       || '';
   document.getElementById('taxId').value        = cfg.taxId       || '';
-  document.getElementById('showHeader').checked = cfg.showHeader !== false; // default true
+  document.getElementById('showHeader').checked = cfg.showHeader === true; // default false (hidden)
   updatePreview();
 }
 

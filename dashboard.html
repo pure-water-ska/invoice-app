@@ -18,6 +18,21 @@
 <div id="navContainer"></div>
 <div class="page-wrap">
 
+  <!-- Setup reminder banner (shown if pdf_dir or local folder not configured) -->
+  <div id="setupBanner" class="d-none alert alert-warning alert-dismissible mb-3 py-2">
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+      <i class="bi bi-folder-x fs-5 flex-shrink-0"></i>
+      <div class="flex-grow-1">
+        <strong>ยังไม่ได้ตั้งค่าโฟลเดอร์สำรองข้อมูล</strong>
+        <div class="small text-muted mt-1" id="setupBannerDetail"></div>
+      </div>
+      <a href="settings.html" class="btn btn-warning btn-sm fw-semibold flex-shrink-0">
+        <i class="bi bi-gear me-1"></i>ไปตั้งค่า
+      </a>
+    </div>
+    <button type="button" class="btn-close" onclick="dismissSetupBanner()"></button>
+  </div>
+
   <!-- Admin label edit button -->
   <div id="adminLabelBar" class="d-none text-end mb-2">
     <button class="btn btn-sm btn-outline-secondary" onclick="openLabelModal()">
@@ -171,7 +186,7 @@
 </div>
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
-<script src="utils.js?v=1.0.72"></script><script src="db.js?v=1.0.72"></script><script src="auth.js?v=1.0.72"></script><script src="nav.js?v=1.0.72"></script>
+<script src="utils.js?v=1.0.73"></script><script src="db.js?v=1.0.73"></script><script src="auth.js?v=1.0.73"></script><script src="nav.js?v=1.0.73"></script>
 <script>
 // Tauri: unregister stale service workers (old SW could serve pre-fix JS files)
 if (window.IS_TAURI && 'serviceWorker' in navigator) {
@@ -180,6 +195,32 @@ if (window.IS_TAURI && 'serviceWorker' in navigator) {
 const session = Auth.require();
 DB.init();
 Nav.render('dashboard');
+
+// ── Setup reminder banner ─────────────────────────────────────────────────────
+// Check after a short delay so IDB + LocalFolderSync have time to initialize.
+const _SETUP_DISMISS_KEY = 'wt_setup_banner_dismissed';
+function dismissSetupBanner() {
+  try { sessionStorage.setItem(_SETUP_DISMISS_KEY, '1'); } catch {}
+  document.getElementById('setupBanner').classList.add('d-none');
+}
+async function checkSetupBanner() {
+  try {
+    if (sessionStorage.getItem(_SETUP_DISMISS_KEY)) return;
+    const missing = [];
+    // Check local folder sync
+    const lfs = window.LocalFolderSync ? LocalFolderSync.getStatus() : { connected: false, needsPermission: false, folderName: null };
+    if (!lfs.connected && !lfs.needsPermission) missing.push('Local folder sync');
+    // Check PDF save folder
+    const pdfHandle = window.IDB ? await IDB.get('pdf_dir').catch(() => null) : null;
+    if (!pdfHandle) missing.push('โฟลเดอร์บันทึก PDF');
+    if (missing.length === 0) return;
+    const banner = document.getElementById('setupBanner');
+    document.getElementById('setupBannerDetail').textContent =
+      'ยังไม่ได้ตั้งค่า: ' + missing.join(', ') + ' — ตั้งค่าเพื่อสำรองข้อมูลและดู PDF ได้ทุกเครื่อง';
+    banner.classList.remove('d-none');
+  } catch(e) { /* non-critical */ }
+}
+setTimeout(checkSetupBanner, 1500);
 
 const LABEL_DEFAULTS = {
   'stat0': 'ใบกำกับวันนี้',
