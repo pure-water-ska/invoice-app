@@ -492,10 +492,16 @@
       <div class="modal-body">
         <div id="multiPayAlert"></div>
 
-        <!-- Customer select -->
+        <!-- Customer select (custom searchable dropdown, styled like invoice-create) -->
         <div class="mb-3">
           <label class="form-label fw-semibold">ลูกค้า <span class="text-danger">*</span></label>
-          <select id="multiPayCust" class="form-select" onchange="onMultiCustChange()"></select>
+          <div class="cust-search-wrap">
+            <input type="text" id="multiPayCustSearch" class="form-control"
+                   placeholder="พิมพ์ชื่อลูกค้า..." autocomplete="off"
+                   oninput="_mpcFilter()" onfocus="_mpcOpen()" onkeydown="_mpcKey(event)">
+            <input type="hidden" id="multiPayCust">
+            <div id="multiPayCustDropdown" class="cust-dd"></div>
+          </div>
         </div>
 
         <!-- Method tabs -->
@@ -633,7 +639,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.84"></script><script src="db.js?v=1.0.84"></script><script src="auth.js?v=1.0.84"></script><script src="nav.js?v=1.0.84"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.85"></script><script src="db.js?v=1.0.85"></script><script src="auth.js?v=1.0.85"></script><script src="nav.js?v=1.0.85"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -2140,13 +2146,13 @@ function openMultiPayModal() {
     const due = (parseFloat(page1.totalAmount) || 0) - DB.getInvoicePaidAmount(num);
     if (due > 0.005) custIds.add(page1.customerId);
   });
-  document.getElementById('multiPayCust').innerHTML =
-    '<option value="">— เลือกลูกค้า —</option>' +
-    customers
-      .filter(c => custIds.has(c.id))
-      .sort((a, b) => String(a.name||'').localeCompare(String(b.name||''), 'th'))
-      .map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`)
-      .join('');
+  // Build the searchable customer list (only customers with outstanding invoices)
+  _mpcList = customers
+    .filter(c => custIds.has(c.id))
+    .map(c => ({ id: c.id, name: c.name == null ? '' : String(c.name) }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'th'));
+  document.getElementById('multiPayCust').value = '';
+  document.getElementById('multiPayCustSearch').value = '';
 
   // Reset all method fields
   ['multiTransferImg','multiChequeImg'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
@@ -2183,6 +2189,61 @@ function openMultiPayModal() {
   updateMultiSummary();
   multiPayModal.show();
 }
+
+// ── Multi-pay customer searchable dropdown (custom, styled like invoice-create) ──
+let _mpcList = [];   // [{id,name}] built when the multi-pay modal opens
+let _mpcHi   = -1;
+function _mpcRender(list) {
+  const dd = document.getElementById('multiPayCustDropdown');
+  if (!list.length) {
+    dd.innerHTML = '<div class="copt-empty">ไม่พบลูกค้า</div>';
+  } else {
+    dd.innerHTML = list.map((c, i) =>
+      `<div class="copt${i === _mpcHi ? ' hi' : ''}" data-id="${c.id}"
+            onmousedown="_mpcSelect('${c.id}')">${esc(c.name)}</div>`
+    ).join('');
+  }
+  dd.style.display = 'block';
+}
+function _mpcOpen() { _mpcHi = -1; _mpcRender(_mpcList); }
+function _mpcFilter() {
+  _mpcHi = -1;
+  const q = document.getElementById('multiPayCustSearch').value.trim().toLowerCase();
+  document.getElementById('multiPayCust').value = '';
+  _mpcRender(q ? _mpcList.filter(c => c.name.toLowerCase().includes(q)) : _mpcList);
+  onMultiCustChange(); // cleared id → collapse allocations
+}
+function _mpcClose() { const dd = document.getElementById('multiPayCustDropdown'); if (dd) dd.style.display = 'none'; _mpcHi = -1; }
+function _mpcSelect(id) {
+  const c = _mpcList.find(x => x.id === id);
+  if (!c) return;
+  document.getElementById('multiPayCustSearch').value = c.name;
+  document.getElementById('multiPayCust').value = c.id;
+  _mpcClose();
+  onMultiCustChange();
+}
+function _mpcKey(e) {
+  const dd = document.getElementById('multiPayCustDropdown');
+  const items = dd.querySelectorAll('.copt');
+  if (!items.length) return;
+  if (e.key === 'ArrowDown') {
+    e.preventDefault(); _mpcHi = Math.min(_mpcHi + 1, items.length - 1);
+    items.forEach((el, i) => el.classList.toggle('hi', i === _mpcHi));
+    items[_mpcHi]?.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault(); _mpcHi = Math.max(_mpcHi - 1, 0);
+    items.forEach((el, i) => el.classList.toggle('hi', i === _mpcHi));
+    items[_mpcHi]?.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    const hi = dd.querySelector('.copt.hi') || dd.querySelector('.copt');
+    if (hi && hi.dataset.id) _mpcSelect(hi.dataset.id);
+  } else if (e.key === 'Escape') { _mpcClose(); }
+}
+document.addEventListener('mousedown', (e) => {
+  const wrap = document.getElementById('multiPayCustSearch')?.closest('.cust-search-wrap');
+  if (wrap && !wrap.contains(e.target)) _mpcClose();
+});
 
 function onMultiCustChange() {
   const custId = document.getElementById('multiPayCust').value;

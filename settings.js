@@ -133,7 +133,15 @@ async function renderLocalFolderCard() {
     nameEl.value = '';
     badgeEl.textContent = 'ไม่ได้เชื่อมต่อ';
     badgeEl.className   = 'badge bg-secondary text-white';
-    statusEl.textContent = 'เลือกโฟลเดอร์เพื่อเริ่มซิงค์อัตโนมัติ';
+    // DIAGNOSTIC: probe IDB for BOTH handles so we can see why local_folder_handle
+    // is missing while pdf_dir survives. Paste this line if the folder is "gone".
+    let _dbg = '';
+    try {
+      const lf  = window.IDB ? await IDB.get('local_folder_handle') : 'noIDB';
+      const pdf = window.IDB ? await IDB.get('pdf_dir') : 'noIDB';
+      _dbg = ` [IDB: local=${lf && lf.name ? lf.name : (lf === 'noIDB' ? 'noIDB' : 'null')}, pdf=${pdf && pdf.name ? pdf.name : 'null'}]`;
+    } catch (e) { _dbg = ' [IDB error: ' + (e.message || e) + ']'; }
+    statusEl.textContent = 'เลือกโฟลเดอร์เพื่อเริ่มซิงค์อัตโนมัติ' + _dbg;
     btnReconnect.classList.add('d-none');
     btnWriteAll.classList.add('d-none');
     btnRestore.classList.add('d-none');
