@@ -2340,7 +2340,16 @@ function saveDeviceLabel() {
   try { DB._set('wt_device_label', v); } catch {}
   Utils.showAlert('<i class="bi bi-check-circle me-1"></i>บันทึกชื่อเครื่องแล้ว: <strong>' + (v || '(ค่าเริ่มต้น)') + '</strong>', 'success');
 }
-window.addEventListener('DOMContentLoaded', () => { try { DB.ready.then(loadDeviceLabel); } catch {} });
+// Load the device label robustly: immediately (cache may already be warm),
+// after DB.ready (HDD/IDB load on Tauri), and after sync:ready (Firestore pull).
+// Any one of these populating the cache fills the field, so timing can't leave
+// it blank — this was the "PC name gone after restart/logout" symptom.
+window.addEventListener('DOMContentLoaded', () => {
+  loadDeviceLabel();
+  try { DB.ready.then(loadDeviceLabel); } catch {}
+});
+window.addEventListener('sync:ready',  loadDeviceLabel);
+window.addEventListener('sync:pulled', loadDeviceLabel);
 
 // Clear all deletion tombstones (local + the shared Firestore _deletions doc).
 // Recovery tool: earlier versions auto-tombstoned bulk reductions, poisoning the

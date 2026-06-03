@@ -118,6 +118,25 @@ select.form-control {
 select.form-select,
 select.form-select-sm { padding-right: 2.25rem !important; }
 
+/* ── Shared searchable custom dropdown (matches invoice-create customer box) ──
+   Used by returns/payments so the customer popup is styled + dark-mode aware,
+   instead of the native <datalist>/<select> popup (which renders black/white). */
+.cust-search-wrap { position: relative; }
+.cust-dd {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 1056;
+  background: #fff; border: 1px solid #86b7fe; border-top: none;
+  border-radius: 0 0 6px 6px; max-height: 240px; overflow-y: auto;
+  box-shadow: 0 6px 16px rgba(0,0,0,.12); display: none;
+}
+.cust-dd .copt { padding: 8px 12px; cursor: pointer; font-size: 14px; border-bottom: 1px solid #f0f0f0; }
+.cust-dd .copt:last-child { border-bottom: none; }
+.cust-dd .copt:hover, .cust-dd .copt.hi { background: #e8f0ff; color: #0d6efd; }
+.cust-dd .copt-empty { padding: 10px 12px; color: #999; font-size: 13px; }
+[data-bs-theme="dark"] .cust-dd { background: #1c2128; border-color: #2d6cdf; }
+[data-bs-theme="dark"] .cust-dd .copt { border-bottom-color: #2a2f37; color: #c9d1d9; }
+[data-bs-theme="dark"] .cust-dd .copt:hover,
+[data-bs-theme="dark"] .cust-dd .copt.hi { background: #243044; color: #6ea8fe; }
+
 /* ── Note badge ── */
 .note-item { background: #fff8e1; border-left: 3px solid #ffc107; padding: .4rem .7rem; margin-bottom:.4rem; border-radius: 0 4px 4px 0; }
 

@@ -98,10 +98,13 @@
         <div class="row g-3">
           <div class="col-12 col-md-6">
             <label class="form-label fw-semibold">ลูกค้า <span class="text-danger">*</span></label>
-            <input type="text" id="returnCustSearch" class="form-control" list="returnCustDatalist"
-                   placeholder="พิมพ์ชื่อลูกค้า..." oninput="onCustSearchInput()" autocomplete="off">
-            <datalist id="returnCustDatalist"></datalist>
-            <input type="hidden" id="returnCustId">
+            <div class="cust-search-wrap">
+              <input type="text" id="returnCustSearch" class="form-control"
+                     placeholder="พิมพ์ชื่อลูกค้า..." autocomplete="off"
+                     oninput="_rcFilter()" onfocus="_rcOpen()" onkeydown="_rcKey(event)">
+              <input type="hidden" id="returnCustId">
+              <div id="returnCustDropdown" class="cust-dd"></div>
+            </div>
           </div>
           <div class="col-12 col-md-6">
             <label class="form-label fw-semibold">ใบกำกับต้นทาง <span class="text-danger">*</span></label>
@@ -187,7 +190,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.83"></script><script src="db.js?v=1.0.83"></script><script src="auth.js?v=1.0.83"></script><script src="nav.js?v=1.0.83"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.84"></script><script src="db.js?v=1.0.84"></script><script src="auth.js?v=1.0.84"></script><script src="nav.js?v=1.0.84"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.requirePage('returns');
 DB.init();
@@ -302,12 +305,11 @@ function openReturnModal(id) {
   document.getElementById('returnCustSearch').value = '';
   document.getElementById('returnCustId').value = '';
 
-  // populate customer datalist
-  const dl = document.getElementById('returnCustDatalist');
-  dl.innerHTML = '';
-  DB.getCustomers().sort((a,b) => String(a.name||'').localeCompare(String(b.name||''),'th')).forEach(c => {
-    dl.innerHTML += `<option value="${c.name}" data-id="${c.id}">`;
-  });
+  // Build the searchable customer list for the custom dropdown
+  _rcList = DB.getCustomers()
+    .filter(c => c && c.id)
+    .map(c => ({ id: c.id, name: c.name == null ? '' : String(c.name) }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'th'));
 
   document.getElementById('returnSourceInv').value = '';
   _populateAllInvDatalist();
@@ -361,17 +363,63 @@ function _filterInvDatalist(custId) {
   document.getElementById('returnInvDatalist').innerHTML = nums.map(n => `<option value="${n}">`).join('');
 }
 
-function onCustSearchInput() {
-  const search = document.getElementById('returnCustSearch').value.trim();
-  const match  = DB.getCustomers().find(c => c.name === search);
-  const prevId = document.getElementById('returnCustId').value;
-  document.getElementById('returnCustId').value = match ? match.id : '';
-  if (match && match.id !== prevId) {
-    _filterInvDatalist(match.id);
-    document.getElementById('returnSourceInv').value = '';
+// ── Searchable customer dropdown (custom, styled like invoice-create) ──────────
+let _rcList = [];   // [{id,name}] built when the modal opens
+let _rcHi   = -1;   // highlighted index
+
+function _rcRender(list) {
+  const dd = document.getElementById('returnCustDropdown');
+  if (!list.length) {
+    dd.innerHTML = '<div class="copt-empty">ไม่พบลูกค้า</div>';
+  } else {
+    dd.innerHTML = list.map((c, i) =>
+      `<div class="copt${i === _rcHi ? ' hi' : ''}" data-id="${c.id}"
+            onmousedown="_rcSelect('${c.id}')">${c.name}</div>`
+    ).join('');
   }
-  if (!match) _populateAllInvDatalist();
+  dd.style.display = 'block';
 }
+function _rcOpen() { _rcHi = -1; _rcRender(_rcList); }
+function _rcFilter() {
+  _rcHi = -1;
+  const q = document.getElementById('returnCustSearch').value.trim().toLowerCase();
+  // typing invalidates the chosen id until a match is picked
+  document.getElementById('returnCustId').value = '';
+  _rcRender(q ? _rcList.filter(c => c.name.toLowerCase().includes(q)) : _rcList);
+}
+function _rcClose() { const dd = document.getElementById('returnCustDropdown'); if (dd) dd.style.display = 'none'; _rcHi = -1; }
+function _rcSelect(id) {
+  const c = _rcList.find(x => x.id === id);
+  if (!c) return;
+  document.getElementById('returnCustSearch').value = c.name;
+  document.getElementById('returnCustId').value = c.id;
+  _rcClose();
+  _filterInvDatalist(c.id);
+  document.getElementById('returnSourceInv').value = '';
+}
+function _rcKey(e) {
+  const dd = document.getElementById('returnCustDropdown');
+  const items = dd.querySelectorAll('.copt');
+  if (!items.length) return;
+  if (e.key === 'ArrowDown') {
+    e.preventDefault(); _rcHi = Math.min(_rcHi + 1, items.length - 1);
+    items.forEach((el, i) => el.classList.toggle('hi', i === _rcHi));
+    items[_rcHi]?.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault(); _rcHi = Math.max(_rcHi - 1, 0);
+    items.forEach((el, i) => el.classList.toggle('hi', i === _rcHi));
+    items[_rcHi]?.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    const hi = dd.querySelector('.copt.hi') || dd.querySelector('.copt');
+    if (hi && hi.dataset.id) _rcSelect(hi.dataset.id);
+  } else if (e.key === 'Escape') { _rcClose(); }
+}
+// Close when clicking outside the customer search box
+document.addEventListener('mousedown', (e) => {
+  const wrap = document.getElementById('returnCustSearch')?.closest('.cust-search-wrap');
+  if (wrap && !wrap.contains(e.target)) _rcClose();
+});
 
 function onSourceInvInput() {
   const invNum = document.getElementById('returnSourceInv').value.trim();
