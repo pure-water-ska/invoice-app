@@ -676,7 +676,7 @@ const DB = {
       const paid  = this.getInvoicePaidAmount(inv.invoiceNumber);
       const total = parseFloat(inv.totalAmount || inv.total || 0);
 
-      if (total > 0 && paid >= total) {
+      if (total > 0 && paid >= total - 0.005) {
         toArchive.push(inv);
       } else {
         toKeep.push(inv);

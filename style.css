@@ -96,6 +96,28 @@ body {
 .inv-table .text-center { text-align: center; }
 .inv-table .row-empty td { color: #bbb; }
 
+/* ── Unify ALL dropdowns to match the customer input box (form-control) ──
+   Some <select>s use form-select-sm or inline border/radius/padding styles, so
+   they looked different from the customer box. Normalize border, corner radius,
+   padding, font size, and height on every select (overriding inline styles and
+   form-select-sm) so they all share the form-control look. Background/appearance
+   are left untouched so the Bootstrap chevron and dark-mode colors still apply. */
+select,
+select.form-select,
+select.form-select-sm,
+select.form-control {
+  border: 1px solid #ced4da !important;
+  border-radius: .375rem !important;
+  padding: .375rem .75rem !important;
+  font-size: 1rem !important;
+  line-height: 1.5 !important;
+  min-height: 38px !important;
+  box-sizing: border-box !important;
+}
+/* Keep right padding for the chevron on Bootstrap selects */
+select.form-select,
+select.form-select-sm { padding-right: 2.25rem !important; }
+
 /* ── Note badge ── */
 .note-item { background: #fff8e1; border-left: 3px solid #ffc107; padding: .4rem .7rem; margin-bottom:.4rem; border-radius: 0 4px 4px 0; }
 

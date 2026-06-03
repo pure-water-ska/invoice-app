@@ -92,22 +92,12 @@ async function saveBackupToFolder(content, filename) {
 
 /* ─── Local Folder Sync ─────────────────────────────────────────────────── */
 
-function renderLocalFolderCard() {
+async function renderLocalFolderCard() {
   const card = document.getElementById('localFolderSyncCard');
   if (!card) return;
 
-  // If LocalFolderSync isn't loaded yet, wait for it then retry
-  if (!window.LocalFolderSync) {
-    window.addEventListener('localfolder:connected',  renderLocalFolderCard, { once: true });
-    window.addEventListener('localfolder:disconnected', renderLocalFolderCard, { once: true });
-    setTimeout(renderLocalFolderCard, 1500); // fallback retry
-    return;
-  }
-
-  const st = LocalFolderSync.getStatus();
-
-  // No API support
-  if (!st.supported) {
+  // No File System Access API support at all
+  if (!window.showDirectoryPicker) {
     document.getElementById('lfsNoApiAlert').classList.remove('d-none');
     document.getElementById('lfsBody').style.opacity = '0.4';
     document.getElementById('lfsBody').style.pointerEvents = 'none';
@@ -124,44 +114,23 @@ function renderLocalFolderCard() {
   const btnRestore    = document.getElementById('btnLfsRestore');
   const btnDisconnect = document.getElementById('btnLfsDisconnect');
 
-  nameEl.value = st.folderName || '';
+  // ── SOURCE OF TRUTH: read the saved handle DIRECTLY from IDB ───────────────
+  // Identical approach to the PDF/Backup folder card (initFolderSettings), which
+  // never loses its path. This does NOT depend on the LocalFolderSync module
+  // being loaded or its async init() having finished, so the folder name never
+  // shows as "gone" after a logout→login navigation.
+  let handle = null;
+  try { handle = window.IDB ? await IDB.get('local_folder_handle') : null; } catch {}
 
-  if (st.connected) {
-    badgeEl.textContent = '✓ เชื่อมต่อแล้ว';
-    badgeEl.className   = 'badge bg-success text-white';
-    statusEl.textContent = `กำลังซิงค์ไปยัง: ${st.folderName}`;
-    btnReconnect.classList.add('d-none');
-    btnWriteAll.classList.remove('d-none');
-    btnRestore.classList.remove('d-none');
-    btnDisconnect.classList.remove('d-none');
-  } else if (st.needsPermission) {
-    badgeEl.textContent = '⚠ ต้องการสิทธิ์';
-    badgeEl.className   = 'badge bg-warning text-dark';
-    statusEl.innerHTML  = `โฟลเดอร์ <strong>${st.folderName}</strong> ต้องการสิทธิ์ใหม่ — กด <em>เชื่อมต่อใหม่</em>`;
-    btnReconnect.classList.remove('d-none');
-    btnWriteAll.classList.add('d-none');
-    btnRestore.classList.remove('d-none');
-    btnDisconnect.classList.remove('d-none');
-  } else {
-    // FALLBACK: getStatus() says no handle, but LocalFolderSync.init() reads the
-    // handle from IDB asynchronously and may not have finished (or its
-    // localfolder:connected event fired before this card registered a listener).
-    // Read the handle DIRECTLY from IDB — the same robust approach the PDF-folder
-    // card uses (initFolderSettings) — so a persisted folder never shows as "gone".
-    if (window.IDB) {
-      IDB.get('local_folder_handle').then(h => {
-        if (h && h.name) {
-          nameEl.value = h.name;
-          badgeEl.textContent = '⚠ ต้องการสิทธิ์';
-          badgeEl.className   = 'badge bg-warning text-dark';
-          statusEl.innerHTML  = `โฟลเดอร์ <strong>${h.name}</strong> ต้องการสิทธิ์ใหม่ — กด <em>เชื่อมต่อใหม่</em>`;
-          btnReconnect.classList.remove('d-none');
-          btnWriteAll.classList.add('d-none');
-          btnRestore.classList.remove('d-none');
-          btnDisconnect.classList.remove('d-none');
-        }
-      }).catch(() => {});
-    }
+  // Always register listeners so the card flips to "connected" once the module
+  // finishes init() / re-grants permission.
+  window.addEventListener('localfolder:connected',     renderLocalFolderCard, { once: true });
+  window.addEventListener('localfolder:disconnected',  renderLocalFolderCard, { once: true });
+  window.addEventListener('localfolder:permissionlost', renderLocalFolderCard, { once: true });
+
+  // No folder ever selected → truly not connected
+  if (!handle || !handle.name) {
+    nameEl.value = '';
     badgeEl.textContent = 'ไม่ได้เชื่อมต่อ';
     badgeEl.className   = 'badge bg-secondary text-white';
     statusEl.textContent = 'เลือกโฟลเดอร์เพื่อเริ่มซิงค์อัตโนมัติ';
@@ -169,12 +138,30 @@ function renderLocalFolderCard() {
     btnWriteAll.classList.add('d-none');
     btnRestore.classList.add('d-none');
     btnDisconnect.classList.add('d-none');
+    return;
   }
 
-  // Re-render on connection changes
-  window.addEventListener('localfolder:connected',    renderLocalFolderCard, { once: true });
-  window.addEventListener('localfolder:disconnected', renderLocalFolderCard, { once: true });
-  window.addEventListener('localfolder:permissionlost', renderLocalFolderCard, { once: true });
+  // A folder IS saved — show its name no matter what (like the PDF card).
+  nameEl.value = handle.name;
+
+  // Permission/connection state is a secondary layer from the module (if loaded).
+  const connected = !!(window.LocalFolderSync && LocalFolderSync.getStatus().connected);
+
+  if (connected) {
+    badgeEl.textContent = '✓ เชื่อมต่อแล้ว';
+    badgeEl.className   = 'badge bg-success text-white';
+    statusEl.textContent = `กำลังซิงค์ไปยัง: ${handle.name}`;
+    btnReconnect.classList.add('d-none');
+    btnWriteAll.classList.remove('d-none');
+  } else {
+    badgeEl.textContent = '⚠ ต้องการสิทธิ์';
+    badgeEl.className   = 'badge bg-warning text-dark';
+    statusEl.innerHTML  = `โฟลเดอร์ <strong>${handle.name}</strong> ต้องการสิทธิ์ใหม่ — กด <em>เชื่อมต่อใหม่</em>`;
+    btnReconnect.classList.remove('d-none');
+    btnWriteAll.classList.add('d-none');
+  }
+  btnRestore.classList.remove('d-none');
+  btnDisconnect.classList.remove('d-none');
 }
 
 async function lfsSelectFolder() {
@@ -1337,7 +1324,7 @@ function previewArchive() {
     if (!dateStr || dateStr >= cutoffIso) continue;
     const paid  = DB.getInvoicePaidAmount(inv.invoiceNumber);
     const total = parseFloat(inv.totalAmount || inv.total || 0);
-    if (total > 0 && paid >= total) count++;
+    if (total > 0 && paid >= total - 0.005) count++;
   }
 
   const el = document.getElementById('archivePreview');

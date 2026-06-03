@@ -186,7 +186,7 @@
 </div>
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
-<script src="utils.js?v=1.0.82"></script><script src="db.js?v=1.0.82"></script><script src="auth.js?v=1.0.82"></script><script src="nav.js?v=1.0.82"></script>
+<script src="utils.js?v=1.0.83"></script><script src="db.js?v=1.0.83"></script><script src="auth.js?v=1.0.83"></script><script src="nav.js?v=1.0.83"></script>
 <script>
 // Tauri: unregister stale service workers (old SW could serve pre-fix JS files)
 if (window.IS_TAURI && 'serviceWorker' in navigator) {
@@ -296,7 +296,7 @@ function getInvoiceStatus(inv) {
   const paid = DB.getInvoicePaidAmount(inv.invoiceNumber);
   const total = parseFloat(inv.totalAmount) || 0;
   if (paid <= 0) return 'pending';
-  if (paid >= total) return 'paid';
+  if (paid >= total - 0.005) return 'paid';  // half-satang epsilon for float-sum totals
   return 'partial';
 }
 
@@ -327,7 +327,7 @@ function load() {
     const first = pages[0];
     const total = parseFloat(first.totalAmount) || 0;
     const paid = DB.getInvoicePaidAmount(num);
-    const status = paid <= 0 ? 'pending' : paid >= total ? 'paid' : 'partial';
+    const status = paid <= 0 ? 'pending' : paid >= total - 0.005 ? 'paid' : 'partial';
     const created = new Date(first.createdAt);
 
     if (status === 'paid') paidCount++;

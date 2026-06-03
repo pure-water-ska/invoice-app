@@ -144,7 +144,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.82"></script><script src="db.js?v=1.0.82"></script><script src="auth.js?v=1.0.82"></script><script src="nav.js?v=1.0.82"></script><script src="idb.js?v=1.0.82"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.83"></script><script src="db.js?v=1.0.83"></script><script src="auth.js?v=1.0.83"></script><script src="nav.js?v=1.0.83"></script><script src="idb.js?v=1.0.83"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -387,7 +387,10 @@ async function viewPdfInvoice(num) {
 }
 
 function statusInfo(paid, total) {
-  if (paid >= total && total > 0) return { key:'paid', label:'ชำระแล้ว', cls:'badge-paid' };
+  // Half-satang epsilon: item totals sum to a full float (e.g. 1234.5600000000002)
+  // while a full payment is parseFloat(rem.toFixed(2)) = 1234.56, so a plain
+  // paid >= total comparison wrongly yields "partial" on an exact full payment.
+  if (paid >= total - 0.005 && total > 0) return { key:'paid', label:'ชำระแล้ว', cls:'badge-paid' };
   if (paid > 0) return { key:'partial', label:'ชำระบางส่วน', cls:'badge-partial' };
   return { key:'pending', label:'ค้างชำระ', cls:'badge-pending' };
 }

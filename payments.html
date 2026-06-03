@@ -633,7 +633,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.82"></script><script src="db.js?v=1.0.82"></script><script src="auth.js?v=1.0.82"></script><script src="nav.js?v=1.0.82"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.83"></script><script src="db.js?v=1.0.83"></script><script src="auth.js?v=1.0.83"></script><script src="nav.js?v=1.0.83"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -854,7 +854,7 @@ function render() {
     const custName = (cust ? cust.name : '').toLowerCase();
     const paid     = paidMap[inv.invoiceNumber] || 0;
     const total    = parseFloat(inv.totalAmount) || 0;
-    const status   = paid <= 0 ? 'pending' : paid >= total ? 'paid' : 'partial';
+    const status   = paid <= 0 ? 'pending' : paid >= total - 0.005 ? 'paid' : 'partial';
     const d = new Date(inv.createdAt);
     if (q  && !inv.invoiceNumber.toLowerCase().includes(q) && !custName.includes(q)) return false;
     if (fc && !custName.includes(fc)) return false;
@@ -886,8 +886,8 @@ function render() {
     const pb  = paidMap[b.invoiceNumber] || 0;
     const ta  = parseFloat(a.totalAmount) || 0;
     const tb  = parseFloat(b.totalAmount) || 0;
-    const stA = pa <= 0 ? 'pending' : pa >= ta ? 'paid' : 'partial';
-    const stB = pb <= 0 ? 'pending' : pb >= tb ? 'paid' : 'partial';
+    const stA = pa <= 0 ? 'pending' : pa >= ta - 0.005 ? 'paid' : 'partial';
+    const stB = pb <= 0 ? 'pending' : pb >= tb - 0.005 ? 'paid' : 'partial';
     let cmp = 0;
     switch (_sortCol) {
       case 'num':    cmp = a.invoiceNumber.localeCompare(b.invoiceNumber, 'th'); break;
@@ -916,7 +916,7 @@ function render() {
     const total = parseFloat(inv.totalAmount) || 0;
     const paid  = paidMap[inv.invoiceNumber] || 0;
     const rem   = total - paid;
-    const status    = paid <= 0 ? 'pending' : paid >= total ? 'paid' : 'partial';
+    const status    = paid <= 0 ? 'pending' : paid >= total - 0.005 ? 'paid' : 'partial';
     const statusLbl = { pending:'ค้างชำระ', partial:'บางส่วน', paid:'ชำระแล้ว' };
     const statusCls = { pending:'badge-pending', partial:'badge-partial', paid:'badge-paid' };
     return `<tr>
