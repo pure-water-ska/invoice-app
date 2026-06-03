@@ -1056,7 +1056,7 @@ function _startIdleTimer() { if (typeof window._startIdleTimer === 'function') w
   window.addEventListener('beforeunload', function() {
     if (!window.Auth || !Auth.session()) return;
     try {
-      const cfg = window.DB ? (DB.getSettings() || {}) : {};
+      const cfg = (typeof DB !== 'undefined') ? (DB.getSettings() || {}) : {};
       if (cfg.autoRestorePoint?.onClose === false) return;
       const s = Auth.session();
       localStorage.setItem('wt_restore_pending', JSON.stringify({

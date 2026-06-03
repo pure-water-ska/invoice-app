@@ -296,7 +296,7 @@ window.DriveDbSync = {
 
     this._setMeta(meta);
     this._ready = true; // mark ready so normal queueUpload works from here on
-    if (window.DB) DB.invalidate(); // flush cache so next read sees new data
+    if (typeof DB !== 'undefined') DB.invalidate(); // flush cache so next read sees new data
     console.log(`[DriveDbSync] pullAllScan: restored=${restored} failed=${failed} total=${files.length}`);
     return { restored, failed, total: files.length };
   },

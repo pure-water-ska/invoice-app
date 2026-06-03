@@ -366,7 +366,7 @@ var Sync = {
     result = this._filterArrayTombstones(docName, result);
 
     this._lsWrite(lsKey, result);
-    if (window.DB) DB.invalidate(lsKey);
+    if ((typeof DB !== 'undefined')) DB.invalidate(lsKey);
     const resultIds = new Set(result.filter(r => r && r.id).map(r => r.id));
     this._setKnownDocIds(docName, resultIds);
     this._lastDocIds[docName] = resultIds;
@@ -468,7 +468,7 @@ var Sync = {
     // array overwrites a fresh one (changes don't stick across devices).
     // DB._get/_set is HDD-backed in Tauri (survives the wipe) and 'wt_device_id'
     // is NOT in DOCUMENTS/COLLECTIONS so it never syncs to Firestore.
-    if (window.IS_TAURI && window.DB) {
+    if (window.IS_TAURI && (typeof DB !== 'undefined')) {
       try {
         let id = DB._getObj('wt_device_id', null);
         if (!id || typeof id !== 'string') {
@@ -521,7 +521,7 @@ var Sync = {
     // In Tauri this sets DB._tauri.dataDir — without this wait, _lsWrite()
     // skips HDD writes (dataDir is null) and pulled data is lost on restart.
     // On the web it ensures IDB-overflow keys are loaded before _pullAll() reads.
-    if (window.DB && DB.ready) await DB.ready;
+    if ((typeof DB !== 'undefined') && DB.ready) await DB.ready;
 
     // Load (or generate) device ID from IndexedDB first — must be ready before
     // any _writeKey() or listener echo-detection call.
@@ -602,7 +602,7 @@ var Sync = {
       // firebasePassword.  Users not yet provisioned fall back to the shared teamEmail.
       // On the login page itself Auth.session() returns null → teamEmail is used.
       const _appSession = (window.Auth && Auth.session) ? Auth.session() : null;
-      const _appUser    = (_appSession && window.DB) ? DB.getUserById(_appSession.userId) : null;
+      const _appUser    = (_appSession && (typeof DB !== 'undefined')) ? DB.getUserById(_appSession.userId) : null;
       const _fbEmail    = _appUser?.firebaseEmail    || FIREBASE_CONFIG.teamEmail;
       const _fbPass     = _appUser?.firebasePassword || FIREBASE_CONFIG.teamPassword;
 
@@ -743,7 +743,7 @@ var Sync = {
         if (timerId != null) {
           clearTimeout(timerId);
           delete this._pushDebounce[key];
-          const val = (window.DB && DB._cache[key] !== undefined) ? DB._cache[key] : null;
+          const val = ((typeof DB !== 'undefined') && DB._cache[key] !== undefined) ? DB._cache[key] : null;
           if (val !== null && val !== undefined) {
             this._enqueue(key, val);
           }
@@ -754,7 +754,7 @@ var Sync = {
         if (timerId != null) {
           clearTimeout(timerId);
           delete this._docDebounce[key];
-          const val = (window.DB && DB._cache[key] !== undefined) ? DB._cache[key] : null;
+          const val = ((typeof DB !== 'undefined') && DB._cache[key] !== undefined) ? DB._cache[key] : null;
           if (val !== null && val !== undefined) {
             this._enqueue(key, val);
           }
@@ -818,7 +818,7 @@ var Sync = {
         // Clear the timer ID now so beforeunload won't re-enqueue already-written data.
         this._pushDebounce[key] = null;
         // Read fresh value from DB cache at fire time (not the stale closure val)
-        const fresh = window.DB ? DB._cache[key] ?? val : val;
+        const fresh = (typeof DB !== 'undefined') ? DB._cache[key] ?? val : val;
         this._writeKey(key, fresh)
           .then(() => { this._pendingWrite[key] = false; })
           .catch(e => {
@@ -841,7 +841,7 @@ var Sync = {
     clearTimeout(this._docDebounce[key]);
     this._docDebounce[key] = setTimeout(() => {
       this._docDebounce[key] = null;
-      const fresh     = window.DB ? (DB._cache[key] !== undefined ? DB._cache[key] : val) : val;
+      const fresh     = (typeof DB !== 'undefined') ? (DB._cache[key] !== undefined ? DB._cache[key] : val) : val;
       const freshJson = JSON.stringify(fresh);
       if (freshJson === this._lastDocJson[key]) {
         console.log('[Sync] Doc unchanged, skip write:', this.DOCUMENTS[key]);
@@ -1074,7 +1074,7 @@ var Sync = {
   // because DB._set() compresses values with LZString.  Always use this helper.
   // For IDB-overflow keys the value lives in DB._cache (loaded by preloadFromIDB).
   _localRead(lsKey) {
-    if (window.DB) {
+    if ((typeof DB !== 'undefined')) {
       // Tauri: data lives in DB._cache (loaded from HDD), not localStorage
       if (window.IS_TAURI) {
         const v = DB._cache[lsKey];
@@ -1097,7 +1097,7 @@ var Sync = {
     // Always keep DB._cache current — reads within this tick see new data.
     // DB.invalidate() will be a no-op for IDB keys (they don't have a localStorage
     // copy to re-read from), so the cache set here is the lasting reference.
-    if (window.DB) DB._cache[lsKey] = data;
+    if ((typeof DB !== 'undefined')) DB._cache[lsKey] = data;
 
     // ── Tauri desktop: persist to HDD, never localStorage ────────────────────
     // Firestore-pulled data (invoices, payments, customers…) must NOT be written
@@ -1112,13 +1112,13 @@ var Sync = {
       // Without this, _pullAll() / listener writes survive in cache for the
       // current page but vanish on the next page load if navigation was fast.
       try { sessionStorage.setItem('wt_hdd_shadow_' + lsKey, JSON.stringify(data)); } catch {}
-      if (window.DB && DB._tauri && DB._tauri.dataDir) DB._tauri.write(lsKey, data);
+      if ((typeof DB !== 'undefined') && DB._tauri && DB._tauri.dataDir) DB._tauri.write(lsKey, data);
       return;
     }
 
     // Key already overflowed to IDB — write there, skip localStorage
-    if (window.DB && DB._idbKeys && DB._idbKeys.has(lsKey)) {
-      if (window.IDB) IDB.data.set(lsKey, data).catch(e => console.error('[Sync] IDB write failed', lsKey, e));
+    if ((typeof DB !== 'undefined') && DB._idbKeys && DB._idbKeys.has(lsKey)) {
+      if (typeof IDB !== 'undefined') IDB.data.set(lsKey, data).catch(e => console.error('[Sync] IDB write failed', lsKey, e));
       return;
     }
 
@@ -1128,12 +1128,12 @@ var Sync = {
     } catch (e) {
       if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
         console.warn('[Sync] localStorage full — overflowing', lsKey, '→ IndexedDB');
-        if (window.DB) {
+        if ((typeof DB !== 'undefined')) {
           DB._idbKeys.add(lsKey);
           DB._persistIdbKeys();
           DB._notifyIdbOverflow(lsKey);
         }
-        if (window.IDB) IDB.data.set(lsKey, data).catch(err => console.error('[Sync] IDB write failed', lsKey, err));
+        if (typeof IDB !== 'undefined') IDB.data.set(lsKey, data).catch(err => console.error('[Sync] IDB write failed', lsKey, err));
       } else {
         throw e;
       }
@@ -1232,7 +1232,7 @@ var Sync = {
           } else {
             // Object document — write as-is
             this._lsWrite(lsKey, fsVal);
-            if (window.DB) DB.invalidate(lsKey);
+            if ((typeof DB !== 'undefined')) DB.invalidate(lsKey);
             this._lastDocJson[lsKey] = JSON.stringify(fsVal);
           }
         } else {
@@ -1370,7 +1370,7 @@ var Sync = {
                 console.log(`[Sync] Merge ${colName}: kept ${toKeepLocal.length} local${isArchive ? ', pushed ' + toSync.length : ' (no re-upload)'}`);
                 const merged = [...fsArr, ...toSync, ...toKeepLocal];
                 this._lsWrite(lsKey, merged);
-                if (window.DB) DB.invalidate(lsKey);
+                if ((typeof DB !== 'undefined')) DB.invalidate(lsKey);
                 // opt ③: seed fingerprints from merged result
                 if (!this._lastSyncedRecs[colName]) this._lastSyncedRecs[colName] = new Map();
                 for (const r of merged) {
@@ -1381,7 +1381,7 @@ var Sync = {
             }
           } catch {}
           this._lsWrite(lsKey, fsArr);
-          if (window.DB) DB.invalidate(lsKey);
+          if ((typeof DB !== 'undefined')) DB.invalidate(lsKey);
           // opt ③: seed fingerprints from pulled Firestore records so the first write
           // after page load only sends records that actually changed locally.
           if (!this._lastSyncedRecs[colName]) this._lastSyncedRecs[colName] = new Map();
@@ -1493,7 +1493,7 @@ var Sync = {
               }));
             }
             this._lsWrite(lsKey, filtered);
-            if (window.DB) DB.invalidate(lsKey);
+            if ((typeof DB !== 'undefined')) DB.invalidate(lsKey);
             this._lastDocJson[lsKey] = JSON.stringify(filtered);
             this._lastDocIds[name] = new Set(filtered.filter(r => r && r.id).map(r => r.id));
             anyChange = true;
@@ -1575,7 +1575,7 @@ var Sync = {
             if (this._lastDocJson[lsKey] === freshDocJson) return;
             this._lastDocJson[lsKey] = freshDocJson;
             this._lsWrite(lsKey, fsVal);
-            if (window.DB) DB.invalidate(lsKey);
+            if ((typeof DB !== 'undefined')) DB.invalidate(lsKey);
             this._notifyUpdate(lsKey);
           },
           (err) => console.error('[Sync] Doc listener error:', docName, err.code, err.message)
@@ -1693,7 +1693,7 @@ var Sync = {
             }
           } catch {}
           this._lsWrite(lsKey, finalArr);
-          if (window.DB) DB.invalidate(lsKey);
+          if ((typeof DB !== 'undefined')) DB.invalidate(lsKey);
           // Suppress the toast on the very first server snapshot after the listener
           // attaches.  Firestore always reports every existing document as type:"added"
           // in docChanges() on the initial delivery — so docChanges().length > 0 is
@@ -1815,7 +1815,7 @@ var Sync = {
   // (not synced). Falls back to the OS/platform label.
   _deviceName() {
     try {
-      const n = (window.DB && DB._getObj) ? DB._getObj('wt_device_label', '') : '';
+      const n = ((typeof DB !== 'undefined') && DB._getObj) ? DB._getObj('wt_device_label', '') : '';
       if (n && typeof n === 'string') return n;
     } catch {}
     if (window.IS_TAURI) return 'เครื่องเดสก์ท็อป';
@@ -1956,7 +1956,7 @@ var Sync = {
     if (newRecords.length > 0) {
       const merged = [...existing, ...newRecords];
       this._lsWrite(lsKey, merged);
-      if (window.DB) DB.invalidate(lsKey);
+      if ((typeof DB !== 'undefined')) DB.invalidate(lsKey);
     }
 
     // Merge all fetched IDs into persisted server-ID set so future deletes of

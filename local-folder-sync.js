@@ -88,7 +88,7 @@ if (!window.LocalFolderSync) {
     // ── Read current value for a key from DB cache / localStorage ─────────
 
     function _readFromDB(key) {
-      if (window.DB) {
+      if ((typeof DB !== 'undefined')) {
         if (Object.prototype.hasOwnProperty.call(DB._cache, key)) {
           return DB._cache[key];
         }
@@ -114,7 +114,11 @@ if (!window.LocalFolderSync) {
         if (_initDone) return;          // nav.js may call init() multiple times
         _initDone = true;
         if (!window.showDirectoryPicker) return;
-        if (!window.IDB)                 return;
+        // NOTE: idb.js declares `const IDB` (a lexical global, NOT window.IDB),
+        // so `window.IDB` is always undefined. Must check the bare name — this
+        // was why the handle was never persisted/loaded and the folder showed
+        // as "gone" after every reload while pdf_dir (which uses bare IDB) survived.
+        if (typeof IDB === 'undefined')  return;
 
         // Only overwrite _handle if IDB read succeeds — an IDB error must not
         // silently clear a handle that was just selected this session.
@@ -168,7 +172,7 @@ if (!window.LocalFolderSync) {
       // Write every DB key to the folder immediately.
       async writeAll() {
         if (!_handle || !_permOk) return;
-        var keys    = window.DB ? Object.values(DB.K) : [];
+        var keys    = (typeof DB !== 'undefined') ? Object.values(DB.K) : [];
         var written = 0;
         for (var i = 0; i < keys.length; i++) {
           var val = _readFromDB(keys[i]);
@@ -189,7 +193,7 @@ if (!window.LocalFolderSync) {
         var h = await window.showDirectoryPicker({ mode: 'readwrite' });
         _handle = h;
         _permOk = true;
-        if (window.IDB) await IDB.set(IDB_HANDLE_KEY, h);
+        if (typeof IDB !== 'undefined') await IDB.set(IDB_HANDLE_KEY, h);
         window.dispatchEvent(new CustomEvent('localfolder:connected', { detail: { name: h.name } }));
         await pub.writeAll();
         return h.name;
@@ -200,7 +204,7 @@ if (!window.LocalFolderSync) {
       async reconnect() {
         // If init() hasn't populated _handle yet (race on settings load), reload
         // it from IDB so the reconnect button works even during that window.
-        if (!_handle && window.IDB) {
+        if (!_handle && typeof IDB !== 'undefined') {
           try { _handle = await IDB.get(IDB_HANDLE_KEY); } catch {}
         }
         if (!_handle) throw new Error('No folder selected — call selectFolder() first');
@@ -218,7 +222,7 @@ if (!window.LocalFolderSync) {
         _permOk = false;
         _queue  = {};
         if (_timer) { clearTimeout(_timer); _timer = null; }
-        if (window.IDB) await IDB.set(IDB_HANDLE_KEY, null);
+        if (typeof IDB !== 'undefined') await IDB.set(IDB_HANDLE_KEY, null);
         window.dispatchEvent(new CustomEvent('localfolder:disconnected'));
       },
 

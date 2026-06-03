@@ -248,7 +248,7 @@ const DB = {
     }
 
     // Write to IndexedDB if this key lives there
-    if (writeToIdb && window.IDB) {
+    if (writeToIdb && typeof IDB !== 'undefined') {
       IDB.data.set(key, val).catch(err => {
         console.error('[DB] IDB write failed for', key, err);
         this._warnQuota(key);  // fall back to red banner if IDB also fails
@@ -282,7 +282,7 @@ const DB = {
       return;
     }
     if (this._idbKeys.has(key)) {
-      if (window.IDB) IDB.data.set(key, val).catch(e => console.error('[DB] IDB local-only write failed', key, e));
+      if (typeof IDB !== 'undefined') IDB.data.set(key, val).catch(e => console.error('[DB] IDB local-only write failed', key, e));
     } else {
       try {
         const json = JSON.stringify(val);
@@ -307,7 +307,7 @@ const DB = {
       localStorage.setItem(this._IDB_KEYS_LS, json);
     } catch {
       // localStorage is completely full — store the key list in IDB itself
-      if (window.IDB) IDB.data.set(this._IDB_KEYS_LS, [...this._idbKeys]).catch(() => {});
+      if (typeof IDB !== 'undefined') IDB.data.set(this._IDB_KEYS_LS, [...this._idbKeys]).catch(() => {});
     }
   },
 
@@ -330,7 +330,7 @@ const DB = {
       if (stored) {
         try { JSON.parse(stored).forEach(k => this._idbKeys.add(k)); }
         catch (e) { console.warn('[DB] Could not parse _idbKeys list', e); }
-      } else if (window.IDB) {
+      } else if (typeof IDB !== 'undefined') {
         // Fallback: key list was itself stored in IDB (localStorage was 100% full)
         try {
           const idbList = await IDB.data.get(this._IDB_KEYS_LS);
@@ -339,7 +339,7 @@ const DB = {
       }
 
       // Step 2: load all IDB-overflow data into _cache
-      if (this._idbKeys.size > 0 && window.IDB) {
+      if (this._idbKeys.size > 0 && typeof IDB !== 'undefined') {
         try {
           const all = await IDB.data.getAll();
           for (const [k, v] of Object.entries(all)) {

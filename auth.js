@@ -123,7 +123,7 @@ const Auth = {
       try { DB.runAutoBackup(s.username); } catch {}
       // Auto restore point download on sign-out
       try {
-        const cfg = (window.DB ? DB.getSettings() : null) || {};
+        const cfg = ((typeof DB !== 'undefined') ? DB.getSettings() : null) || {};
         if (cfg.autoRestorePoint?.onLogout !== false) {
           const now = new Date();
           const beYear = now.getFullYear() + 543;

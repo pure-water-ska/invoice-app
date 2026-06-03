@@ -119,8 +119,9 @@ async function renderLocalFolderCard() {
   // never loses its path. This does NOT depend on the LocalFolderSync module
   // being loaded or its async init() having finished, so the folder name never
   // shows as "gone" after a logout→login navigation.
+  // Bare IDB — idb.js declares `const IDB`, so window.IDB is always undefined.
   let handle = null;
-  try { handle = window.IDB ? await IDB.get('local_folder_handle') : null; } catch {}
+  try { handle = (typeof IDB !== 'undefined') ? await IDB.get('local_folder_handle') : null; } catch {}
 
   // Always register listeners so the card flips to "connected" once the module
   // finishes init() / re-grants permission.
@@ -133,15 +134,7 @@ async function renderLocalFolderCard() {
     nameEl.value = '';
     badgeEl.textContent = 'ไม่ได้เชื่อมต่อ';
     badgeEl.className   = 'badge bg-secondary text-white';
-    // DIAGNOSTIC: probe IDB for BOTH handles so we can see why local_folder_handle
-    // is missing while pdf_dir survives. Paste this line if the folder is "gone".
-    let _dbg = '';
-    try {
-      const lf  = window.IDB ? await IDB.get('local_folder_handle') : 'noIDB';
-      const pdf = window.IDB ? await IDB.get('pdf_dir') : 'noIDB';
-      _dbg = ` [IDB: local=${lf && lf.name ? lf.name : (lf === 'noIDB' ? 'noIDB' : 'null')}, pdf=${pdf && pdf.name ? pdf.name : 'null'}]`;
-    } catch (e) { _dbg = ' [IDB error: ' + (e.message || e) + ']'; }
-    statusEl.textContent = 'เลือกโฟลเดอร์เพื่อเริ่มซิงค์อัตโนมัติ' + _dbg;
+    statusEl.textContent = 'เลือกโฟลเดอร์เพื่อเริ่มซิงค์อัตโนมัติ';
     btnReconnect.classList.add('d-none');
     btnWriteAll.classList.add('d-none');
     btnRestore.classList.add('d-none');
@@ -2059,7 +2052,7 @@ async function forceDedupeCustomers() {
 
     // Set local to the deduped canonical set (strip sync meta fields)
     const cleaned = keep.map(k => { const { _by, _byName, _ts, ...rec } = k.rec; return { ...rec, id: k.id }; });
-    if (window.DB) DB.saveCustomers(cleaned);
+    if ((typeof DB !== 'undefined')) DB.saveCustomers(cleaned);
     L.push('local set to ' + cleaned.length + ' customers');
     L.push(''); L.push('✅ Done. Reopen the app on EVERY device. Now each customer has ONE id → delete works.');
     paint();
@@ -2098,7 +2091,7 @@ async function purgeAllCustomers() {
     catch (e) { L.push('(legacy doc: ' + (e.code || 'none') + ')'); }
 
     // 3) Clear local customers + customer-related sync state
-    if (window.DB) DB.saveCustomers([]);
+    if ((typeof DB !== 'undefined')) DB.saveCustomers([]);
     try {
       const stones = JSON.parse(localStorage.getItem('wt_sync_tombstones') || '{}');
       delete stones[colName]; delete stones['customers'];
@@ -2237,7 +2230,7 @@ async function forceMigrateCustomers() {
     if (typeof Sync === 'undefined' || !Sync._db) { L.push('❌ Sync/Firestore not ready'); paint(); return; }
     const colName = 'customers_v2';
     L.push('customers collection: ' + colName);
-    const local = (window.DB ? DB.getCustomers() : []) || [];
+    const local = ((typeof DB !== 'undefined') ? DB.getCustomers() : []) || [];
     L.push('local customers (this device): ' + local.length); paint();
 
     // RECOVER STRANDED DATA: the old whole-array document (data/customers) still
@@ -2264,7 +2257,7 @@ async function forceMigrateCustomers() {
     // If everything is empty everywhere, restore the canonical default customer
     // list (now with DETERMINISTIC ids) so every device ends up with identical
     // ids — the prerequisite for cross-device delete to work.
-    if (merged.length === 0 && window.DB && typeof DB._seedCustomers === 'function') {
+    if (merged.length === 0 && (typeof DB !== 'undefined') && typeof DB._seedCustomers === 'function') {
       L.push('all sources empty → restoring default customer list…'); paint();
       try { DB._seedCustomers(); merged = DB.getCustomers(); L.push('restored ' + merged.length + ' default customers'); }
       catch (e) { L.push('restore failed: ' + (e.message || e)); }
@@ -2287,7 +2280,7 @@ async function forceMigrateCustomers() {
     if (firstErr) L.push('first error: ' + firstErr);
     // Restore the merged set to LOCAL so this device shows the recovered customers.
     try {
-      if (merged.length > 0 && window.DB) { DB.saveCustomers(merged); L.push('restored ' + merged.length + ' customers to this device'); }
+      if (merged.length > 0 && (typeof DB !== 'undefined')) { DB.saveCustomers(merged); L.push('restored ' + merged.length + ' customers to this device'); }
     } catch (e) { L.push('(local restore failed: ' + (e.message || e) + ')'); }
     const all = await col.get({ source: 'server' });
     L.push('customers_v2 docs on server now: ' + all.size);
