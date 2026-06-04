@@ -752,7 +752,11 @@ const DB = {
       // server (was in the set, now gone → drop) from one created locally and
       // not yet synced (never in the set → push). Without it, a deleted record
       // looks "new" on the next launch and gets re-uploaded ("delete comes back").
-      const _keep = new Set(['wt_last_user', 'wt_restore_pending', 'wt_sync_pending', 'wt_sync_tombstones', 'wt_sync_sids']);
+      // wt_device_label — this device's name (shown in the Firestore card). It is
+      // device-local (never synced) and tiny, so keep it in localStorage and protect
+      // it from the wipe. This avoids the HDD-load/cache-poison timing that left it
+      // blank after restart (the "PC name gone on restart" bug).
+      const _keep = new Set(['wt_last_user', 'wt_restore_pending', 'wt_sync_pending', 'wt_sync_tombstones', 'wt_sync_sids', 'wt_device_label']);
       const _allLs = [];
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);

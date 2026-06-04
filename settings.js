@@ -2327,28 +2327,22 @@ async function runFsDeleteTest() {
 
 // Device label — shown to other devices in sync-activity toasts. Stored in the
 // HDD-backed DB store (not synced; each device keeps its own name).
+// Device label is read/written DIRECTLY from localStorage (kept across the Tauri
+// wipe via DB.init's keep-list). This is synchronous and timing-free — no
+// dependency on the async HDD load or DB cache, which previously left it blank
+// after restart.
 function loadDeviceLabel() {
   const el = document.getElementById('deviceLabel');
   if (!el) return;
   let v = '';
-  try { v = DB._getObj('wt_device_label', '') || ''; } catch {}
+  try { v = localStorage.getItem('wt_device_label') || ''; } catch {}
   el.value = v;
-  // DIAGNOSTIC: when empty, show whether the cache/HDD actually has the key so we
-  // can tell "never persisted" from "persisted but not loaded". Paste this text.
-  if (!v) {
-    let has = '?', raw = '?';
-    try { has = (DB._cache && Object.prototype.hasOwnProperty.call(DB._cache, 'wt_device_label')); } catch {}
-    try { raw = JSON.stringify(DB._cache ? DB._cache['wt_device_label'] : undefined); } catch {}
-    el.placeholder = `เช่น PC-หน้าร้าน  [cacheHas=${has} raw=${raw}]`;
-  } else {
-    el.placeholder = 'เช่น PC-หน้าร้าน, โน้ตบุ๊คเจ้าของ';
-  }
 }
 function saveDeviceLabel() {
   const el = document.getElementById('deviceLabel');
   if (!el) return;
   const v = (el.value || '').trim().slice(0, 40);
-  try { DB._set('wt_device_label', v); } catch {}
+  try { localStorage.setItem('wt_device_label', v); } catch {}
   Utils.showAlert('<i class="bi bi-check-circle me-1"></i>บันทึกชื่อเครื่องแล้ว: <strong>' + (v || '(ค่าเริ่มต้น)') + '</strong>', 'success');
 }
 // Load the device label robustly: immediately (cache may already be warm),

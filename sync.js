@@ -1811,11 +1811,13 @@ var Sync = {
 
   // ── Activity toasts ────────────────────────────────────────────────────────
   // Friendly name of THIS device, shown to other devices as the source of a
-  // change. Set in Settings ("ชื่อเครื่องนี้"); stored in the HDD-backed DB store
-  // (not synced). Falls back to the OS/platform label.
+  // change. Set in Settings ("ชื่อเครื่องนี้"); stored in localStorage
+  // (device-local, not synced, kept across the Tauri wipe). Falls back to the OS/platform label.
   _deviceName() {
     try {
-      const n = ((typeof DB !== 'undefined') && DB._getObj) ? DB._getObj('wt_device_label', '') : '';
+      // Read directly from localStorage (kept across the Tauri wipe) — same source
+      // as settings.js load/saveDeviceLabel, timing-free.
+      const n = localStorage.getItem('wt_device_label') || '';
       if (n && typeof n === 'string') return n;
     } catch {}
     if (window.IS_TAURI) return 'เครื่องเดสก์ท็อป';
