@@ -61,6 +61,7 @@ async function pickFolder(type) {
     const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
     await IDB.set(type + '_dir', handle);
     document.getElementById(type + 'FolderName').value = handle.name;
+    try { DB.logActivity(session.userId, session.username, 'เลือกโฟลเดอร์', { type, name: handle.name }); } catch {}
     Utils.showAlert(`<i class="bi bi-check-circle me-1"></i>เลือก ${type === 'pdf' ? 'PDF' : 'Backup'} Folder: <strong>${handle.name}</strong> สำเร็จ`);
   } catch(e) {
     if (e.name !== 'AbortError') Utils.showAlert('เลือก Folder ล้มเหลว: ' + e.message, 'danger');
@@ -70,6 +71,7 @@ async function pickFolder(type) {
 async function clearFolder(type) {
   await IDB.set(type + '_dir', null);
   document.getElementById(type + 'FolderName').value = '';
+  try { DB.logActivity(session.userId, session.username, 'ล้างโฟลเดอร์', { type }); } catch {}
   Utils.showAlert('ล้าง Folder แล้ว', 'info');
 }
 
@@ -169,6 +171,7 @@ async function lfsSelectFolder() {
   if (!window.LocalFolderSync) return;
   try {
     const name = await LocalFolderSync.selectFolder();
+    try { DB.logActivity(session.userId, session.username, 'เชื่อมต่อ Local Folder Sync', { name }); } catch {}
     Utils.showAlert(`<i class="bi bi-check-circle me-1"></i>เชื่อมต่อโฟลเดอร์ <strong>${name}</strong> สำเร็จ — กำลังบันทึกข้อมูล…`);
     renderLocalFolderCard();
   } catch (e) {
@@ -249,6 +252,7 @@ async function lfsDisconnect() {
   if (!window.LocalFolderSync) return;
   if (!await Utils.confirm('ยกเลิกการเชื่อมต่อโฟลเดอร์?\n\nข้อมูลในโฟลเดอร์จะไม่ถูกลบ แค่หยุดซิงค์เท่านั้น')) return;
   await LocalFolderSync.disconnect();
+  try { DB.logActivity(session.userId, session.username, 'ยกเลิก Local Folder Sync', {}); } catch {}
   Utils.showAlert('ยกเลิกการเชื่อมต่อโฟลเดอร์แล้ว', 'info');
   renderLocalFolderCard();
 }
@@ -352,6 +356,7 @@ function saveAutoRestorePointConfig() {
     onClose:  document.getElementById('arpOnClose').checked,
   };
   DB.saveSettings(cfg);
+  try { DB.logActivity(session.userId, session.username, 'แก้ไขตั้งค่า Auto Restore Point', cfg.autoRestorePoint); } catch {}
   Utils.showAlert('บันทึกการตั้งค่า Auto Restore Point สำเร็จ');
 }
 
@@ -2343,6 +2348,7 @@ function saveDeviceLabel() {
   if (!el) return;
   const v = (el.value || '').trim().slice(0, 40);
   try { localStorage.setItem('wt_device_label', v); } catch {}
+  try { DB.logActivity(session.userId, session.username, 'ตั้งชื่อเครื่อง', { name: v }); } catch {}
   Utils.showAlert('<i class="bi bi-check-circle me-1"></i>บันทึกชื่อเครื่องแล้ว: <strong>' + (v || '(ค่าเริ่มต้น)') + '</strong>', 'success');
 }
 // Load the device label robustly: immediately (cache may already be warm),
