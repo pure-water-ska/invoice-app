@@ -186,7 +186,7 @@
 </div>
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
-<script src="utils.js?v=1.0.86"></script><script src="db.js?v=1.0.86"></script><script src="auth.js?v=1.0.86"></script><script src="nav.js?v=1.0.86"></script>
+<script src="utils.js?v=1.0.87"></script><script src="db.js?v=1.0.87"></script><script src="auth.js?v=1.0.87"></script><script src="nav.js?v=1.0.87"></script>
 <script>
 // Tauri: unregister stale service workers (old SW could serve pre-fix JS files)
 if (window.IS_TAURI && 'serviceWorker' in navigator) {
@@ -214,7 +214,9 @@ async function checkSetupBanner() {
     const lfs = window.LocalFolderSync ? LocalFolderSync.getStatus() : { connected: false, needsPermission: false, folderName: null };
     if (!lfs.connected && !lfs.needsPermission) missing.push('Local folder sync');
     // Check PDF save folder
-    const pdfHandle = window.IDB ? await IDB.get('pdf_dir').catch(() => null) : null;
+    // Bare IDB — window.IDB is always undefined (idb.js declares `const IDB`),
+    // so the old check reported "PDF folder not set" even when it WAS set.
+    const pdfHandle = (typeof IDB !== 'undefined') ? await IDB.get('pdf_dir').catch(() => null) : null;
     if (!pdfHandle) missing.push('โฟลเดอร์บันทึก PDF');
     if (missing.length === 0) return;
     const banner = document.getElementById('setupBanner');
