@@ -1033,15 +1033,23 @@ function _checkOverdueAlert() {
 
   window._startIdleTimer = function() {
     if (_active) return;
-    var mins = 30;
-    try { var s = DB.getSettings(); if (s.sessionTimeoutMin !== undefined) mins = s.sessionTimeoutMin; } catch {}
-    if (!mins || mins <= 0) return;   // 0 = disabled
-    _timeoutMs = mins * 60 * 1000;
-    _active    = true;
-    _lastAct   = Date.now();
-    ['mousemove','keydown','mousedown','touchstart','scroll','click']
-      .forEach(function(e) { document.addEventListener(e, _reset, { passive: true }); });
-    setTimeout(_tick, 15000);
+    // Read the setting AFTER DB.ready — on Tauri, HDD settings load asynchronously,
+    // so reading synchronously here returned undefined → always fell back to the
+    // 30-min default and ignored the configured value ("nothing happens at set time").
+    var start = function() {
+      if (_active) return;
+      var mins = 30;
+      try { var s = DB.getSettings(); if (s.sessionTimeoutMin !== undefined && s.sessionTimeoutMin !== null) mins = s.sessionTimeoutMin; } catch {}
+      if (!mins || mins <= 0) return;   // 0 = disabled
+      _timeoutMs = mins * 60 * 1000;
+      _active    = true;
+      _lastAct   = Date.now();
+      ['mousemove','keydown','mousedown','touchstart','scroll','click']
+        .forEach(function(e) { document.addEventListener(e, _reset, { passive: true }); });
+      setTimeout(_tick, 15000);
+    };
+    if (window.DB && DB.ready && typeof DB.ready.then === 'function') DB.ready.then(start);
+    else start();
   };
 })();
 
