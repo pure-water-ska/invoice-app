@@ -997,7 +997,7 @@ function _checkOverdueAlert() {
 
   function _logout() {
     if (_warnEl) { _warnEl.remove(); _warnEl = null; }
-    if (window.Auth) Auth.logout();
+    if (window.Auth) Auth.logout('หมดเวลาการใช้งาน (idle timeout)');
     window.location.href = 'index.html';
   }
 

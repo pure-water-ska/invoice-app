@@ -115,10 +115,10 @@ const Auth = {
     return { ok: true, user: session };
   },
 
-  logout() {
+  logout(reason) {
     const s = this.session();
     if (s) {
-      DB.logActivity(s.userId, s.username, 'ออกจากระบบ', {});
+      DB.logActivity(s.userId, s.username, 'ออกจากระบบ', reason ? { reason } : {});
       // Auto-download backup on sign-out if daily backup is enabled
       try { DB.runAutoBackup(s.username); } catch {}
       // Auto restore point download on sign-out
