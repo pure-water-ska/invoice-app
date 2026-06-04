@@ -106,6 +106,7 @@ const Auth = {
       name: user.name,
       role: user.role,
       permissions: user.permissions || [],
+      mobileViewOnly: user.mobileViewOnly === true,
       loginTime: new Date().toISOString()
     };
     sessionStorage.setItem(this.KEY, JSON.stringify(session));
@@ -183,11 +184,50 @@ const Auth = {
     return s && s.role === 'admin';
   },
 
+  // Real mobile phone = touch device with a small screen (not just a narrow
+  // desktop window). Used for the per-user "view-only on mobile" restriction.
+  isMobile() {
+    const touch = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
+    return touch && window.innerWidth < 768;
+  },
+
+  // Mutation permission keys — blocked when a flagged user is on a mobile phone.
+  // (Page-access/view keys like dashboard/invoices/customers are NOT here, so
+  //  viewing still works.)
+  MUTATION_PERMS: new Set([
+    'invoice_create','invoice_edit','invoice_delete','invoice_print',
+    'payment_add','payment_edit','payment_delete',
+    'customer_add','customer_edit','customer_delete',
+    'product_add','product_edit','product_delete','pricing_edit',
+    'version_add','version_edit','version_delete',
+    'cap_stock_add',
+    'return_add','return_edit','return_delete',
+    'export_backup','import_backup','export_zip','import_zip',
+  ]),
+
+  // True when the current user is flagged view-only AND is on a mobile phone.
+  _mobileViewOnlyActive() {
+    const s = this.session();
+    if (!s) return false;
+    let flagged = s.mobileViewOnly === true;
+    // Live-read the user record so a just-changed flag applies without re-login.
+    try {
+      if (typeof DB !== 'undefined' && DB.getUserById) {
+        const u = DB.getUserById(s.userId);
+        if (u) flagged = u.mobileViewOnly === true;
+      }
+    } catch {}
+    return flagged && this.isMobile();
+  },
+
   // Check if current user has a specific permission key.
   // Admin always returns true; regular users must have the key in their permissions array.
+  // EXCEPTION: a user flagged "view-only on mobile" (admin included) is denied
+  // every mutation permission while on a phone — view permissions still pass.
   can(key) {
     const s = this.session();
     if (!s) return false;
+    if (this.MUTATION_PERMS.has(key) && this._mobileViewOnlyActive()) return false;
     if (s.role === 'admin') return true;
     return (s.permissions || []).includes(key);
   },

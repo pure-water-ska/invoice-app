@@ -92,6 +92,13 @@
           <input class="form-check-input" type="checkbox" id="uActive" checked>
           <label class="form-check-label fw-semibold" for="uActive">เปิดใช้งาน</label>
         </div>
+        <div class="form-check form-switch mb-3">
+          <input class="form-check-input" type="checkbox" id="uMobileViewOnly">
+          <label class="form-check-label fw-semibold" for="uMobileViewOnly">
+            ดูอย่างเดียวเมื่อใช้บนมือถือ
+            <span class="text-muted fw-normal small ms-1">(บนโทรศัพท์จะแก้ไข/บันทึก/ลบไม่ได้)</span>
+          </label>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
@@ -190,7 +197,7 @@
 </div>
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
-<script src="utils.js?v=1.0.103"></script><script src="db.js?v=1.0.103"></script><script src="auth.js?v=1.0.103"></script><script src="nav.js?v=1.0.103"></script>
+<script src="utils.js?v=1.0.104"></script><script src="db.js?v=1.0.104"></script><script src="auth.js?v=1.0.104"></script><script src="nav.js?v=1.0.104"></script>
 <script>
 const session = Auth.require();
 if (!Auth.isAdmin()) { alert('เฉพาะผู้ดูแลระบบเท่านั้น'); location.href='dashboard.html'; }
@@ -255,10 +262,12 @@ function openModal(id) {
     document.getElementById('uPassword').value = '';
     document.getElementById('uRole').value = u.role;
     document.getElementById('uActive').checked = u.active;
+    document.getElementById('uMobileViewOnly').checked = u.mobileViewOnly === true;
   } else {
     ['uUsername','uName','uPassword'].forEach(f => document.getElementById(f).value='');
     document.getElementById('uRole').value = 'user';
     document.getElementById('uActive').checked = true;
+    document.getElementById('uMobileViewOnly').checked = false;
   }
   modal.show();
 }
@@ -318,6 +327,7 @@ async function saveUser() {
   const password = document.getElementById('uPassword').value;
   const role = document.getElementById('uRole').value;
   const active = document.getElementById('uActive').checked;
+  const mobileViewOnly = document.getElementById('uMobileViewOnly').checked;
 
   if (!username) { Utils.showAlert('กรุณากรอกชื่อผู้ใช้', 'warning', 'modalAlert'); return; }
   if (!name) { Utils.showAlert('กรุณากรอกชื่อ-นามสกุล', 'warning', 'modalAlert'); return; }
@@ -333,7 +343,7 @@ async function saveUser() {
   if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลังสร้างบัญชี...'; }
 
   try {
-    const data = { username, name, role, active };
+    const data = { username, name, role, active, mobileViewOnly };
     if (password) data.password = Utils.hashPassword(password);
 
     if (id) {
