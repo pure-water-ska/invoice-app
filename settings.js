@@ -2333,6 +2333,16 @@ function loadDeviceLabel() {
   let v = '';
   try { v = DB._getObj('wt_device_label', '') || ''; } catch {}
   el.value = v;
+  // DIAGNOSTIC: when empty, show whether the cache/HDD actually has the key so we
+  // can tell "never persisted" from "persisted but not loaded". Paste this text.
+  if (!v) {
+    let has = '?', raw = '?';
+    try { has = (DB._cache && Object.prototype.hasOwnProperty.call(DB._cache, 'wt_device_label')); } catch {}
+    try { raw = JSON.stringify(DB._cache ? DB._cache['wt_device_label'] : undefined); } catch {}
+    el.placeholder = `เช่น PC-หน้าร้าน  [cacheHas=${has} raw=${raw}]`;
+  } else {
+    el.placeholder = 'เช่น PC-หน้าร้าน, โน้ตบุ๊คเจ้าของ';
+  }
 }
 function saveDeviceLabel() {
   const el = document.getElementById('deviceLabel');
