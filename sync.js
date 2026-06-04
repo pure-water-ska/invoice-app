@@ -1877,33 +1877,19 @@ var Sync = {
     }
   },
 
-  // Render one activity toast (bottom-right stack). action ∈ add|edit|del.
+  // Cross-device activity toast. Routes through Utils.showToast so it shares the
+  // same style/position as all other toasts (top-right, under the nav bar).
+  // action ∈ add|edit|del → success|info|danger color.
   _activityToast({ typeKey, action, name, byName }) {
     try {
       const T = this._ACTIVITY_TYPE[typeKey] || { label: typeKey, icon: 'bi-arrow-repeat' };
       const A = this._ACTIVITY_ACTION[action] || this._ACTIVITY_ACTION.edit;
-      let stack = document.getElementById('syncActivityStack');
-      if (!stack) {
-        stack = document.createElement('div');
-        stack.id = 'syncActivityStack';
-        stack.style.cssText = 'position:fixed;bottom:16px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px;width:320px;max-width:90vw;';
-        document.body.appendChild(stack);
-      }
-      const card = document.createElement('div');
-      card.style.cssText = `background:#1f2340;color:#fff;border-radius:10px;padding:9px 11px;
-        box-shadow:0 8px 24px rgba(0,0,0,.4);display:flex;align-items:flex-start;gap:9px;
-        border-left:4px solid ${A.color};font-family:'Sarabun',sans-serif;`;
-      const now = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
-      card.innerHTML = `
-        <i class="bi ${T.icon}" style="font-size:1.1rem;color:${A.color};line-height:1.3"></i>
-        <div style="flex:1;min-width:0">
-          <div style="font-weight:700;font-size:.88rem">${A.verb}${T.label}${name ? ': ' + this._esc(name) : ''}</div>
-          <div style="font-size:.7rem;opacity:.6;margin-top:1px"><i class="bi bi-pc-display me-1"></i>${this._esc(byName || 'เครื่องอื่น')} · ${now}</div>
-        </div>
-        <i class="bi bi-x" style="opacity:.5;cursor:pointer" onclick="this.closest('div').parentNode.removeChild(this.closest('div'))"></i>`;
-      stack.appendChild(card);
-      while (stack.children.length > 4) stack.firstElementChild.remove();
-      setTimeout(() => { card.style.transition = 'opacity .4s'; card.style.opacity = '0'; setTimeout(() => card.remove(), 400); }, 5000);
+      const toastType = action === 'add' ? 'success' : action === 'del' ? 'danger' : 'info';
+      const who = byName ? ` · ${this._esc(byName)}` : '';
+      const msg = `<i class="bi ${T.icon} me-1"></i><strong>${A.verb}${T.label}</strong>`
+                + (name ? `: ${this._esc(name)}` : '')
+                + `<span style="opacity:.75;font-size:.85em">${who}</span>`;
+      if (window.Utils && Utils.showToast) Utils.showToast(msg, toastType);
     } catch (e) { console.warn('[Sync] activity toast failed:', e.message); }
   },
   _esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); },

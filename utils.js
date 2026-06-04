@@ -159,9 +159,9 @@ const LZString = (function () {
 // ── End LZString ────────────────────────────────────────────────────────────
 
 const APP_VERSION = {
-  version: '1.0.98',
-  date: '2026-06-04T17:09:19.141Z',
-  label: 'v1.0.98 (5 มิ.ย. 2569)',
+  version: '1.0.99',
+  date: '2026-06-04T17:27:58.841Z',
+  label: 'v1.0.99 (5 มิ.ย. 2569)',
 };
 
 // Changelog — add new entry here when releasing a new version.
@@ -468,7 +468,7 @@ const Utils = {
     if (!host) {
       host = document.createElement('div');
       host.id = '_toastHost';
-      host.style.cssText = 'position:fixed;top:16px;right:16px;z-index:20000;display:flex;flex-direction:column;gap:8px;max-width:min(92vw,380px)';
+      host.style.cssText = 'position:fixed;top:68px;right:16px;z-index:20000;display:flex;flex-direction:column;gap:8px;max-width:min(92vw,380px)';
       document.body.appendChild(host);
     }
     const colors = { success: '#198754', info: '#0d6efd', warning: '#fd7e14', danger: '#dc3545', error: '#dc3545' };
