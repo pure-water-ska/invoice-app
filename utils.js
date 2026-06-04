@@ -159,9 +159,9 @@ const LZString = (function () {
 // ── End LZString ────────────────────────────────────────────────────────────
 
 const APP_VERSION = {
-  version: '1.0.94',
-  date: '2026-06-04T12:26:34.702Z',
-  label: 'v1.0.94 (4 มิ.ย. 2569)',
+  version: '1.0.95',
+  date: '2026-06-04T12:35:34.913Z',
+  label: 'v1.0.95 (4 มิ.ย. 2569)',
 };
 
 // Changelog — add new entry here when releasing a new version.
@@ -443,13 +443,45 @@ const Utils = {
     return Promise.resolve(window.confirm(message));
   },
 
+  // Notifications: warning & error stay as an in-context inline bar (more
+  // persistent, dismissible); everything else (success/info) shows as a
+  // floating toast. Central routing so all call sites follow the rule.
   showAlert(msg, type = 'success', containerId = 'alertBox') {
-    const el = document.getElementById(containerId);
-    if (!el) return;
-    el.innerHTML = `<div class="alert alert-${type} alert-dismissible fade show mb-0" role="alert">
-      ${msg}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>`;
-    if (type === 'success') setTimeout(() => { if (el) el.innerHTML = ''; }, 4000);
-    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    const isBar = (type === 'warning' || type === 'danger' || type === 'error');
+    if (isBar) {
+      const cls = (type === 'error') ? 'danger' : type;
+      const el = document.getElementById(containerId);
+      if (el) {
+        el.innerHTML = `<div class="alert alert-${cls} alert-dismissible fade show mb-0" role="alert">
+          ${msg}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>`;
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        return;
+      }
+      // No container on this page → fall back to a toast so it isn't lost
+    }
+    this.showToast(msg, type);
+  },
+
+  // ── Floating toast (top-right, auto-dismiss) ───────────────────────────────
+  showToast(msg, type = 'success') {
+    let host = document.getElementById('_toastHost');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = '_toastHost';
+      host.style.cssText = 'position:fixed;top:16px;right:16px;z-index:20000;display:flex;flex-direction:column;gap:8px;max-width:min(92vw,380px)';
+      document.body.appendChild(host);
+    }
+    const colors = { success: '#198754', info: '#0d6efd', warning: '#fd7e14', danger: '#dc3545', error: '#dc3545' };
+    const bg = colors[type] || '#198754';
+    const t = document.createElement('div');
+    t.style.cssText = `background:${bg};color:#fff;padding:10px 14px;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.25);font-size:14px;line-height:1.4;opacity:0;transform:translateX(20px);transition:opacity .2s,transform .2s;cursor:pointer`;
+    t.innerHTML = msg;
+    let done = false;
+    const remove = () => { if (done) return; done = true; t.style.opacity = '0'; t.style.transform = 'translateX(20px)'; setTimeout(() => t.remove(), 220); };
+    t.onclick = remove;
+    host.appendChild(t);
+    requestAnimationFrame(() => { t.style.opacity = '1'; t.style.transform = 'translateX(0)'; });
+    setTimeout(remove, 3500);
   },
 
   // ── Progress toast (fixed bottom-right, shows label + % bar) ───────────────
