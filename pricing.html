@@ -148,7 +148,7 @@
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.95"></script><script src="db.js?v=1.0.95"></script><script src="auth.js?v=1.0.95"></script><script src="nav.js?v=1.0.95"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.96"></script><script src="db.js?v=1.0.96"></script><script src="auth.js?v=1.0.96"></script><script src="nav.js?v=1.0.96"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -309,8 +309,16 @@ function savePrice() {
     DB.upsertPrice(productId, customerId, shippingMethod, price);
   }
   DB.addPriceHistory({ id: Utils.uuid(), productId, customerId: customerId||'', shippingMethod: shippingMethod||'', price, changedAt: new Date().toISOString(), changedBy: session.name, changedByUser: session.username });
-  DB.logActivity(session.userId, session.username, 'จัดการราคาสินค้า', { productId, customerId, shippingMethod, price });
-  Utils.showAlert('บันทึกราคาสำเร็จ');
+  // Log real names (not raw ids) so the activity log is readable
+  const _prod = DB.getProductById(productId);
+  const _cust = customerId ? DB.getCustomerById(customerId) : null;
+  const _prodName = _prod ? _prod.name : productId;
+  const _custName = _cust ? _cust.name : (customerId ? customerId : 'ทุกลูกค้า');
+  DB.logActivity(session.userId, session.username, 'จัดการราคาสินค้า', {
+    product: _prodName, customer: _custName,
+    shippingMethod: shippingMethod || 'ทุกวิธีจัดส่ง', price,
+  });
+  Utils.showAlert(`บันทึกราคา <strong>${_prodName}</strong> สำเร็จ`);
   modal.hide();
   render();
 }
@@ -372,8 +380,17 @@ function openHistModal(productId, customerId, shippingMethod) {
 
 async function deletePrice(id) {
   if (!await Utils.confirm('ลบราคานี้ใช่หรือไม่?')) return;
+  const p = DB.getPricing().find(x => x.id === id);
+  const prod = p ? DB.getProductById(p.productId) : null;
+  const cust = (p && p.customerId) ? DB.getCustomerById(p.customerId) : null;
   DB.deletePrice(id);
-  try { DB.logActivity(session.userId, session.username, 'ลบราคาสินค้า', { id }); } catch {}
+  try {
+    DB.logActivity(session.userId, session.username, 'ลบราคาสินค้า', {
+      product: prod ? prod.name : (p ? p.productId : id),
+      customer: cust ? cust.name : (p && p.customerId ? p.customerId : 'ทุกลูกค้า'),
+      shippingMethod: (p && p.shippingMethod) || 'ทุกวิธีจัดส่ง',
+    });
+  } catch {}
   Utils.showAlert('ลบราคาแล้ว', 'info');
   render();
 }

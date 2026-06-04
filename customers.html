@@ -367,7 +367,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="./vendor/html2canvas.min.js"></script>
-<script src="utils.js?v=1.0.95"></script><script src="db.js?v=1.0.95"></script><script src="auth.js?v=1.0.95"></script><script src="nav.js?v=1.0.95"></script>
+<script src="utils.js?v=1.0.96"></script><script src="db.js?v=1.0.96"></script><script src="auth.js?v=1.0.96"></script><script src="nav.js?v=1.0.96"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -1016,15 +1016,20 @@ function showPriceChangeNotice(id) {
 function _pcText() {
   if (!_pcData) return '';
   const fmt = n => n.toLocaleString('th-TH', { minimumFractionDigits: 2 });
-  const cfg = DB.getSettings();
   const lines = [];
-  lines.push(`แจ้งปรับราคาสินค้า — ${cfg.companyName || ''}`.trim());
+  lines.push(`แจ้งเปลี่ยนแปลงราคา (${_pcData.dateStr})`);
   lines.push(`เรียน ${_pcData.customer.name}`);
-  lines.push(`รายการปรับราคา (ณ ${_pcData.dateStr}):`);
-  if (!_pcData.rows.length) lines.push('- ไม่มีรายการเปลี่ยนแปลงราคา');
-  _pcData.rows.forEach(r => {
-    const sign = r.diff > 0 ? `+${fmt(r.diff)}` : `-${fmt(Math.abs(r.diff))}`;
-    lines.push(`- ${r.name} (${r.ship}): ${fmt(r.oldP)} → ${fmt(r.newP)} บาท (${sign})`);
+  if (!_pcData.rows.length) { lines.push('- ไม่มีรายการเปลี่ยนแปลงราคา'); return lines.join('\n'); }
+  // Group rows by delivery type
+  const byShip = {};
+  _pcData.rows.forEach(r => { (byShip[r.ship] = byShip[r.ship] || []).push(r); });
+  Object.keys(byShip).forEach(ship => {
+    lines.push('');
+    lines.push(ship);
+    byShip[ship].forEach(r => {
+      const sign = r.diff > 0 ? `+${fmt(r.diff)}` : `-${fmt(Math.abs(r.diff))}`;
+      lines.push(`- ${r.name} : ${fmt(r.oldP)} → ${fmt(r.newP)} (${sign})`);
+    });
   });
   return lines.join('\n');
 }
