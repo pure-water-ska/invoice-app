@@ -186,7 +186,7 @@
 </div>
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
-<script src="utils.js?v=1.0.90"></script><script src="db.js?v=1.0.90"></script><script src="auth.js?v=1.0.90"></script><script src="nav.js?v=1.0.90"></script>
+<script src="utils.js?v=1.0.91"></script><script src="db.js?v=1.0.91"></script><script src="auth.js?v=1.0.91"></script><script src="nav.js?v=1.0.91"></script>
 <script>
 // Tauri: unregister stale service workers (old SW could serve pre-fix JS files)
 if (window.IS_TAURI && 'serviceWorker' in navigator) {
@@ -283,6 +283,7 @@ function saveLabels() {
   const s = DB.getSettings();
   s.dashboardLabels = labels;
   DB.saveSettings(s);
+  try { DB.logActivity(session.userId, session.username, 'แก้ไขชื่อ Dashboard', labels); } catch {}
   applyLabels();
   labelModal.hide();
 }

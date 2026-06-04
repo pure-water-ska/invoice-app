@@ -218,7 +218,7 @@ td.editable-cell input { font-size: 13px; }
 </div>
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
-<script src="utils.js?v=1.0.90"></script><script src="db.js?v=1.0.90"></script><script src="auth.js?v=1.0.90"></script><script src="nav.js?v=1.0.90"></script>
+<script src="utils.js?v=1.0.91"></script><script src="db.js?v=1.0.91"></script><script src="auth.js?v=1.0.91"></script><script src="nav.js?v=1.0.91"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -666,6 +666,12 @@ function saveCustomers() {
 
   // อัปเดต UI
   renderPreview();
+
+  try {
+    if (addedCount || updatedCount)
+      DB.logActivity(session.userId, session.username, 'นำเข้าลูกค้า (Import)',
+        { added: addedCount, updated: updatedCount, errors: errorCount });
+  } catch {}
 
   const parts = [];
   if (addedCount)   parts.push(`เพิ่มใหม่ <strong>${addedCount}</strong> ราย`);

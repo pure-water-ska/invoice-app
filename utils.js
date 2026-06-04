@@ -159,9 +159,9 @@ const LZString = (function () {
 // ── End LZString ────────────────────────────────────────────────────────────
 
 const APP_VERSION = {
-  version: '1.0.90',
-  date: '2026-06-04T11:19:09.449Z',
-  label: 'v1.0.90 (4 มิ.ย. 2569)',
+  version: '1.0.91',
+  date: '2026-06-04T11:24:42.228Z',
+  label: 'v1.0.91 (4 มิ.ย. 2569)',
 };
 
 // Changelog — add new entry here when releasing a new version.
