@@ -1475,7 +1475,14 @@ var Sync = {
       if (!affected.size) return;
       // Map docName → lsKey so we can rewrite the local array
       const docToLs = {};
-      for (const [lsKey, dn] of Object.entries(this.DOCUMENTS)) docToLs[dn] = lsKey;
+      // Skip NO_SYNC keys (wt_activity/wt_logins): legacy deletion tombstones for
+      // activity_log/login_log (written by old builds before _recordDocDeletions
+      // guarded NO_SYNC) must NOT filter local logs — that wiped all logs after
+      // sign-in. Logs are local-only; the deletions machinery never touches them.
+      for (const [lsKey, dn] of Object.entries(this.DOCUMENTS)) {
+        if (this.NO_SYNC.has(lsKey)) continue;
+        docToLs[dn] = lsKey;
+      }
       let anyChange = false;
       affected.forEach(name => {
         const lsKey = docToLs[name];
@@ -1830,6 +1837,7 @@ var Sync = {
     users_cfg:  { label: 'ผู้ใช้',         icon: 'bi-person-gear' },
     products:   { label: 'สินค้า',        icon: 'bi-box-seam' },
     pricing:    { label: 'ราคา',          icon: 'bi-tag' },
+    price_history: { label: 'ประวัติราคา', icon: 'bi-tag' },
     versions:   { label: 'ฉลากขวด',       icon: 'bi-tag' },
     invoices:   { label: 'ใบกำกับ',        icon: 'bi-receipt' },
     payments:   { label: 'การชำระเงิน',    icon: 'bi-cash-coin' },
@@ -1850,6 +1858,18 @@ var Sync = {
       case 'users_cfg': return rec.name || rec.username || rec.id || '';
       case 'products':  return rec.name || rec.id || '';
       case 'pricing':   return rec.customerName || rec.name || rec.id || '';
+      case 'price_history': {
+        // Price-history rows have no name field — resolve product/customer to
+        // real names (was showing the raw UUID in the toast).
+        try {
+          const p = (typeof DB !== 'undefined') ? DB.getProductById(rec.productId) : null;
+          const c = (typeof DB !== 'undefined' && rec.customerId) ? DB.getCustomerById(rec.customerId) : null;
+          const nm = (p && p.name) || rec.productId || '';
+          const cn = (c && c.name) ? ' (' + c.name + ')' : '';
+          const pr = (rec.price != null) ? ' ' + Number(rec.price).toLocaleString('th-TH') + '฿' : '';
+          return (nm + cn + pr).trim() || rec.id || '';
+        } catch { return rec.id || ''; }
+      }
       case 'versions':  return rec.name || rec.colorName || rec.id || '';
       case 'invoices':  return '#' + (rec.invoiceNumber || rec.id || '');
       case 'payments':  return (rec.amount != null ? Number(rec.amount).toLocaleString('th-TH') + ' บาท' : (rec.id || ''));
