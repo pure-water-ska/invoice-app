@@ -333,13 +333,46 @@
   </div>
 </div>
 
+<!-- Price Change Notification Modal -->
+<div class="modal fade" id="priceChangeModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header bg-primary text-white py-2">
+        <h6 class="modal-title fw-bold mb-0"><i class="bi bi-tag me-2"></i>แจ้งเตือนเปลี่ยนราคา</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0">
+        <div id="priceChangeCapture" style="background:#fff;padding:20px">
+          <div id="priceChangeContent"></div>
+        </div>
+      </div>
+      <div class="modal-footer gap-2">
+        <button class="btn btn-outline-secondary btn-sm" onclick="copyPriceChangeText()">
+          <i class="bi bi-clipboard me-1"></i>คัดลอกข้อความ
+        </button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="copyPriceChangeImage()">
+          <i class="bi bi-clipboard-image me-1"></i>คัดลอกรูป
+        </button>
+        <button class="btn btn-primary btn-sm" onclick="savePriceChangeImage()">
+          <i class="bi bi-download me-1"></i>บันทึกรูป
+        </button>
+        <button class="btn btn-success btn-sm" onclick="printPriceChange()">
+          <i class="bi bi-printer me-1"></i>พิมพ์
+        </button>
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">ปิด</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="./vendor/html2canvas.min.js"></script>
-<script src="utils.js?v=1.0.93"></script><script src="db.js?v=1.0.93"></script><script src="auth.js?v=1.0.93"></script><script src="nav.js?v=1.0.93"></script>
+<script src="utils.js?v=1.0.94"></script><script src="db.js?v=1.0.94"></script><script src="auth.js?v=1.0.94"></script><script src="nav.js?v=1.0.94"></script>
 <script>
 const session = Auth.require();
 DB.init();
 Nav.render('customers');
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, m => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[m]));
 
 let custModal, noteModal, suspendModal, currentNoteId;
 let modalBrands = [];
@@ -597,6 +630,7 @@ function render() {
                   <li><a class="dropdown-item" href="#" onclick="openNotes('${c.id}')"><i class="bi bi-chat-text me-1"></i>บันทึกข้อความ</a></li>
                   <li><a class="dropdown-item" href="invoices.html?cust=${c.id}"><i class="bi bi-receipt me-1"></i>ดูใบกำกับ</a></li>
                   <li><a class="dropdown-item" href="#" onclick="showOutstandingPreview('${c.id}')"><i class="bi bi-card-list me-1"></i>รายการค้างชำระ</a></li>
+                  <li><a class="dropdown-item" href="#" onclick="showPriceChangeNotice('${c.id}')"><i class="bi bi-tag me-1"></i>แจ้งเตือนเปลี่ยนราคา</a></li>
                   <li><hr class="dropdown-divider"></li>
                   ${c.suspended
                     ? `<li><a class="dropdown-item text-success" href="#" onclick="openSuspendModal('${c.id}','unsuspend')"><i class="bi bi-check-circle me-1"></i>ยกเลิกระงับ</a></li>`
@@ -901,6 +935,163 @@ async function copyOutstandingImage() {
   } catch(e) {
     Utils.showAlert('ไม่สามารถคัดลอกรูปได้ — ลองบันทึกแทน', 'warning');
   }
+}
+
+/* ─── Price Change Notification ──────────────────────────────────────────── */
+let _pcData = null;  // { customer, rows:[{name,ship,oldP,newP,diff}], dateStr }
+
+function showPriceChangeNotice(id) {
+  const c = DB.getCustomerById(id);
+  if (!c) return;
+  const cfg     = DB.getSettings();
+  const pricing = DB.getPricing().filter(p => (p.customerId || '') === id);  // customer-specific only
+  const allHist = DB.getPriceHistory();
+
+  // Build rows only for prices that ACTUALLY changed (≥2 history entries, old≠new)
+  const rows = [];
+  pricing.forEach(p => {
+    const hist = allHist
+      .filter(h => h.productId === p.productId &&
+                   (h.customerId || '') === id &&
+                   (h.shippingMethod || '') === (p.shippingMethod || ''))
+      .sort((a, b) => new Date(b.changedAt) - new Date(a.changedAt));
+    if (hist.length < 2) return;
+    const newP = parseFloat(hist[0].price) || 0;
+    const oldP = parseFloat(hist[1].price) || 0;
+    if (newP === oldP) return;
+    const prod = DB.getProductById(p.productId);
+    rows.push({
+      name: prod ? prod.name : '(สินค้า)',
+      ship: p.shippingMethod || 'ทุกวิธีจัดส่ง',
+      oldP, newP, diff: newP - oldP, changedAt: hist[0].changedAt,
+    });
+  });
+
+  const today = Utils.formatDateTH ? Utils.formatDateTH(new Date().toISOString())
+                                   : new Date().toLocaleDateString('th-TH');
+  _pcData = { customer: c, rows, dateStr: today };
+
+  const fmt = n => (n).toLocaleString('th-TH', { minimumFractionDigits: 2 });
+  const body = rows.length ? `
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead>
+        <tr style="background:#0d6efd;color:#fff">
+          <th style="padding:6px 8px;text-align:left">สินค้า</th>
+          <th style="padding:6px 8px;text-align:center">วิธีจัดส่ง</th>
+          <th style="padding:6px 8px;text-align:right">ราคาเดิม</th>
+          <th style="padding:6px 8px;text-align:right">ราคาใหม่</th>
+          <th style="padding:6px 8px;text-align:right">เปลี่ยนแปลง</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map((r, i) => `
+        <tr style="background:${i % 2 ? '#f1f6ff' : '#fff'}">
+          <td style="padding:5px 8px;font-weight:600">${esc(r.name)}</td>
+          <td style="padding:5px 8px;text-align:center;color:#666">${esc(r.ship)}</td>
+          <td style="padding:5px 8px;text-align:right;color:#888;text-decoration:line-through">${fmt(r.oldP)}</td>
+          <td style="padding:5px 8px;text-align:right;font-weight:700">${fmt(r.newP)}</td>
+          <td style="padding:5px 8px;text-align:right;font-weight:700;color:${r.diff > 0 ? '#dc2626' : '#16a34a'}">
+            ${r.diff > 0 ? '▲ +' : '▼ '}${fmt(Math.abs(r.diff))}
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>` : '<div style="text-align:center;color:#16a34a;padding:16px;font-weight:600">ไม่มีรายการเปลี่ยนแปลงราคา</div>';
+
+  document.getElementById('priceChangeContent').innerHTML = `
+    <div style="font-family:Sarabun,sans-serif;color:#222">
+      <div style="text-align:center;margin-bottom:12px">
+        <div style="font-size:18px;font-weight:700">${esc(cfg.companyName || 'บริษัท')}</div>
+        <div style="font-size:13px;color:#555">แจ้งปรับราคาสินค้า · ${today}</div>
+      </div>
+      <div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:12px;margin-bottom:12px">
+        <div style="font-size:15px;font-weight:700">${esc(c.name)}</div>
+        ${c.phone ? `<div style="font-size:12px;color:#555">${esc(c.phone)}</div>` : ''}
+      </div>
+      ${body}
+    </div>`;
+
+  new bootstrap.Modal(document.getElementById('priceChangeModal')).show();
+}
+
+function _pcText() {
+  if (!_pcData) return '';
+  const fmt = n => n.toLocaleString('th-TH', { minimumFractionDigits: 2 });
+  const cfg = DB.getSettings();
+  const lines = [];
+  lines.push(`แจ้งปรับราคาสินค้า — ${cfg.companyName || ''}`.trim());
+  lines.push(`เรียน ${_pcData.customer.name}`);
+  lines.push(`รายการปรับราคา (ณ ${_pcData.dateStr}):`);
+  if (!_pcData.rows.length) lines.push('- ไม่มีรายการเปลี่ยนแปลงราคา');
+  _pcData.rows.forEach(r => {
+    const sign = r.diff > 0 ? `+${fmt(r.diff)}` : `-${fmt(Math.abs(r.diff))}`;
+    lines.push(`- ${r.name} (${r.ship}): ${fmt(r.oldP)} → ${fmt(r.newP)} บาท (${sign})`);
+  });
+  return lines.join('\n');
+}
+
+function _pcLog(action) {
+  if (!_pcData) return;
+  try {
+    DB.logActivity(session.userId, session.username, 'แจ้งเตือนเปลี่ยนราคา',
+      { customer: _pcData.customer.name, items: _pcData.rows.length, action });
+  } catch {}
+}
+
+async function copyPriceChangeText() {
+  try {
+    await navigator.clipboard.writeText(_pcText());
+    _pcLog('copy-text');
+    Utils.showAlert('<i class="bi bi-check-circle me-1"></i>คัดลอกข้อความแล้ว');
+  } catch(e) { Utils.showAlert('คัดลอกข้อความไม่สำเร็จ', 'warning'); }
+}
+
+async function _capturePriceChange() {
+  return html2canvas(document.getElementById('priceChangeCapture'),
+    { scale: 3, useCORS: true, backgroundColor: '#ffffff' });
+}
+
+async function copyPriceChangeImage() {
+  try {
+    const canvas = await _capturePriceChange();
+    const blob   = await new Promise(r => canvas.toBlob(r, 'image/png'));
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    _pcLog('copy-image');
+    Utils.showAlert('<i class="bi bi-check-circle me-1"></i>คัดลอกรูปไปยัง Clipboard แล้ว');
+  } catch(e) { Utils.showAlert('ไม่สามารถคัดลอกรูปได้ — ลองบันทึกแทน', 'warning'); }
+}
+
+async function savePriceChangeImage() {
+  const canvas = await _capturePriceChange();
+  const name = `price-change_${_pcData ? _pcData.customer.name : ''}_${Date.now()}.png`.replace(/\s+/g, '_');
+  if (window.showSaveFilePicker) {
+    try {
+      const fh = await window.showSaveFilePicker({ suggestedName: name,
+        types: [{ description: 'PNG Image', accept: { 'image/png': ['.png'] } }] });
+      const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+      const w = await fh.createWritable(); await w.write(blob); await w.close();
+      _pcLog('save-image');
+      Utils.showAlert('<i class="bi bi-check-circle me-1"></i>บันทึกรูปสำเร็จ');
+      return;
+    } catch(e) { if (e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a');
+  a.href = canvas.toDataURL('image/png'); a.download = name; a.click();
+  _pcLog('save-image');
+  Utils.showAlert('<i class="bi bi-download me-1"></i>ดาวน์โหลดรูปแล้ว');
+}
+
+function printPriceChange() {
+  const html = document.getElementById('priceChangeContent').innerHTML;
+  const w = window.open('', '_blank', 'width=720,height=900');
+  if (!w) { Utils.showAlert('กรุณาอนุญาต popup เพื่อพิมพ์', 'warning'); return; }
+  w.document.write(`<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8">
+    <title>แจ้งปรับราคาสินค้า</title>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>body{font-family:Sarabun,sans-serif;margin:24px}</style>
+    </head><body>${html}</body></html>`);
+  w.document.close();
+  _pcLog('print');
+  setTimeout(() => { w.focus(); w.print(); }, 600);
 }
 
 function editMapInline(id) {
