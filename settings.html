@@ -57,6 +57,11 @@
             </label>
           </div>
         </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">หมดเวลาเซสชัน (นาที)</label>
+          <input type="number" id="sessionTimeoutMin" class="form-control" min="0" max="1440" step="1" placeholder="30">
+          <div class="form-text">ออกจากระบบอัตโนมัติเมื่อไม่มีการใช้งาน · 0 = ปิดใช้งาน</div>
+        </div>
       </div>
       <button class="btn btn-primary mt-3" onclick="saveCompanySettings()">
         <i class="bi bi-save me-1"></i>บันทึกข้อมูลบริษัท
@@ -836,10 +841,10 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-<script src="utils.js?v=1.0.101"></script><script src="db.js?v=1.0.101"></script><script src="auth.js?v=1.0.101"></script><script src="nav.js?v=1.0.101"></script><script src="idb.js?v=1.0.101"></script>
+<script src="utils.js?v=1.0.102"></script><script src="db.js?v=1.0.102"></script><script src="auth.js?v=1.0.102"></script><script src="nav.js?v=1.0.102"></script><script src="idb.js?v=1.0.102"></script>
 <script src="drive-config.js" onerror="window.GOOGLE_CLIENT_ID=''"></script>
 <script src="drive-store.js"></script>
-<script src="settings.js?v=1.0.101"></script>
+<script src="settings.js?v=1.0.102"></script>
 <script>Nav.render('settings');</script>
 </body>
 </html>

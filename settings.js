@@ -265,6 +265,8 @@ function loadCompanySettings() {
   document.getElementById('phone').value        = cfg.phone       || '';
   document.getElementById('taxId').value        = cfg.taxId       || '';
   document.getElementById('showHeader').checked = cfg.showHeader === true; // default false (hidden)
+  const stEl = document.getElementById('sessionTimeoutMin');
+  if (stEl) stEl.value = (cfg.sessionTimeoutMin !== undefined && cfg.sessionTimeoutMin !== null) ? cfg.sessionTimeoutMin : 30;
   updatePreview();
 }
 
@@ -288,8 +290,11 @@ function saveCompanySettings() {
     taxId:       document.getElementById('taxId').value.trim(),
     showHeader:  document.getElementById('showHeader').checked,
   };
+  const _stRaw = parseInt(document.getElementById('sessionTimeoutMin').value, 10);
+  const _st = isNaN(_stRaw) ? 30 : Math.max(0, Math.min(1440, _stRaw));
+  upd.sessionTimeoutMin = _st;
   DB.saveSettings(upd);
-  DB.logActivity(session.userId, session.username, 'แก้ไขตั้งค่าระบบ', {});
+  DB.logActivity(session.userId, session.username, 'แก้ไขตั้งค่าระบบ', { sessionTimeoutMin: _st });
   Utils.showAlert('บันทึกการตั้งค่าสำเร็จ');
   updatePreview();
 }
