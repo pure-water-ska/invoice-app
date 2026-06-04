@@ -202,7 +202,7 @@
 </div><!-- /page-wrap -->
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
-<script src="utils.js?v=1.0.92"></script><script src="db.js?v=1.0.92"></script><script src="auth.js?v=1.0.92"></script><script src="nav.js?v=1.0.92"></script>
+<script src="utils.js?v=1.0.93"></script><script src="db.js?v=1.0.93"></script><script src="auth.js?v=1.0.93"></script><script src="nav.js?v=1.0.93"></script>
 <script>
 const session = Auth.require();
 if (!Auth.isAdmin()) location.href = 'dashboard.html';
@@ -467,7 +467,20 @@ function updateSaveBtn() {
 function savePrices() {
   const { products, customers, cells } = _matches;
   const checked = [...document.querySelectorAll('.row-chk:checked')];
-  let saved = 0, skipped = 0;
+  let saved = 0;
+
+  // ── Batch in memory, write each key ONCE ──────────────────────────────────
+  // Previously this called DB.upsertPrice() + DB.addPriceHistory() per cell, and
+  // each of those re-serialized + LZString-compressed the ENTIRE pricing/history
+  // array. For an N-cell grid that's O(N²) huge string allocations → out of
+  // memory. Now we mutate in-memory arrays and savePricing/savePriceHistory once.
+  const pricing = DB.getPricing();
+  const history = DB.getPriceHistory();
+  const keyOf = (pid, cid, ship) => pid + '|' + (cid || '') + '|' + (ship || '');
+  const idx = new Map();
+  pricing.forEach((p, i) => idx.set(keyOf(p.productId, p.customerId, p.shippingMethod), i));
+  const now = new Date().toISOString();
+  const newHistory = [];
 
   for (const cb of checked) {
     const ri   = parseInt(cb.dataset.ri);
@@ -479,20 +492,32 @@ function savePrices() {
       const prod = products[pi];
       if (!prod.dbProd) return;
 
-      DB.upsertPrice(prod.dbProd.id, cust.dbCust.id, _shipType, cell.newPrice);
-      DB.addPriceHistory({
+      const k = keyOf(prod.dbProd.id, cust.dbCust.id, _shipType);
+      const entry = {
+        id: idx.has(k) ? pricing[idx.get(k)].id : Utils.uuid(),
+        productId: prod.dbProd.id, customerId: cust.dbCust.id,
+        shippingMethod: _shipType, price: parseFloat(cell.newPrice) || 0,
+      };
+      if (idx.has(k)) pricing[idx.get(k)] = entry;
+      else { idx.set(k, pricing.length); pricing.push(entry); }
+
+      newHistory.push({
         id:            Utils.uuid(),
         productId:     prod.dbProd.id,
         customerId:    cust.dbCust.id,
         shippingMethod: _shipType,
         price:         cell.newPrice,
-        changedAt:     new Date().toISOString(),
+        changedAt:     now,
         changedBy:     session.name || session.username,
         changedByUser: session.username,
       });
       saved++;
     });
   }
+
+  // newest first (matches DB.addPriceHistory's unshift behaviour), one write each
+  DB.savePricing(pricing);
+  DB.savePriceHistory(newHistory.reverse().concat(history));
 
   DB.logActivity(session.userId, session.username, 'นำเข้าราคาจาก Excel',
     { shipType: _shipType, saved, file: _fileName });

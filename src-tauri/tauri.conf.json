@@ -9,7 +9,7 @@
   },
   "package": {
     "productName": "ระบบใบกำกับสินค้า",
-    "version": "1.0.92"
+    "version": "1.0.93"
   },
   "tauri": {
     "allowlist": {
