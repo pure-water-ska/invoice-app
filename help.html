@@ -99,8 +99,8 @@
               <div class="col-md-6">
                 <p class="fw-semibold mb-1"><i class="bi bi-printer text-primary me-1"></i>พิมพ์ / ดู PDF</p>
                 <ol class="ps-3 small mb-0">
-                  <li>เปิดใบกำกับด้วยปุ่ม <i class="bi bi-eye"></i></li>
-                  <li>กด <strong>พิมพ์</strong> หรือ <strong>บันทึก PDF</strong></li>
+                  <li>กดปุ่ม <i class="bi bi-printer"></i> <strong>พิมพ์</strong> ที่แถวใบกำกับ</li>
+                  <li>กดปุ่ม <i class="bi bi-file-earmark-pdf text-danger"></i> เพื่อดูรูป PDF ใบกำกับ — <strong>ดูได้จากทุกเครื่อง</strong> (ระบบเก็บภาพไว้ให้อัตโนมัติเมื่อบันทึก/พิมพ์)</li>
                   <li>ใบกำกับหลายหน้าจะแสดง badge <em>"X หน้า"</em></li>
                 </ol>
               </div>
@@ -146,6 +146,13 @@
                 <p class="small text-muted mb-0">
                   กดปุ่ม <i class="bi bi-list-check"></i> ข้างแถวใบกำกับใดก็ได้ เพื่อดูรายการค้างชำระ<strong>ทั้งหมด</strong>ของลูกค้านั้น
                   พร้อม<strong>บันทึกภาพ</strong>หรือ<strong>คัดลอก</strong>ไปแจ้งลูกค้า
+                </p>
+              </div>
+              <div class="col-12">
+                <p class="fw-semibold mb-1"><i class="bi bi-file-earmark-check text-success me-1"></i>ใบกำกับที่ลูกค้าเซ็นรับ</p>
+                <p class="small text-muted mb-0">
+                  ในหน้าชำระเงินของแต่ละใบ มีปุ่ม <strong>อัปโหลด/เปลี่ยน</strong> สำหรับแนบรูปใบกำกับที่ลูกค้าเซ็นรับแล้ว
+                  — แนบได้เลยโดย<strong>ไม่ต้องผูกกับการบันทึกชำระ</strong> และดูได้ทุกเครื่อง
                 </p>
               </div>
             </div>
@@ -310,10 +317,27 @@
               <div class="col-md-6">
                 <p class="fw-semibold mb-1"><i class="bi bi-gear me-1"></i>ตั้งค่า</p>
                 <ul class="small ps-3 mb-0">
-                  <li>ชื่อบริษัท, ที่อยู่, โลโก้</li>
+                  <li>ชื่อบริษัท, ที่อยู่, โลโก้ (ซ่อนหัวกระดาษบนใบกำกับได้)</li>
+                  <li><strong>ชื่อเครื่องนี้</strong> — ตั้งชื่ออุปกรณ์ (แสดงในการ์ด Firestore Sync)</li>
+                  <li><strong>โฟลเดอร์บันทึก PDF / สำรองข้อมูล</strong> — เลือกโฟลเดอร์ในเครื่อง</li>
                   <li>Auto Backup ตั้งเวลา</li>
                   <li>Export / Import ข้อมูล JSON</li>
                   <li>Archive log เก่า</li>
+                </ul>
+              </div>
+              <div class="col-md-6">
+                <p class="fw-semibold mb-1"><i class="bi bi-clock-history me-1"></i>ประวัติการใช้งาน</p>
+                <ul class="small ps-3 mb-0">
+                  <li>บันทึก<strong>ทุกการกระทำ</strong>ที่เปลี่ยนข้อมูล (สร้าง/แก้ไข/ลบ, ชำระเงิน, นำเข้า, ตั้งค่า)</li>
+                  <li>ดูได้ที่หน้า <strong>ประวัติ</strong> พร้อมผู้ทำและเวลา</li>
+                </ul>
+              </div>
+              <div class="col-md-6">
+                <p class="fw-semibold mb-1"><i class="bi bi-cloud-arrow-up me-1"></i>ซิงค์ข้ามอุปกรณ์</p>
+                <ul class="small ps-3 mb-0">
+                  <li>ข้อมูลซิงค์อัตโนมัติผ่าน Firestore ทุกเครื่องที่ใช้บัญชีเดียวกัน</li>
+                  <li>รูป PDF ใบกำกับและใบเซ็นดูได้จากทุกเครื่อง</li>
+                  <li>สถานะการเชื่อมต่อแสดงที่แถบล่าง / ป้าย Firestore</li>
                 </ul>
               </div>
               <div class="col-md-6">
@@ -442,13 +466,81 @@
         </div>
       </div>
 
+      <div class="accordion-item help-section" data-keywords="ดู pdf ใบกำกับ ไม่ขึ้น ไม่เห็น รูป ทุกเครื่อง">
+        <h2 class="accordion-header">
+          <button class="accordion-button collapsed faq-q" data-bs-toggle="collapse" data-bs-target="#faq7">
+            <i class="bi bi-question-circle text-primary me-2"></i>ดูรูป PDF ใบกำกับไม่ได้ / ไม่ขึ้น
+          </button>
+        </h2>
+        <div id="faq7" class="accordion-collapse collapse">
+          <div class="accordion-body small">
+            รูป PDF ใบกำกับจะถูกเก็บอัตโนมัติ<strong>เมื่อบันทึกหรือพิมพ์ใบกำกับ</strong> แล้วดูได้จากทุกเครื่องผ่านปุ่ม <i class="bi bi-file-earmark-pdf text-danger"></i><br>
+            <strong>ถ้าไม่ขึ้น:</strong>
+            <ul class="mb-0">
+              <li>ใบกำกับเก่าที่สร้างก่อนอัปเดต อาจยังไม่มีรูป — เปิดใบนั้นแล้วกด<strong>พิมพ์/บันทึก</strong>อีกครั้งเพื่อสร้างรูป</li>
+              <li>ตรวจสอบว่าเชื่อมต่ออินเทอร์เน็ต (ป้าย Firestore เป็นสีเขียว)</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="accordion-item help-section" data-keywords="ซิงค์ sync ไม่ขึ้น อีกเครื่อง หาย ข้ามอุปกรณ์ firestore">
+        <h2 class="accordion-header">
+          <button class="accordion-button collapsed faq-q" data-bs-toggle="collapse" data-bs-target="#faq8">
+            <i class="bi bi-question-circle text-primary me-2"></i>ข้อมูลไม่ขึ้นบนอีกเครื่อง / ซิงค์ไม่ครบ
+          </button>
+        </h2>
+        <div id="faq8" class="accordion-collapse collapse">
+          <div class="accordion-body small">
+            ข้อมูลซิงค์อัตโนมัติผ่าน Firestore เมื่อทุกเครื่องใช้บัญชีทีมเดียวกันและออนไลน์<br>
+            <strong>ถ้าไม่ครบ:</strong>
+            <ul class="mb-0">
+              <li>ตรวจสอบป้าย <strong>Firestore</strong> บนแถบเมนูเป็นสีเขียว (เชื่อมต่อแล้ว)</li>
+              <li>ลองรีเฟรช/เปิดแอปใหม่บนเครื่องที่ไม่เห็นข้อมูล</li>
+              <li>ใบกำกับเก่ากว่า 6 เดือนจะไม่โหลดอัตโนมัติ — กด <strong>"โหลดใบกำกับเก่า"</strong> ในหน้ารายการ</li>
+              <li>Admin ตรวจสอบได้ที่ <a href="settings.html">ตั้งค่า → Firestore Sync → ตรวจสอบการซิงค์</a></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="accordion-item help-section" data-keywords="นำเข้า pdf สแกน ลูกค้า ยอด ชื่อไฟล์ import">
+        <h2 class="accordion-header">
+          <button class="accordion-button collapsed faq-q" data-bs-toggle="collapse" data-bs-target="#faq9">
+            <i class="bi bi-question-circle text-primary me-2"></i>นำเข้า PDF แล้วได้ข้อมูลไม่ครบ
+          </button>
+        </h2>
+        <div id="faq9" class="accordion-collapse collapse">
+          <div class="accordion-body small">
+            ระบบดึง <strong>เลขที่ใบกำกับ + ชื่อลูกค้าจากชื่อไฟล์</strong> (เช่น <code>030669-001_ชื่อลูกค้า.pdf</code>) และดึงยอด/วันที่/วิธีจัดส่งจากข้อความใน PDF<br>
+            <strong>PDF ที่เป็นไฟล์สแกนหรือรูปถ่าย</strong> จะอ่านข้อความไม่ได้ — ระบบจะแสดง badge "PDF สแกน" ให้<strong>กรอกยอดเงิน/วิธีจัดส่งเอง</strong> (ชื่อลูกค้า/เลขที่ยังดึงจากชื่อไฟล์ได้)<br>
+            ตรวจชื่อลูกค้าให้ตรงกับที่มีในระบบก่อนบันทึก
+          </div>
+        </div>
+      </div>
+
+      <div class="accordion-item help-section" data-keywords="โฟลเดอร์ folder สำรอง pdf เตือน banner ตั้งค่า">
+        <h2 class="accordion-header">
+          <button class="accordion-button collapsed faq-q" data-bs-toggle="collapse" data-bs-target="#faq10">
+            <i class="bi bi-question-circle text-primary me-2"></i>มีแถบเตือนให้ตั้งค่าโฟลเดอร์สำรอง
+          </button>
+        </h2>
+        <div id="faq10" class="accordion-collapse collapse">
+          <div class="accordion-body small">
+            แถบเหลืองบนหน้าหลักเตือนเมื่อยังไม่ได้ตั้ง<strong>โฟลเดอร์บันทึก PDF</strong> หรือ <strong>Local Folder Sync</strong><br>
+            ตั้งได้ที่หน้า <a href="settings.html">ตั้งค่า</a> — เลือกโฟลเดอร์ในเครื่องเพื่อสำรองไฟล์ไว้ในเครื่อง (เสริมจากการซิงค์ Firestore)<br>
+            ถ้าตั้งแล้วแถบยังขึ้น ให้กดปิด (×) หรือเปิดแอปใหม่
+          </div>
+        </div>
+      </div>
+
     </div><!-- /faqAccordion -->
   </div><!-- /tab-faq -->
 
 </div><!-- /page-wrap -->
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
-<script src="utils.js?v=1.0.91"></script><script src="db.js?v=1.0.91"></script><script src="auth.js?v=1.0.91"></script><script src="nav.js?v=1.0.91"></script>
+<script src="utils.js?v=1.0.92"></script><script src="db.js?v=1.0.92"></script><script src="auth.js?v=1.0.92"></script><script src="nav.js?v=1.0.92"></script>
 <script>
 const session = Auth.require();
 DB.init();
