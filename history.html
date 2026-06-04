@@ -115,7 +115,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.96"></script><script src="db.js?v=1.0.96"></script><script src="auth.js?v=1.0.96"></script><script src="nav.js?v=1.0.96"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.97"></script><script src="db.js?v=1.0.97"></script><script src="auth.js?v=1.0.97"></script><script src="nav.js?v=1.0.97"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -233,6 +233,21 @@ function renderActivity() {
   if (f.action) list = list.filter(item => item.action === f.action);
   document.getElementById('activityCount').textContent = list.length + ' รายการ';
   const shown = f.limit > 0 ? list.slice(0, f.limit) : list;
+  // Render activity-detail keys/values readably — resolve id keys to real names
+  // (covers old log entries that stored productId/customerId/userId as raw ids).
+  window._detailLabel = window._detailLabel || function(k) {
+    return ({ productId:'สินค้า', customerId:'ลูกค้า', userId:'ผู้ใช้', returnIds:'รายการคืน' })[k] || k;
+  };
+  window._detailVal = window._detailVal || function(k, v) {
+    try {
+      if (k === 'productId'  && v) return (DB.getProductById(v) || {}).name || v;
+      if (k === 'customerId' && v) return (DB.getCustomerById(v) || {}).name || v;
+      if (k === 'userId' && v && typeof DB.getUserById === 'function') return (DB.getUserById(v) || {}).name || v;
+    } catch {}
+    if (v && typeof v === 'object') return Array.isArray(v) ? (v.length + ' รายการ') : JSON.stringify(v);
+    return v;
+  };
+
   const tbody = document.getElementById('activityTable');
   if (!shown.length) {
     tbody.innerHTML = Utils.emptyTableRow(6, {
@@ -244,7 +259,7 @@ function renderActivity() {
   tbody.innerHTML = shown.map((item, i) => {
     const icon = ACTION_ICONS[item.action] || 'bi-circle text-muted';
     const details = item.details || {};
-    const detailStr = Object.entries(details).map(([k,v]) => `${k}: ${v}`).join(' | ');
+    const detailStr = Object.entries(details).map(([k,v]) => `${_detailLabel(k)}: ${_detailVal(k,v)}`).join(' | ');
     return `<tr>
       <td class="text-muted">${i+1}</td>
       <td style="white-space:nowrap">${Utils.formatDateTimeTH(item.timestamp)}</td>
