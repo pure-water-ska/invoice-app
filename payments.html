@@ -641,11 +641,17 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.99"></script><script src="db.js?v=1.0.99"></script><script src="auth.js?v=1.0.99"></script><script src="nav.js?v=1.0.99"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.100"></script><script src="db.js?v=1.0.100"></script><script src="auth.js?v=1.0.100"></script><script src="nav.js?v=1.0.100"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
 Nav.render('payments');
+// Permission guard — returns true if allowed, else shows a warning bar and false.
+function _needPerm(perm) {
+  if (Auth.isAdmin() || Auth.can(perm)) return true;
+  Utils.showAlert('คุณไม่มีสิทธิ์ทำรายการนี้', 'warning');
+  return false;
+}
 
 let payModal, overpayModal, transferAccountModal, cancelPayModal, dateConfirmModal, imgUpdateModal;
 let _sortCol = 'date', _sortDir = -1;
@@ -1436,6 +1442,7 @@ async function previewImgUpdate(input) {
 }
 
 async function confirmImageUpdate() {
+  if (!_needPerm('payment_edit')) return;
   const payId  = document.getElementById('imgUpdatePayId').value;
   const invNum = document.getElementById('imgUpdateInvNum').value;
   const type   = document.getElementById('imgUpdateType').value;
@@ -1487,6 +1494,7 @@ async function confirmImageUpdate() {
 // The signed-invoice image lives on the INVOICE record (inv.signedImage), so it
 // can be uploaded even before any payment exists. Uses a transient file input.
 function uploadSignedInvoice(invNum) {
+  if (!_needPerm('payment_edit')) return;
   const inv = DB.getInvoices().find(i => i.invoiceNumber === invNum);
   if (!inv) { Utils.showAlert('ไม่พบใบกำกับ ' + invNum, 'warning'); return; }
   const input = document.createElement('input');
@@ -1514,6 +1522,7 @@ function uploadSignedInvoice(invNum) {
 
 // ── Cancel Payment ────────────────────────────────────────────────────────────
 function cancelPayment(payId, invNum) {
+  if (!_needPerm('payment_edit')) return;
   const p = DB.getPayments().find(x => x.id === payId);
   if (!p) return;
   document.getElementById('cancelPayId').value     = payId;
@@ -1528,6 +1537,7 @@ function cancelPayment(payId, invNum) {
 }
 
 function confirmCancelPayment() {
+  if (!_needPerm('payment_edit')) return;
   const payId  = document.getElementById('cancelPayId').value;
   const invNum = document.getElementById('cancelPayInvNum').value;
   const note   = document.getElementById('cancelPayNote').value.trim();
@@ -1550,6 +1560,7 @@ function confirmCancelPayment() {
 }
 
 async function deletePayment(payId, invNum) {
+  if (!_needPerm('payment_delete')) return;
   if (!await Utils.confirm('ลบรายการชำระนี้ใช่หรือไม่?')) return;
   DB.deletePayment(payId);
   DB.logActivity(session.userId, session.username, 'ลบรายการชำระ', { invoiceNumber: invNum });
@@ -1680,6 +1691,7 @@ function removePendingPayment(index) {
 }
 
 function addPaymentEntry() {
+  if (!_needPerm('payment_add')) return;
   const data = collectPaymentData();
   if (!data) return;
   _pendingPayments.push(data);
@@ -1714,6 +1726,7 @@ function addPaymentEntry() {
 
 // ── Save payment (with date confirmation) ─────────────────────────────────────
 function savePayment() {
+  if (!_needPerm('payment_add')) return;
   const method = document.getElementById('payMethod').value;
   const amount = parseFloat(document.getElementById('payAmount').value);
   const hasCurrentForm = !!(method && amount > 0);
@@ -1746,6 +1759,7 @@ function savePayment() {
 }
 
 function confirmSavePayment() {
+  if (!_needPerm('payment_add')) return;
   dateConfirmModal.hide();
   if (_pendingPaymentData) {
     const payments = Array.isArray(_pendingPaymentData) ? _pendingPaymentData : [_pendingPaymentData];
@@ -2432,6 +2446,7 @@ function updateMultiSummary() {
 }
 
 async function saveMultiPay() {
+  if (!_needPerm('payment_add')) return;
   document.getElementById('multiPayAlert').innerHTML = '';
   const custId = document.getElementById('multiPayCust').value;
   if (!custId) { Utils.showAlert('กรุณาเลือกลูกค้า', 'warning', 'multiPayAlert'); return; }
