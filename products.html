@@ -92,7 +92,7 @@
 </div>
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
-<script src="utils.js?v=1.0.106"></script><script src="db.js?v=1.0.106"></script><script src="auth.js?v=1.0.106"></script><script src="nav.js?v=1.0.106"></script>
+<script src="utils.js?v=1.0.107"></script><script src="db.js?v=1.0.107"></script><script src="auth.js?v=1.0.107"></script><script src="nav.js?v=1.0.107"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -105,9 +105,16 @@ window.addEventListener('DOMContentLoaded', () => {
   DB.ready.then(() => render());
 });
 
+function _productsSorted() {
+  return DB.getProducts().slice().sort((a, b) => ((a.order ?? 1e9) - (b.order ?? 1e9)));
+}
+
 function render() {
   const q = document.getElementById('searchInput').value.toLowerCase();
-  const products = DB.getProducts().filter(p => !q || p.name.toLowerCase().includes(q));
+  const all = _productsSorted();
+  const products = q ? all.filter(p => p.name.toLowerCase().includes(q)) : all;
+  // Reordering only makes sense on the full, unfiltered list and for admins.
+  const canReorder = Auth.isAdmin() && !q;
   const tbody = document.getElementById('productTable');
   if (products.length === 0) {
     tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4"><i class="bi bi-box-seam fs-2 d-block mb-2"></i>ยังไม่มีสินค้า</td></tr>';
@@ -115,9 +122,12 @@ function render() {
   }
   tbody.innerHTML = products.map((p, i) => {
     const unit = p.unit || Utils.productUnit(p.name);
+    const reorder = canReorder ? `
+      <button class="btn btn-sm btn-outline-secondary px-1 me-1" onclick="moveProduct('${p.id}',-1)" ${i===0?'disabled':''} title="เลื่อนขึ้น"><i class="bi bi-arrow-up"></i></button>
+      <button class="btn btn-sm btn-outline-secondary px-1 me-2" onclick="moveProduct('${p.id}',1)" ${i===products.length-1?'disabled':''} title="เลื่อนลง"><i class="bi bi-arrow-down"></i></button>` : '';
     return `
     <tr>
-      <td class="text-muted">${i+1}</td>
+      <td class="text-muted">${reorder}${i+1}</td>
       <td class="fw-semibold">${p.name}</td>
       <td class="text-center">${unit ? `<span class="badge bg-light text-dark border">${unit}</span>` : '<span class="text-muted">-</span>'}</td>
       <td class="text-center">${Utils.formatNumberInt(p.unitSize)}</td>
@@ -129,6 +139,20 @@ function render() {
       </td>
     </tr>`;
   }).join('');
+}
+
+// Admin: move a product up/down and persist the order (order field on each record).
+function moveProduct(id, dir) {
+  if (!Auth.isAdmin()) { Utils.showAlert('เฉพาะผู้ดูแลระบบ', 'warning'); return; }
+  const arr = _productsSorted();
+  const idx = arr.findIndex(p => p.id === id);
+  const j = idx + dir;
+  if (idx < 0 || j < 0 || j >= arr.length) return;
+  const tmp = arr[idx]; arr[idx] = arr[j]; arr[j] = tmp;
+  arr.forEach((p, k) => { p.order = k; });
+  DB.saveProducts(arr);
+  try { DB.logActivity(session.userId, session.username, 'จัดลำดับสินค้า', { product: arr[j].name }); } catch {}
+  render();
 }
 
 function updateUnitHint(name) {
