@@ -159,7 +159,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.104"></script><script src="db.js?v=1.0.104"></script><script src="auth.js?v=1.0.104"></script><script src="nav.js?v=1.0.104"></script><script src="idb.js?v=1.0.104"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.105"></script><script src="db.js?v=1.0.105"></script><script src="auth.js?v=1.0.105"></script><script src="nav.js?v=1.0.105"></script><script src="idb.js?v=1.0.105"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -331,8 +331,21 @@ let _editSaving = false;      // true while saveInvoiceEdit() is committing — 
 
 let _fpInvDate;
 
+// Selected invoice date as ISO (YYYY-MM-DD); falls back to today.
+function _selectedInvISO() {
+  try { return Utils.parseBEToISO(document.getElementById('invDate').value) || Utils.todayInputValue(); }
+  catch { return Utils.todayInputValue(); }
+}
+// When the date changes in CREATE mode: re-run the invoice number for that date
+// and re-price items from the price timeline as of that date.
+function _onInvDateChange() {
+  if (editMode || viewMode) return;
+  try { document.getElementById('invNumber').value = DB.peekNextInvoiceNumberForDate(_selectedInvISO()); } catch {}
+  if (typeof refreshPrices === 'function') refreshPrices();
+}
+
 window.addEventListener('DOMContentLoaded', () => {
-  _fpInvDate = BEDate.byId('invDate');
+  _fpInvDate = BEDate.byId('invDate', { onChange: _onInvDateChange });
   const params = new URLSearchParams(location.search);
   const viewNum = params.get('view');
   const editNum = params.get('edit');
@@ -941,9 +954,10 @@ function addSelectedBalances() {
 function refreshPrices() {
   const custId = document.getElementById('invCustomer').value;
   const shipping = document.getElementById('invShipping').value;
+  const iso = _selectedInvISO();
   items.forEach(item => {
     if (item.productId && custId && shipping) {
-      item.price = DB.getPrice(item.productId, custId, shipping);
+      item.price = DB.getPriceAsOf(item.productId, custId, shipping, iso);
     }
   });
   renderRows();
@@ -1000,7 +1014,7 @@ function onProductSelect(i, productId) {
     items[i].unitSize = p.unitSize;
     const custBrandsArr = cust ? getCustBrands(cust) : [];
     items[i].brand = custBrandsArr.length === 1 ? custBrandsArr[0] : '';
-    items[i].price = (custId && shipping) ? DB.getPrice(productId, custId, shipping) : (p.defaultPrice || '');
+    items[i].price = (custId && shipping) ? DB.getPriceAsOf(productId, custId, shipping, _selectedInvISO()) : (p.defaultPrice || '');
   }
   renderRows();
 }
@@ -1144,7 +1158,7 @@ function previewInvoice() {
   const totalAmount = activeItems.reduce((s, item) => s + calcTotal(item), 0);
   const dateValISO  = Utils.parseBEToISO(dateVal) || Utils.todayInputValue();
   const createdAt   = new Date(dateValISO).toISOString();
-  const previewInvNum = editMode ? currentInvNum : DB.peekNextInvoiceNumber();
+  const previewInvNum = editMode ? currentInvNum : DB.peekNextInvoiceNumberForDate(dateValISO);
   const existingMeta  = editMode ? (DB.getInvoices().find(i => i.invoiceNumber === currentInvNum) || {}) : {};
   const editCount     = editMode ? ((existingMeta.editCount || 0) + 1) : 0;
 
@@ -1233,8 +1247,9 @@ async function saveInvoice(shouldPrint = false) {
   }
 
   const totalAmount = activeItems.reduce((s, item) => s + calcTotal(item), 0);
-  const invNumber = DB.generateInvoiceNumber();
   const _dateISO  = Utils.parseBEToISO(dateVal) || Utils.todayInputValue();
+  // Number prefix/run follows the chosen invoice DATE (continues that day's sequence)
+  const invNumber = DB.generateInvoiceNumberForDate(_dateISO);
   const createdAt = new Date(_dateISO).toISOString();
 
   // Split into pages of 14 rows

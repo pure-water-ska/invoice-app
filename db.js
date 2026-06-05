@@ -557,6 +557,73 @@ const DB = {
     return `${dd}${mm}${yy}-${String(next).padStart(3, '0')}`;
   },
 
+  // ── Date-aware invoice numbering ───────────────────────────────────────────
+  // The number prefix (DDMMYY, BE year) follows the chosen invoice DATE, not
+  // "today". The running NNN continues from the highest existing number on that
+  // date (covers PDF imports too) and the per-date counter — whichever is larger.
+  _invNumParts(isoDate) {
+    let y, m, dd;
+    if (isoDate && /^\d{4}-\d{2}-\d{2}/.test(isoDate)) {
+      [y, m, dd] = isoDate.slice(0, 10).split('-');
+    } else {
+      const d = new Date();
+      y = String(d.getFullYear()); m = String(d.getMonth() + 1).padStart(2, '0'); dd = String(d.getDate()).padStart(2, '0');
+    }
+    const yy = String((parseInt(y, 10) + 543) % 100).padStart(2, '0');
+    return { dd, mm: m, yy, dateKey: `${y}-${m}-${dd}`, prefix: `${dd}${m}${yy}-` };
+  },
+  _maxRunningForPrefix(prefix) {
+    let max = 0;
+    for (const inv of this.getInvoices()) {
+      const n = inv.invoiceNumber || '';
+      if (n.indexOf(prefix) === 0) {
+        const run = parseInt(n.slice(prefix.length), 10);
+        if (!isNaN(run) && run > max) max = run;
+      }
+    }
+    return max;
+  },
+  peekNextInvoiceNumberForDate(isoDate) {
+    const { prefix, dateKey } = this._invNumParts(isoDate);
+    const counters = this._getObj(this.K.COUNTER, {});
+    const next = Math.max(counters[dateKey] || 0, this._maxRunningForPrefix(prefix)) + 1;
+    return `${prefix}${String(next).padStart(3, '0')}`;
+  },
+  generateInvoiceNumberForDate(isoDate) {
+    const { prefix, dateKey } = this._invNumParts(isoDate);
+    const counters = this._getObj(this.K.COUNTER, {});
+    const next = Math.max(counters[dateKey] || 0, this._maxRunningForPrefix(prefix)) + 1;
+    counters[dateKey] = next;
+    this._set(this.K.COUNTER, counters);
+    return `${prefix}${String(next).padStart(3, '0')}`;
+  },
+
+  // Price valid AS OF a given date, from the wt_price_history timeline.
+  // Same fallback chain as getPrice (exact → by customer → by shipping →
+  // default), but each level uses the latest history entry on/before the date.
+  // Falls back to the current getPrice if no history exists before that date.
+  getPriceAsOf(productId, customerId, shippingMethod, isoDate) {
+    if (!isoDate) return this.getPrice(productId, customerId, shippingMethod);
+    const cutoff = isoDate.slice(0, 10) + 'T23:59:59.999';
+    const hist = this.getPriceHistory();
+    const latestFor = (cid, ship) => {
+      let best = null;
+      for (const h of hist) {
+        if (h.productId !== productId) continue;
+        if ((h.customerId || '') !== (cid || '')) continue;
+        if ((h.shippingMethod || '') !== (ship || '')) continue;
+        const at = (h.changedAt || '').slice(0, 23);
+        if (at && at <= cutoff && (!best || at > best.at)) best = { at, price: h.price };
+      }
+      return best ? best.price : null;
+    };
+    let p = latestFor(customerId, shippingMethod);
+    if (p == null) p = latestFor(customerId, '');
+    if (p == null) p = latestFor('', shippingMethod);
+    if (p == null) p = latestFor('', '');
+    return (p != null) ? p : this.getPrice(productId, customerId, shippingMethod);
+  },
+
   // ─── PAYMENTS ────────────────────────────────────────────────────────────────
   getPayments() { return this._get(this.K.PAYMENTS); },
   savePayments(p) { this._set(this.K.PAYMENTS, p); },
