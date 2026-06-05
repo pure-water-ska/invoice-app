@@ -641,7 +641,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.105"></script><script src="db.js?v=1.0.105"></script><script src="auth.js?v=1.0.105"></script><script src="nav.js?v=1.0.105"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.106"></script><script src="db.js?v=1.0.106"></script><script src="auth.js?v=1.0.106"></script><script src="nav.js?v=1.0.106"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -805,6 +805,7 @@ window.addEventListener('DOMContentLoaded', () => {
   // Wait for IDB-overflow data before rendering data-dependent UI
   DB.ready.then(() => {
     document.getElementById('bankDatalist').innerHTML = Utils.bankDatalistOptions();
+    _initBankCombos();
 
     // Build the searchable customer-name list for the custom filter dropdown
     _fcList = DB.getCustomers()
@@ -883,6 +884,67 @@ document.addEventListener('mousedown', (e) => {
   const wrap = document.getElementById('filterCustomer')?.closest('.cust-search-wrap');
   if (wrap && !wrap.contains(e.target)) _fcClose();
 });
+
+// ── Bank name searchable dropdown (custom, styled like the customer dropdowns) ──
+// Replaces the native <datalist> on all bank inputs so the popup matches the rest
+// of the app (and is dark-mode aware). Body-anchored + position:fixed so it works
+// inside input-groups and modals.
+const _BANK_IDS = ['paySourceBank','payChequeBank','editAcctBank','newAcctBank','multiSourceBank','multiChequeBank'];
+let _bankDD = null, _bankActiveInput = null, _bankHi = -1;
+function _bankDDEl() {
+  if (!_bankDD) {
+    _bankDD = document.createElement('div');
+    _bankDD.className = 'cust-dd';
+    _bankDD.style.position = 'fixed';
+    _bankDD.style.display = 'none';
+    _bankDD.style.zIndex = '20050';
+    document.body.appendChild(_bankDD);
+  }
+  return _bankDD;
+}
+function _bankItems(q) {
+  q = (q || '').trim().toLowerCase();
+  return Utils.BANKS.filter(b => !q || b.name.toLowerCase().includes(q) || b.code.toLowerCase().includes(q));
+}
+function _bankRender(input) {
+  const dd = _bankDDEl();
+  const items = _bankItems(input.value);
+  dd.innerHTML = items.length
+    ? items.map((b, i) => `<div class="copt${i === _bankHi ? ' hi' : ''}" data-name="${esc(b.name)}"
+        onmousedown="_bankPick('${b.name.replace(/'/g, "\\'")}')">${esc(b.name)}</div>`).join('')
+    : '<div class="copt-empty">ไม่พบธนาคาร</div>';
+  const r = input.getBoundingClientRect();
+  dd.style.left = r.left + 'px'; dd.style.top = r.bottom + 'px'; dd.style.width = r.width + 'px';
+  dd.style.display = 'block';
+  _bankActiveInput = input;
+}
+function _bankPick(name) { if (_bankActiveInput) _bankActiveInput.value = name; _bankClose(); }
+function _bankClose() { if (_bankDD) _bankDD.style.display = 'none'; _bankHi = -1; _bankActiveInput = null; }
+function _bankKey(e) {
+  if (!_bankDD || _bankDD.style.display === 'none') return;
+  const items = _bankDD.querySelectorAll('.copt');
+  if (!items.length) return;
+  if (e.key === 'ArrowDown') { e.preventDefault(); _bankHi = Math.min(_bankHi + 1, items.length - 1); items.forEach((el, i) => el.classList.toggle('hi', i === _bankHi)); items[_bankHi]?.scrollIntoView({ block: 'nearest' }); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); _bankHi = Math.max(_bankHi - 1, 0); items.forEach((el, i) => el.classList.toggle('hi', i === _bankHi)); items[_bankHi]?.scrollIntoView({ block: 'nearest' }); }
+  else if (e.key === 'Enter') { const hi = _bankDD.querySelector('.copt.hi') || _bankDD.querySelector('.copt'); if (hi && hi.dataset.name) { e.preventDefault(); _bankPick(hi.dataset.name); } }
+  else if (e.key === 'Escape') { _bankClose(); }
+}
+function _initBankCombos() {
+  _BANK_IDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el || el._bankWired) return;
+    el._bankWired = true;
+    el.removeAttribute('list');
+    el.setAttribute('autocomplete', 'off');
+    el.addEventListener('focus', () => { _bankHi = -1; _bankRender(el); });
+    el.addEventListener('input', () => { _bankHi = -1; _bankRender(el); });
+    el.addEventListener('keydown', _bankKey);
+  });
+  document.addEventListener('mousedown', (e) => {
+    if (_bankDD && _bankActiveInput && e.target !== _bankActiveInput && !_bankDD.contains(e.target)) _bankClose();
+  });
+  document.addEventListener('scroll', () => { if (_bankActiveInput && _bankDD && _bankDD.style.display === 'block') _bankRender(_bankActiveInput); }, true);
+}
 
 // ── Render invoice list ───────────────────────────────────────────────────────
 function render() {
