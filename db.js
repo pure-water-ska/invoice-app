@@ -480,6 +480,9 @@ const DB = {
 
   // ─── PRODUCTS ────────────────────────────────────────────────────────────────
   getProducts() { return this._get(this.K.PRODUCTS); },
+  // Products in the admin-defined display order (order field; unset → last).
+  // Use this for every product dropdown/list so the sequence is consistent app-wide.
+  getProductsSorted() { return this.getProducts().slice().sort((a, b) => ((a.order ?? 1e9) - (b.order ?? 1e9))); },
   saveProducts(p) { this._set(this.K.PRODUCTS, p); },
   getProductById(id) { return this.getProducts().find(p => p.id === id) || null; },
   addProduct(p) { const a = this.getProducts(); a.push(p); this.saveProducts(a); },

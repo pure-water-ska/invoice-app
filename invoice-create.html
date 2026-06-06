@@ -159,7 +159,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.110"></script><script src="db.js?v=1.0.110"></script><script src="auth.js?v=1.0.110"></script><script src="nav.js?v=1.0.110"></script><script src="idb.js?v=1.0.110"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.111"></script><script src="db.js?v=1.0.111"></script><script src="auth.js?v=1.0.111"></script><script src="nav.js?v=1.0.111"></script><script src="idb.js?v=1.0.111"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -1061,6 +1061,15 @@ function updateGrandTotal() {
 // Effective unit price for a line: base price (as of invoice date) with the
 // pricing rule's volume tier applied. Tier qty basis = this line's qty, or the
 // total of that product across the whole invoice (rule.tierBasis === 'invoice').
+// A product counts as a "ขวด" (bottle) when its unit contains ขวด (e.g. "ขวด/ห่อ")
+// or its name starts with ขวด. Used by the "รวมขวดทั้งใบ" tier basis.
+function _isBottleProduct(productId) {
+  const p = productId ? DB.getProductById(productId) : null;
+  if (!p) return false;
+  const unit = p.unit || (Utils.productUnit ? Utils.productUnit(p.name) : '') || '';
+  return unit.includes('ขวด') || (p.name || '').trim().startsWith('ขวด');
+}
+
 function _effectivePriceForItem(item) {
   const custId = document.getElementById('invCustomer').value;
   const shipping = document.getElementById('invShipping').value;
@@ -1069,7 +1078,11 @@ function _effectivePriceForItem(item) {
   const rule = DB.getPricingRule(item.productId, custId, shipping);
   let qty = parseFloat(item.qty) || 0;
   if (rule && rule.tierBasis === 'invoice') {
+    // total of THIS product across all lines
     qty = items.filter(x => x.productId === item.productId).reduce((s, x) => s + (parseFloat(x.qty) || 0), 0);
+  } else if (rule && rule.tierBasis === 'bottle') {
+    // total of EVERY "ขวด" (bottle) product across all lines
+    qty = items.reduce((s, x) => s + (_isBottleProduct(x.productId) ? (parseFloat(x.qty) || 0) : 0), 0);
   }
   return DB.applyTier(rule, base, qty);
 }

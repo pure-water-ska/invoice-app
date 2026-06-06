@@ -367,7 +367,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="./vendor/html2canvas.min.js"></script>
-<script src="utils.js?v=1.0.110"></script><script src="db.js?v=1.0.110"></script><script src="auth.js?v=1.0.110"></script><script src="nav.js?v=1.0.110"></script>
+<script src="utils.js?v=1.0.111"></script><script src="db.js?v=1.0.111"></script><script src="auth.js?v=1.0.111"></script><script src="nav.js?v=1.0.111"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -943,7 +943,8 @@ let _pcData = null;  // { customer, rows:[...], dateStr }
 // Format a tier as readable text, e.g. "ซื้อ ≥100 → ฿9.50 (รวมทั้งใบ)"
 function _tierText(qty, price, basis) {
   const fmt = n => (parseFloat(n) || 0).toLocaleString('th-TH', { minimumFractionDigits: 2 });
-  return `ซื้อ ≥${parseInt(qty, 10) || 0} → ฿${fmt(price)}${basis === 'invoice' ? ' (รวมทั้งใบ)' : ''}`;
+  const note = basis === 'invoice' ? ' (รวมทั้งใบ)' : basis === 'bottle' ? ' (รวมขวดทั้งใบ)' : '';
+  return `ซื้อ ≥${parseInt(qty, 10) || 0} → ฿${fmt(price)}${note}`;
 }
 
 function showPriceChangeNotice(id) {
