@@ -115,7 +115,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.109"></script><script src="db.js?v=1.0.109"></script><script src="auth.js?v=1.0.109"></script><script src="nav.js?v=1.0.109"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.110"></script><script src="db.js?v=1.0.110"></script><script src="auth.js?v=1.0.110"></script><script src="nav.js?v=1.0.110"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -236,7 +236,9 @@ function renderActivity() {
   // Render activity-detail keys/values readably — resolve id keys to real names
   // (covers old log entries that stored productId/customerId/userId as raw ids).
   window._detailLabel = window._detailLabel || function(k) {
-    return ({ productId:'สินค้า', customerId:'ลูกค้า', userId:'ผู้ใช้', returnIds:'รายการคืน' })[k] || k;
+    return ({ productId:'สินค้า', customerId:'ลูกค้า', userId:'ผู้ใช้', returnIds:'รายการคืน',
+      product:'สินค้า', customer:'ลูกค้า', shippingMethod:'วิธีจัดส่ง', price:'ราคา/หน่วย',
+      tier:'ขั้นบันได', tierQty:'จำนวนขั้นบันได', tierPrice:'ราคาขั้นบันได', tierBasis:'นับจาก' })[k] || k;
   };
   window._detailVal = window._detailVal || function(k, v) {
     try {

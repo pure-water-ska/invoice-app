@@ -171,7 +171,7 @@
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.109"></script><script src="db.js?v=1.0.109"></script><script src="auth.js?v=1.0.109"></script><script src="nav.js?v=1.0.109"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.110"></script><script src="db.js?v=1.0.110"></script><script src="auth.js?v=1.0.110"></script><script src="nav.js?v=1.0.110"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -356,10 +356,14 @@ function savePrice() {
   const _cust = customerId ? DB.getCustomerById(customerId) : null;
   const _prodName = _prod ? _prod.name : productId;
   const _custName = _cust ? _cust.name : (customerId ? customerId : 'ทุกลูกค้า');
-  DB.logActivity(session.userId, session.username, 'จัดการราคาสินค้า', {
+  const _logDetail = {
     product: _prodName, customer: _custName,
     shippingMethod: shippingMethod || 'ทุกวิธีจัดส่ง', price,
-  });
+  };
+  if (tierActive) {
+    _logDetail.tier = `≥${tierQty} → ฿${tierPrice}${tierBasis === 'invoice' ? ' (รวมทั้งใบ)' : ''}`;
+  }
+  DB.logActivity(session.userId, session.username, 'จัดการราคาสินค้า', _logDetail);
   Utils.showAlert(`บันทึกราคา <strong>${_prodName}</strong> สำเร็จ`);
   modal.hide();
   render();
