@@ -367,7 +367,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="./vendor/html2canvas.min.js"></script>
-<script src="utils.js?v=1.0.108"></script><script src="db.js?v=1.0.108"></script><script src="auth.js?v=1.0.108"></script><script src="nav.js?v=1.0.108"></script>
+<script src="utils.js?v=1.0.109"></script><script src="db.js?v=1.0.109"></script><script src="auth.js?v=1.0.109"></script><script src="nav.js?v=1.0.109"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -938,7 +938,13 @@ async function copyOutstandingImage() {
 }
 
 /* ─── Price Change Notification ──────────────────────────────────────────── */
-let _pcData = null;  // { customer, rows:[{name,ship,oldP,newP,diff}], dateStr }
+let _pcData = null;  // { customer, rows:[...], dateStr }
+
+// Format a tier as readable text, e.g. "ซื้อ ≥100 → ฿9.50 (รวมทั้งใบ)"
+function _tierText(qty, price, basis) {
+  const fmt = n => (parseFloat(n) || 0).toLocaleString('th-TH', { minimumFractionDigits: 2 });
+  return `ซื้อ ≥${parseInt(qty, 10) || 0} → ฿${fmt(price)}${basis === 'invoice' ? ' (รวมทั้งใบ)' : ''}`;
+}
 
 function showPriceChangeNotice(id) {
   const c = DB.getCustomerById(id);
@@ -947,7 +953,9 @@ function showPriceChangeNotice(id) {
   const pricing = DB.getPricing().filter(p => (p.customerId || '') === id);  // customer-specific only
   const allHist = DB.getPriceHistory();
 
-  // Build rows only for prices that ACTUALLY changed (≥2 history entries, old≠new)
+  // Show EVERY customer-specific price. For each, the current rule is the "new"
+  // state; the previous history snapshot (entry index 1) is the "old" state, so
+  // we can flag base-price AND tier changes (tier is recorded in history too).
   const rows = [];
   pricing.forEach(p => {
     const hist = allHist
@@ -955,15 +963,25 @@ function showPriceChangeNotice(id) {
                    (h.customerId || '') === id &&
                    (h.shippingMethod || '') === (p.shippingMethod || ''))
       .sort((a, b) => new Date(b.changedAt) - new Date(a.changedAt));
-    if (hist.length < 2) return;
-    const newP = parseFloat(hist[0].price) || 0;
-    const oldP = parseFloat(hist[1].price) || 0;
-    if (newP === oldP) return;
     const prod = DB.getProductById(p.productId);
+    const prev = hist[1] || null;  // the snapshot before the current one
+
+    const newP = parseFloat(p.price) || 0;
+    const oldP = prev ? (parseFloat(prev.price) || 0) : null;
+    const baseChanged = oldP != null && oldP !== newP;
+
+    const newTierQty   = (p.tierQty > 0 && p.tierPrice != null && p.tierPrice !== '') ? (parseInt(p.tierQty, 10) || 0) : null;
+    const newTierPrice = newTierQty != null ? (parseFloat(p.tierPrice) || 0) : null;
+    const oldTierQty   = prev && prev.tierQty > 0 && prev.tierPrice != null && prev.tierPrice !== '' ? (parseInt(prev.tierQty, 10) || 0) : null;
+    const oldTierPrice = oldTierQty != null ? (parseFloat(prev.tierPrice) || 0) : null;
+    const tierChanged  = !!prev && (newTierQty !== oldTierQty || newTierPrice !== oldTierPrice);
+
     rows.push({
       name: prod ? prod.name : '(สินค้า)',
       ship: p.shippingMethod || 'ทุกวิธีจัดส่ง',
-      oldP, newP, diff: newP - oldP, changedAt: hist[0].changedAt,
+      oldP, newP, diff: oldP != null ? newP - oldP : 0, baseChanged,
+      basis: p.tierBasis || 'line',
+      newTierQty, newTierPrice, oldTierQty, oldTierPrice, tierChanged,
     });
   });
 
@@ -972,15 +990,36 @@ function showPriceChangeNotice(id) {
   _pcData = { customer: c, rows, dateStr: today };
 
   const fmt = n => (n).toLocaleString('th-TH', { minimumFractionDigits: 2 });
+  const priceCell = r => {
+    if (r.baseChanged) {
+      return `<span style="color:#888;text-decoration:line-through">${fmt(r.oldP)}</span>
+              <span style="font-weight:700"> → ${fmt(r.newP)}</span>
+              <span style="font-weight:700;color:${r.diff > 0 ? '#dc2626' : '#16a34a'}"> (${r.diff > 0 ? '▲+' : '▼'}${fmt(Math.abs(r.diff))})</span>`;
+    }
+    return `<span style="font-weight:700">${fmt(r.newP)}</span>`;
+  };
+  const tierCell = r => {
+    if (r.newTierQty == null) {
+      return r.oldTierQty != null
+        ? '<span style="color:#dc2626">ยกเลิกราคาขั้นบันได</span>'
+        : '<span style="color:#aaa">–</span>';
+    }
+    let html = `<span style="font-weight:600;color:#0d6efd">${esc(_tierText(r.newTierQty, r.newTierPrice, r.basis))}</span>`;
+    if (r.tierChanged) {
+      html += r.oldTierQty != null
+        ? `<br><span style="color:#888;font-size:11px;text-decoration:line-through">เดิม: ${esc(_tierText(r.oldTierQty, r.oldTierPrice, r.basis))}</span>`
+        : `<br><span style="color:#16a34a;font-size:11px">(ใหม่)</span>`;
+    }
+    return html;
+  };
   const body = rows.length ? `
     <table style="width:100%;border-collapse:collapse;font-size:13px">
       <thead>
         <tr style="background:#0d6efd;color:#fff">
           <th style="padding:6px 8px;text-align:left">สินค้า</th>
           <th style="padding:6px 8px;text-align:center">วิธีจัดส่ง</th>
-          <th style="padding:6px 8px;text-align:right">ราคาเดิม</th>
-          <th style="padding:6px 8px;text-align:right">ราคาใหม่</th>
-          <th style="padding:6px 8px;text-align:right">เปลี่ยนแปลง</th>
+          <th style="padding:6px 8px;text-align:right">ราคา/หน่วย</th>
+          <th style="padding:6px 8px;text-align:left">ราคาขั้นบันได</th>
         </tr>
       </thead>
       <tbody>
@@ -988,14 +1027,11 @@ function showPriceChangeNotice(id) {
         <tr style="background:${i % 2 ? '#f1f6ff' : '#fff'}">
           <td style="padding:5px 8px;font-weight:600">${esc(r.name)}</td>
           <td style="padding:5px 8px;text-align:center;color:#666">${esc(r.ship)}</td>
-          <td style="padding:5px 8px;text-align:right;color:#888;text-decoration:line-through">${fmt(r.oldP)}</td>
-          <td style="padding:5px 8px;text-align:right;font-weight:700">${fmt(r.newP)}</td>
-          <td style="padding:5px 8px;text-align:right;font-weight:700;color:${r.diff > 0 ? '#dc2626' : '#16a34a'}">
-            ${r.diff > 0 ? '▲ +' : '▼ '}${fmt(Math.abs(r.diff))}
-          </td>
+          <td style="padding:5px 8px;text-align:right">${priceCell(r)}</td>
+          <td style="padding:5px 8px;text-align:left">${tierCell(r)}</td>
         </tr>`).join('')}
       </tbody>
-    </table>` : '<div style="text-align:center;color:#16a34a;padding:16px;font-weight:600">ไม่มีรายการเปลี่ยนแปลงราคา</div>';
+    </table>` : '<div style="text-align:center;color:#16a34a;padding:16px;font-weight:600">ลูกค้ารายนี้ยังไม่มีราคาเฉพาะ</div>';
 
   document.getElementById('priceChangeContent').innerHTML = `
     <div style="font-family:Sarabun,sans-serif;color:#222">
@@ -1019,7 +1055,7 @@ function _pcText() {
   const lines = [];
   lines.push(`แจ้งเปลี่ยนแปลงราคา (${_pcData.dateStr})`);
   lines.push(`เรียน ${_pcData.customer.name}`);
-  if (!_pcData.rows.length) { lines.push('- ไม่มีรายการเปลี่ยนแปลงราคา'); return lines.join('\n'); }
+  if (!_pcData.rows.length) { lines.push('- ลูกค้ารายนี้ยังไม่มีราคาเฉพาะ'); return lines.join('\n'); }
   // Group rows by delivery type
   const byShip = {};
   _pcData.rows.forEach(r => { (byShip[r.ship] = byShip[r.ship] || []).push(r); });
@@ -1027,8 +1063,20 @@ function _pcText() {
     lines.push('');
     lines.push(ship);
     byShip[ship].forEach(r => {
-      const sign = r.diff > 0 ? `+${fmt(r.diff)}` : `-${fmt(Math.abs(r.diff))}`;
-      lines.push(`- ${r.name} : ${fmt(r.oldP)} → ${fmt(r.newP)} (${sign})`);
+      if (r.baseChanged) {
+        const sign = r.diff > 0 ? `+${fmt(r.diff)}` : `-${fmt(Math.abs(r.diff))}`;
+        lines.push(`- ${r.name} : ${fmt(r.oldP)} → ${fmt(r.newP)} (${sign})`);
+      } else {
+        lines.push(`- ${r.name} : ${fmt(r.newP)}`);
+      }
+      if (r.newTierQty != null) {
+        let t = `    • ${_tierText(r.newTierQty, r.newTierPrice, r.basis)}`;
+        if (r.tierChanged && r.oldTierQty != null) t += ` (เดิม: ${_tierText(r.oldTierQty, r.oldTierPrice, r.basis)})`;
+        else if (r.tierChanged) t += ' (ใหม่)';
+        lines.push(t);
+      } else if (r.oldTierQty != null) {
+        lines.push('    • ยกเลิกราคาขั้นบันได');
+      }
     });
   });
   return lines.join('\n');

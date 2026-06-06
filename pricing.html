@@ -171,7 +171,7 @@
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.108"></script><script src="db.js?v=1.0.108"></script><script src="auth.js?v=1.0.108"></script><script src="nav.js?v=1.0.108"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.109"></script><script src="db.js?v=1.0.109"></script><script src="auth.js?v=1.0.109"></script><script src="nav.js?v=1.0.109"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -350,7 +350,7 @@ function savePrice() {
     const e = list.find(p => p.productId === productId && (p.customerId||'') === (customerId||'') && (p.shippingMethod||'') === (shippingMethod||''));
     if (e) { e.tierQty = tierQty; e.tierPrice = tierPrice; e.tierBasis = tierBasis; DB.savePricing(list); }
   }
-  DB.addPriceHistory({ id: Utils.uuid(), productId, customerId: customerId||'', shippingMethod: shippingMethod||'', price, changedAt: new Date().toISOString(), changedBy: session.name, changedByUser: session.username });
+  DB.addPriceHistory({ id: Utils.uuid(), productId, customerId: customerId||'', shippingMethod: shippingMethod||'', price, tierQty, tierPrice, tierBasis, changedAt: new Date().toISOString(), changedBy: session.name, changedByUser: session.username });
   // Log real names (not raw ids) so the activity log is readable
   const _prod = DB.getProductById(productId);
   const _cust = customerId ? DB.getCustomerById(customerId) : null;
