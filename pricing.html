@@ -115,6 +115,29 @@
             <input type="number" id="priceValue" class="form-control" placeholder="0.00" min="0" step="0.01">
           </div>
         </div>
+
+        <!-- Volume tier (optional): qty ≥ threshold → special price -->
+        <div class="border rounded p-2 bg-light">
+          <div class="fw-semibold small mb-2"><i class="bi bi-graph-down-arrow me-1 text-success"></i>ราคาขั้นบันได (เมื่อซื้อจำนวนมาก) — ไม่บังคับ</div>
+          <div class="row g-2">
+            <div class="col-6">
+              <label class="form-label small mb-1">เมื่อจำนวนถึง (หน่วย)</label>
+              <input type="number" id="tierQty" class="form-control form-control-sm" placeholder="เช่น 100" min="0" step="1">
+            </div>
+            <div class="col-6">
+              <label class="form-label small mb-1">ราคาพิเศษ/หน่วย (บาท)</label>
+              <input type="number" id="tierPrice" class="form-control form-control-sm" placeholder="0.00" min="0" step="0.01">
+            </div>
+            <div class="col-12">
+              <label class="form-label small mb-1">นับจำนวนจาก</label>
+              <select id="tierBasis" class="form-select form-select-sm">
+                <option value="line">จำนวนต่อบรรทัด (รายการนั้น)</option>
+                <option value="invoice">รวมทั้งใบ (สินค้านี้ทุกบรรทัด)</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-text">เว้นว่างทั้งคู่ = ไม่ใช้ราคาขั้นบันได</div>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
@@ -148,7 +171,7 @@
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.107"></script><script src="db.js?v=1.0.107"></script><script src="auth.js?v=1.0.107"></script><script src="nav.js?v=1.0.107"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.108"></script><script src="db.js?v=1.0.108"></script><script src="auth.js?v=1.0.108"></script><script src="nav.js?v=1.0.108"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -226,7 +249,9 @@ function render() {
       <td>${prod ? prod.name : '<span class="text-danger">ไม่พบสินค้า</span>'}</td>
       <td>${cust ? cust.name : '<span class="text-muted">ทุกลูกค้า</span>'}</td>
       <td>${p.shippingMethod || '<span class="text-muted">ทุกวิธีจัดส่ง</span>'}</td>
-      <td class="text-end fw-semibold">฿${Utils.formatNumber(p.price)}</td>
+      <td class="text-end fw-semibold">฿${Utils.formatNumber(p.price)}
+        ${(p.tierQty > 0 && p.tierPrice != null) ? `<div class="small text-success fw-normal"><i class="bi bi-graph-down-arrow"></i> ≥${Utils.formatNumberInt ? Utils.formatNumberInt(p.tierQty) : p.tierQty} → ฿${Utils.formatNumber(p.tierPrice)}${p.tierBasis === 'invoice' ? ' (รวมใบ)' : ''}</div>` : ''}
+      </td>
       <td class="text-center" style="min-width:130px">
         <input type="text" class="form-control form-control-sm price-notif-date" data-pid="${p.id}"
                value="${notified ? Utils.isoToBE(notified) : ''}"
@@ -280,6 +305,9 @@ function openModal(id) {
     document.getElementById('priceCustomer').value = p.customerId || '';
     document.getElementById('priceShipping').value = p.shippingMethod || '';
     document.getElementById('priceValue').value = p.price || '';
+    document.getElementById('tierQty').value = (p.tierQty != null ? p.tierQty : '');
+    document.getElementById('tierPrice').value = (p.tierPrice != null ? p.tierPrice : '');
+    document.getElementById('tierBasis').value = p.tierBasis || 'line';
   } else {
     const fp = document.getElementById('filterProduct').value;
     const fc = document.getElementById('filterCustomer').value;
@@ -288,6 +316,9 @@ function openModal(id) {
     document.getElementById('priceCustomer').value = fc || '';
     document.getElementById('priceShipping').value = fs || '';
     document.getElementById('priceValue').value = '';
+    document.getElementById('tierQty').value = '';
+    document.getElementById('tierPrice').value = '';
+    document.getElementById('tierBasis').value = 'line';
   }
   modal.show();
 }
@@ -301,12 +332,23 @@ function savePrice() {
   if (!productId) { Utils.showAlert('กรุณาเลือกสินค้า', 'warning', 'modalAlert'); return; }
   if (isNaN(price) || price < 0) { Utils.showAlert('กรุณากรอกราคา', 'warning', 'modalAlert'); return; }
 
+  // Optional volume tier — active only when BOTH qty and price are filled
+  const _tqRaw = document.getElementById('tierQty').value;
+  const _tpRaw = document.getElementById('tierPrice').value;
+  const tierBasis = document.getElementById('tierBasis').value || 'line';
+  const tierActive = _tqRaw !== '' && _tpRaw !== '';
+  const tierQty = tierActive ? (parseInt(_tqRaw, 10) || 0) : null;
+  const tierPrice = tierActive ? (parseFloat(_tpRaw) || 0) : null;
+
   if (id) {
     const list = DB.getPricing();
     const idx = list.findIndex(p => p.id === id);
-    if (idx >= 0) { list[idx] = { ...list[idx], productId, customerId, shippingMethod, price }; DB.savePricing(list); }
+    if (idx >= 0) { list[idx] = { ...list[idx], productId, customerId, shippingMethod, price, tierQty, tierPrice, tierBasis }; DB.savePricing(list); }
   } else {
     DB.upsertPrice(productId, customerId, shippingMethod, price);
+    const list = DB.getPricing();
+    const e = list.find(p => p.productId === productId && (p.customerId||'') === (customerId||'') && (p.shippingMethod||'') === (shippingMethod||''));
+    if (e) { e.tierQty = tierQty; e.tierPrice = tierPrice; e.tierBasis = tierBasis; DB.savePricing(list); }
   }
   DB.addPriceHistory({ id: Utils.uuid(), productId, customerId: customerId||'', shippingMethod: shippingMethod||'', price, changedAt: new Date().toISOString(), changedBy: session.name, changedByUser: session.username });
   // Log real names (not raw ids) so the activity log is readable

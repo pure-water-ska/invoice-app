@@ -159,7 +159,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.107"></script><script src="db.js?v=1.0.107"></script><script src="auth.js?v=1.0.107"></script><script src="nav.js?v=1.0.107"></script><script src="idb.js?v=1.0.107"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.108"></script><script src="db.js?v=1.0.108"></script><script src="auth.js?v=1.0.108"></script><script src="nav.js?v=1.0.108"></script><script src="idb.js?v=1.0.108"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -952,14 +952,10 @@ function addSelectedBalances() {
 }
 
 function refreshPrices() {
-  const custId = document.getElementById('invCustomer').value;
-  const shipping = document.getElementById('invShipping').value;
-  const iso = _selectedInvISO();
-  items.forEach(item => {
-    if (item.productId && custId && shipping) {
-      item.price = DB.getPriceAsOf(item.productId, custId, shipping, iso);
-    }
-  });
+  // Changing customer/shipping/date re-prices everything (clears manual overrides),
+  // applying volume tiers via recomputeAutoPrices.
+  items.forEach(it => { it._manual = false; });
+  recomputeAutoPrices();
   renderRows();
 }
 
@@ -988,13 +984,13 @@ function renderRows() {
         <input type="text" value="${item.name||''}" placeholder="หรือพิมพ์รายการ" oninput="items[${i}].name=this.value;updateTotal(${i})" style="margin-top:2px;width:100%;border:1px solid #dee2e6;border-radius:4px;padding:2px 5px;font-size:12px">
       </td>
       <td>${buildBrandCell(i, item.brand)}</td>
-      <td><input type="number" value="${item.qty === 0 ? '0' : (item.qty || '')}" placeholder="0" step="any" oninput="items[${i}].qty=this.value;updateTotal(${i})" class="text-center"></td>
+      <td><input type="number" value="${item.qty === 0 ? '0' : (item.qty || '')}" placeholder="0" step="any" oninput="items[${i}].qty=this.value;onQtyChange(${i})" class="text-center"></td>
       <td>
         <input type="number" value="${item.unitSize||''}" placeholder="0" min="0" oninput="items[${i}].unitSize=this.value;updateTotal(${i})" class="text-center">
         ${(() => { const p = item.productId ? DB.getProductById(item.productId) : null; const u = (p && p.unit) || Utils.productUnit(item.name); return u ? `<div style="font-size:10px;color:#6c757d;text-align:center;margin-top:1px">${u}</div>` : ''; })()}
       </td>
       <td><input type="number" value="${item.remainder||0}" placeholder="0" min="0" oninput="items[${i}].remainder=this.value;updateTotal(${i})" class="text-center"></td>
-      <td><input type="number" value="${item.price||''}" placeholder="0.00" min="0" step="0.01" oninput="items[${i}].price=this.value;updateTotal(${i})" class="text-end"></td>
+      <td><input type="number" id="priceInp${i}" value="${item.price||''}" placeholder="0.00" min="0" step="0.01" oninput="items[${i}].price=this.value;items[${i}]._manual=true;updateTotal(${i})" class="text-end"></td>
       <td class="text-end fw-semibold pe-2" id="rowTotal${i}">${total>0?'฿'+Utils.formatNumber(total):'-'}</td>
       <td class="text-center"><button class="btn btn-sm text-danger p-0" onclick="removeRow(${i})" title="ลบแถว"><i class="bi bi-x-circle"></i></button></td>
     `;
@@ -1014,7 +1010,8 @@ function onProductSelect(i, productId) {
     items[i].unitSize = p.unitSize;
     const custBrandsArr = cust ? getCustBrands(cust) : [];
     items[i].brand = custBrandsArr.length === 1 ? custBrandsArr[0] : '';
-    items[i].price = (custId && shipping) ? DB.getPriceAsOf(productId, custId, shipping, _selectedInvISO()) : (p.defaultPrice || '');
+    items[i]._manual = false;
+    items[i].price = (custId && shipping) ? (_effectivePriceForItem(items[i]) ?? DB.getPriceAsOf(productId, custId, shipping, _selectedInvISO())) : (p.defaultPrice || '');
   }
   renderRows();
 }
@@ -1059,6 +1056,44 @@ function updateGrandTotal() {
   const total = items.reduce((s, item) => s + (item.total || 0), 0);
   document.getElementById('grandTotal').textContent = '฿' + Utils.formatNumber(total);
   document.getElementById('totalWords').textContent = Utils.numberToThaiWords(total);
+}
+
+// Effective unit price for a line: base price (as of invoice date) with the
+// pricing rule's volume tier applied. Tier qty basis = this line's qty, or the
+// total of that product across the whole invoice (rule.tierBasis === 'invoice').
+function _effectivePriceForItem(item) {
+  const custId = document.getElementById('invCustomer').value;
+  const shipping = document.getElementById('invShipping').value;
+  if (!item.productId || !custId || !shipping) return null;
+  const base = DB.getPriceAsOf(item.productId, custId, shipping, _selectedInvISO());
+  const rule = DB.getPricingRule(item.productId, custId, shipping);
+  let qty = parseFloat(item.qty) || 0;
+  if (rule && rule.tierBasis === 'invoice') {
+    qty = items.filter(x => x.productId === item.productId).reduce((s, x) => s + (parseFloat(x.qty) || 0), 0);
+  }
+  return DB.applyTier(rule, base, qty);
+}
+// Recompute auto (non-manually-edited) line prices from rules + tiers.
+function recomputeAutoPrices() {
+  items.forEach(it => {
+    if (!it._manual && it.productId) {
+      const p = _effectivePriceForItem(it);
+      if (p != null) it.price = p;
+    }
+  });
+}
+// Qty changed → tier thresholds may flip; re-price (respecting manual edits) and
+// update price inputs + totals in place (no full re-render, to keep qty focus).
+function onQtyChange(i) {
+  recomputeAutoPrices();
+  items.forEach((it, k) => {
+    const inp = document.getElementById('priceInp' + k);
+    if (inp && document.activeElement !== inp) inp.value = (it.price || it.price === 0) ? it.price : '';
+    it.total = calcTotal(it);
+    const tEl = document.getElementById('rowTotal' + k);
+    if (tEl) tEl.textContent = it.total > 0 ? '฿' + Utils.formatNumber(it.total) : '-';
+  });
+  updateGrandTotal();
 }
 
 function addRow() {

@@ -507,6 +507,27 @@ const DB = {
     const prod = this.getProductById(productId);
     return prod ? (prod.defaultPrice || 0) : 0;
   },
+
+  // Return the matched pricing RULE object (same fallback chain as getPrice),
+  // so callers can read its volume-tier fields (tierQty, tierPrice, tierBasis).
+  getPricingRule(productId, customerId, shippingMethod) {
+    const list = this.getPricing();
+    return list.find(p => p.productId === productId && p.customerId === customerId && p.shippingMethod === shippingMethod)
+        || list.find(p => p.productId === productId && p.customerId === customerId && !p.shippingMethod)
+        || list.find(p => p.productId === productId && !p.customerId && p.shippingMethod === shippingMethod)
+        || list.find(p => p.productId === productId && !p.customerId && !p.shippingMethod)
+        || null;
+  },
+
+  // Apply a single volume tier to a base price: if the rule has tierQty>0 and a
+  // tierPrice and the quantity reaches the threshold, return tierPrice; else base.
+  applyTier(rule, basePrice, qty) {
+    if (rule && rule.tierQty > 0 && rule.tierPrice != null && rule.tierPrice !== '' &&
+        (parseFloat(qty) || 0) >= rule.tierQty) {
+      return parseFloat(rule.tierPrice) || 0;
+    }
+    return basePrice;
+  },
   upsertPrice(productId, customerId, shippingMethod, price) {
     const list = this.getPricing();
     const idx = list.findIndex(p =>
