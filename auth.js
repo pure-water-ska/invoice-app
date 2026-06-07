@@ -110,7 +110,7 @@ const Auth = {
       loginTime: new Date().toISOString()
     };
     sessionStorage.setItem(this.KEY, JSON.stringify(session));
-    if (user.mustChangePw) localStorage.setItem('mustChangePw', '1');
+    if (user.mustChangePw) sessionStorage.setItem('mustChangePw', '1');
     DB.logLogin(user.id, user.username, true, geo, deviceInfo);
     DB.logActivity(user.id, user.username, 'เข้าสู่ระบบ', {});
     return { ok: true, user: session };
@@ -153,7 +153,7 @@ const Auth = {
       delete _docTs['users_cfg'];
       localStorage.setItem('wt_sync_doc_ts', JSON.stringify(_docTs));
     } catch {}
-    localStorage.removeItem('mustChangePw');
+    sessionStorage.removeItem('mustChangePw');
     // Sign out of Firebase Auth if available (not loaded in Tauri — auth-compat skipped)
     try { if (window.firebase && firebase.apps.length && typeof firebase.auth === 'function') firebase.auth().signOut(); } catch {}
     window.location.href = 'index.html';
