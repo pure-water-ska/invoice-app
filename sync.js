@@ -938,6 +938,17 @@ var Sync = {
 
       if (syncDeletedIds.length > 0) {
         this._ignoreUntil[key] = Date.now() + this._skipInitialMs;
+        // ── DIAGNOSTIC (payments/invoices): record every Firestore deletion with its
+        // call source, so a "data reverts on another device" bug can be traced on a
+        // release build where DevTools is unavailable. Visible in Settings → Troubleshoot.
+        try {
+          if ((colName === 'payments' || colName === 'invoices') && typeof DB !== 'undefined' && DB.logError) {
+            const src = (new Error().stack || '').split('\n').slice(2, 5).map(s => s.trim()).join(' ← ');
+            DB.logError('SYNC-DEL',
+              `${colName}: deleting ${syncDeletedIds.length} id(s) [${syncDeletedIds.slice(0, 8).join(', ')}] ` +
+              `| local=${localIds.size} serverKnown=${(knownServerIds ? knownServerIds.size : 0)} | src: ${src}`);
+          }
+        } catch {}
       }
 
       // Update cached server IDs to reflect the new local state.
