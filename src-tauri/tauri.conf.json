@@ -9,7 +9,7 @@
   },
   "package": {
     "productName": "ระบบใบกำกับสินค้า",
-    "version": "1.0.116"
+    "version": "1.0.117"
   },
   "tauri": {
     "allowlist": {
@@ -103,6 +103,7 @@
     "windows": [
       {
         "fullscreen": false,
+        "maximized": true,
         "height": 900,
         "resizable": true,
         "title": "ระบบใบกำกับสินค้า",
