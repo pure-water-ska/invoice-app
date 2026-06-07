@@ -136,7 +136,7 @@
 </div>
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
-<script src="utils.js?v=1.0.111"></script><script src="db.js?v=1.0.111"></script><script src="auth.js?v=1.0.111"></script><script src="nav.js?v=1.0.111"></script><script src="idb.js?v=1.0.111"></script>
+<script src="utils.js?v=1.0.112"></script><script src="db.js?v=1.0.112"></script><script src="auth.js?v=1.0.112"></script><script src="nav.js?v=1.0.112"></script><script src="idb.js?v=1.0.112"></script>
 <script src="drive-config.js" onerror="window.GOOGLE_CLIENT_ID=''"></script>
 <script src="drive-store.js"></script>
 <script>
@@ -166,22 +166,56 @@ function handleDrop(e) {
 async function handleFiles(filesInput) {
   _custs = DB.getCustomers(); // refresh before parsing so auto-detect uses current data
   const files = Array.from(filesInput);
-  const total = files.length;
   document.getElementById('clearBtn').classList.remove('d-none');
-  for (let i = 0; i < total; i++) {
-    setProgress(true, `กำลัง import (${i + 1}/${total}): ${files[i].name}`, i, total);
-    await processPDF(files[i]);
-    setProgress(true, `กำลัง import (${i + 1}/${total}): ${files[i].name}`, i + 1, total);
+
+  // Phase 1 — open each PDF (cheap: just loads the doc) to count total pages,
+  // so the progress bar can report processed-page / total-page.
+  setProgress(true, 'กำลังเปิดไฟล์...', 0, 1);
+  const docs = [];
+  let totalPages = 0;
+  for (const file of files) {
+    try {
+      const buf = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+      docs.push({ file, buf, pdf });
+      totalPages += pdf.numPages;
+    } catch (err) {
+      showFileError(file, err);
+    }
+  }
+
+  // Phase 2 — render + parse each page, advancing the page-level counter.
+  let processed = 0;
+  for (const d of docs) {
+    for (let pn = 1; pn <= d.pdf.numPages; pn++) {
+      setProgress(true, `กำลังประมวลผล: ${d.file.name} — หน้า ${pn}/${d.pdf.numPages}`, processed, totalPages);
+      try { await processPage(d.pdf, d.buf, d.file, pn); }
+      catch (err) { showFileError(d.file, err); }
+      processed++;
+      setProgress(true, `กำลังประมวลผล: ${d.file.name} — หน้า ${pn}/${d.pdf.numPages}`, processed, totalPages);
+    }
   }
   setProgress(false);
+
+  // Record the import (read) step in the activity log — distinct from per-invoice save.
+  try {
+    DB.logActivity(session.userId, session.username, 'อ่านไฟล์ PDF (นำเข้า)',
+      { files: files.length, pages: totalPages, cards: _cards.length });
+  } catch {}
+
   updateSaveBtn();
 }
 
-async function processPDF(file) {
-  try {
-    const buf = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-    for (let pn = 1; pn <= pdf.numPages; pn++) {
+function showFileError(file, err) {
+  const errEl = document.createElement('div');
+  errEl.className = 'alert alert-danger mb-3';
+  errEl.innerHTML = `<i class="bi bi-exclamation-triangle me-1"></i>
+     อ่านไฟล์ <strong>${esc(file.name)}</strong> ไม่สำเร็จ: ${esc(err.message)}`;
+  document.getElementById('invoiceCards').appendChild(errEl);
+  errEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+async function processPage(pdf, buf, file, pn) {
       const page    = await pdf.getPage(pn);
 
       // Render page to canvas for visual preview
@@ -236,24 +270,18 @@ async function processPDF(file) {
         _totalPdfPages: pdf.numPages,
       });
       renderCard(parsed, ci, file.name, pn, pdf.numPages, pageImageUrl, parsed._scanned);
-    }
-  } catch (err) {
-    const errEl = document.createElement('div');
-    errEl.className = 'alert alert-danger mb-3';
-    errEl.innerHTML = `<i class="bi bi-exclamation-triangle me-1"></i>
-       อ่านไฟล์ <strong>${esc(file.name)}</strong> ไม่สำเร็จ: ${esc(err.message)}`;
-    document.getElementById('invoiceCards').appendChild(errEl);
-    errEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }
 }
 
 function setProgress(show, txt, current, total) {
   document.getElementById('progressWrap').classList.toggle('d-none', !show);
   if (!show) return;
   document.getElementById('progressText').textContent = txt || '';
-  document.getElementById('progressCounter').textContent = '';
   if (total) {
-    document.getElementById('progressBar').style.width = `${Math.round(current / total * 100)}%`;
+    const pct = Math.round(current / total * 100);
+    document.getElementById('progressCounter').textContent = `${current}/${total} (${pct}%)`;
+    document.getElementById('progressBar').style.width = `${pct}%`;
+  } else {
+    document.getElementById('progressCounter').textContent = '';
   }
 }
 

@@ -115,7 +115,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.111"></script><script src="db.js?v=1.0.111"></script><script src="auth.js?v=1.0.111"></script><script src="nav.js?v=1.0.111"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.112"></script><script src="db.js?v=1.0.112"></script><script src="auth.js?v=1.0.112"></script><script src="nav.js?v=1.0.112"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -141,6 +141,8 @@ const ACTION_ICONS = {
   'ลบผู้ใช้': 'bi-person-dash text-danger',
   'เปลี่ยนรหัสผ่าน': 'bi-key text-warning',
   'พิมพ์ใบกำกับ': 'bi-printer text-info',
+  'อ่านไฟล์ PDF (นำเข้า)': 'bi-file-earmark-pdf text-danger',
+  'นำเข้าใบกำกับจาก PDF': 'bi-file-earmark-arrow-up text-primary',
 };
 
 // Re-render when activity or login log syncs in from another device
@@ -238,7 +240,8 @@ function renderActivity() {
   window._detailLabel = window._detailLabel || function(k) {
     return ({ productId:'สินค้า', customerId:'ลูกค้า', userId:'ผู้ใช้', returnIds:'รายการคืน',
       product:'สินค้า', customer:'ลูกค้า', shippingMethod:'วิธีจัดส่ง', price:'ราคา/หน่วย',
-      tier:'ขั้นบันได', tierQty:'จำนวนขั้นบันได', tierPrice:'ราคาขั้นบันได', tierBasis:'นับจาก' })[k] || k;
+      tier:'ขั้นบันได', tierQty:'จำนวนขั้นบันได', tierPrice:'ราคาขั้นบันได', tierBasis:'นับจาก',
+      files:'จำนวนไฟล์', pages:'จำนวนหน้า', cards:'จำนวนการ์ด' })[k] || k;
   };
   window._detailVal = window._detailVal || function(k, v) {
     try {
