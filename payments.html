@@ -607,11 +607,20 @@
         <!-- Invoice allocation -->
         <div id="multiAllocSection" style="display:none">
           <hr>
-          <div class="d-flex align-items-center justify-content-between mb-2">
+          <div class="d-flex align-items-center justify-content-between mb-2 flex-wrap gap-2">
             <h6 class="fw-semibold mb-0"><i class="bi bi-layout-text-window-reverse me-1 text-primary"></i>กระจายยอดให้บิลที่ค้าง</h6>
-            <button class="btn btn-outline-primary btn-sm" onclick="autoFillMultiPay()">
-              <i class="bi bi-magic me-1"></i>เติมอัตโนมัติ
-            </button>
+            <div class="d-flex align-items-center gap-2">
+              <select id="multiAllocSort" class="form-select form-select-sm" style="width:auto" onchange="_sortMultiAllocs()">
+                <option value="date_asc">วันที่: เก่า→ใหม่</option>
+                <option value="date_desc">วันที่: ใหม่→เก่า</option>
+                <option value="due_desc">ค้างมาก→น้อย</option>
+                <option value="due_asc">ค้างน้อย→มาก</option>
+                <option value="inv_asc">เลขที่ใบกำกับ</option>
+              </select>
+              <button class="btn btn-outline-primary btn-sm flex-shrink-0" onclick="autoFillMultiPay()">
+                <i class="bi bi-magic me-1"></i>เติมอัตโนมัติ
+              </button>
+            </div>
           </div>
           <div class="list-group list-group-flush border rounded mb-3" id="multiAllocRows"></div>
           <div class="d-flex justify-content-between align-items-center bg-light rounded px-3 py-2">
@@ -641,7 +650,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.114"></script><script src="db.js?v=1.0.114"></script><script src="auth.js?v=1.0.114"></script><script src="nav.js?v=1.0.114"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.115"></script><script src="db.js?v=1.0.115"></script><script src="auth.js?v=1.0.115"></script><script src="nav.js?v=1.0.115"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -2350,11 +2359,12 @@ function openMultiPayModal() {
   const accounts = DB.getTransferAccounts();
   const acctOpts = '<option value="">— เลือกบัญชี —</option>' +
     accounts.map((a, i) =>
-      `<option value="${i}">${esc(a.name)}${a.bank ? ' · ' + esc(a.bank) : ''}${a.accountNo ? ' · ' + esc(a.accountNo) : ''}</option>`
+      `<option value="${i}">${a.bank ? esc(a.bank) + ' · ' : ''}${esc(a.name)}${a.accountNo ? ' · ' + esc(a.accountNo) : ''}</option>`
     ).join('');
   document.getElementById('multiTransferAcct').innerHTML = acctOpts;
   document.getElementById('multiChequeAcct').innerHTML   = acctOpts;
 
+  const _ss = document.getElementById('multiAllocSort'); if (_ss) _ss.value = 'date_asc';
   switchMultiTab('transfer');
   document.getElementById('multiAllocSection').style.display = 'none';
   document.getElementById('multiAllocRows').innerHTML = '';
@@ -2505,23 +2515,47 @@ function autoFillMultiPay() {
   updateMultiSummary();
 }
 
+function _multiRowCls(inv) {
+  return inv.alloc >= inv.due
+    ? 'list-group-item d-flex align-items-center gap-2 py-2 px-3 bg-success bg-opacity-10'
+    : 'list-group-item d-flex align-items-center gap-2 py-2 px-3';
+}
+function _multiBadgeHtml(inv) {
+  const a = inv.alloc;
+  if (a <= 0)            return '<span class="badge bg-secondary">ยังไม่กระจาย</span>';
+  if (a >= inv.due)      return '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>ครบ</span>';
+  return `<span class="badge bg-warning text-dark">ค้าง ฿${Utils.formatNumber(inv.due - a)}</span>`;
+}
+
+// On input we must NOT rebuild the whole list — that recreates the <input> and
+// drops focus after a single digit (the "can only type 1 digit / scrolls up"
+// bug). Update the model + this row's class/badge + the summary in place.
 function onMultiAllocChange(i) {
   _multiAllocs[i].alloc = parseFloat(document.getElementById('multiAlloc_' + i)?.value) || 0;
-  renderMultiAllocRows();
+  const rowEl   = document.getElementById('multiAllocRow_' + i);
+  const badgeEl = document.getElementById('multiAllocBadge_' + i);
+  if (rowEl)   rowEl.className   = _multiRowCls(_multiAllocs[i]);
+  if (badgeEl) badgeEl.innerHTML = _multiBadgeHtml(_multiAllocs[i]);
   updateMultiSummary();
+}
+
+const _MULTI_SORTERS = {
+  date_asc:  (a, b) => new Date(a.date) - new Date(b.date),
+  date_desc: (a, b) => new Date(b.date) - new Date(a.date),
+  due_desc:  (a, b) => b.due - a.due,
+  due_asc:   (a, b) => a.due - b.due,
+  inv_asc:   (a, b) => String(a.invNum).localeCompare(String(b.invNum), 'th', { numeric: true }),
+};
+function _sortMultiAllocs() {
+  const key = document.getElementById('multiAllocSort')?.value || 'date_asc';
+  _multiAllocs.sort(_MULTI_SORTERS[key] || _MULTI_SORTERS.date_asc);
+  renderMultiAllocRows();
 }
 
 function renderMultiAllocRows() {
   document.getElementById('multiAllocRows').innerHTML = _multiAllocs.map((inv, i) => {
     const a = inv.alloc;
-    const rowCls = a >= inv.due
-      ? 'list-group-item d-flex align-items-center gap-2 py-2 px-3 bg-success bg-opacity-10'
-      : 'list-group-item d-flex align-items-center gap-2 py-2 px-3';
-    let badge = '';
-    if (a <= 0)            badge = '<span class="badge bg-secondary">ยังไม่กระจาย</span>';
-    else if (a >= inv.due) badge = '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>ครบ</span>';
-    else                   badge = `<span class="badge bg-warning text-dark">ค้าง ฿${Utils.formatNumber(inv.due - a)}</span>`;
-    return `<div class="${rowCls}">
+    return `<div class="${_multiRowCls(inv)}" id="multiAllocRow_${i}">
       <div class="flex-grow-1">
         <div class="fw-semibold small">${esc(inv.invNum)}</div>
         <div class="text-muted" style="font-size:11px">${Utils.formatDateTH(inv.date)} · ค้าง <strong>฿${Utils.formatNumber(inv.due)}</strong></div>
@@ -2531,7 +2565,7 @@ function renderMultiAllocRows() {
         <input type="number" id="multiAlloc_${i}" class="form-control" min="0" step="0.01" placeholder="0.00"
                value="${a > 0 ? a.toFixed(2) : ''}" oninput="onMultiAllocChange(${i})">
       </div>
-      <div style="min-width:90px;text-align:right">${badge}</div>
+      <div style="min-width:90px;text-align:right" id="multiAllocBadge_${i}">${_multiBadgeHtml(inv)}</div>
     </div>`;
   }).join('') || '<div class="list-group-item text-muted text-center small py-2">ไม่มีบิลค้างชำระ</div>';
 }
