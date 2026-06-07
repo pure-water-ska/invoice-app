@@ -761,6 +761,76 @@ var Sync = {
         }
       }
     });
+
+    // Warn before refresh/close while an upload is still in flight — the
+    // same-device "payment reverts after refresh" guard. Also paints the bar.
+    window.addEventListener('beforeunload', (e) => {
+      if (this.isUploading()) { e.preventDefault(); e.returnValue = ''; return ''; }
+    });
+    this._initUploadBar();
+  },
+
+  // ── Upload progress / busy state ────────────────────────────────────────────
+  // "Busy" = any debounced collection/doc write pending, any in-flight commit,
+  // or any queued (offline) write. Used by the upload bar + beforeunload guard.
+  _uploadBusyCount() {
+    let n = 0;
+    for (const k in this._pendingWrite) if (this._pendingWrite[k]) n++;
+    for (const k in this._pushDebounce)  if (this._pushDebounce[k] != null) n++;
+    for (const k in this._docDebounce)   if (this._docDebounce[k] != null) n++;
+    try { n += this._getQueue().length; } catch {}
+    return n;
+  },
+  isUploading() { return this._uploadBusyCount() > 0; },
+  _emitUploadState() {
+    try {
+      window.dispatchEvent(new CustomEvent('sync:uploadstate',
+        { detail: { busy: this.isUploading(), count: this._uploadBusyCount() } }));
+    } catch {}
+  },
+  _initUploadBar() {
+    if (this._uploadBarInit) return; this._uploadBarInit = true;
+    if (!document.getElementById('wtUploadBarCss')) {
+      const st = document.createElement('style'); st.id = 'wtUploadBarCss';
+      st.textContent = '@keyframes wtspin{to{transform:rotate(360deg)}}';
+      (document.head || document.documentElement).appendChild(st);
+    }
+    let hideTimer = null;
+    const onState = (e) => {
+      let bar = document.getElementById('wtUploadBar');
+      if (!bar) {
+        if (!document.body) return;
+        bar = document.createElement('div');
+        bar.id = 'wtUploadBar';
+        bar.style.cssText = 'position:fixed;left:0;right:0;z-index:1100;display:none;' +
+          'align-items:center;gap:10px;padding:8px 16px;font-size:14px;' +
+          'box-shadow:0 2px 6px rgba(0,0,0,.12);font-family:Sarabun,sans-serif';
+        document.body.appendChild(bar);
+      }
+      const nav = document.querySelector('.navbar');
+      bar.style.top = ((nav ? nav.offsetHeight : 52)) + 'px';
+      const busy  = e.detail && e.detail.busy;
+      const count = (e.detail && e.detail.count) || 0;
+      if (busy) {
+        if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+        bar.style.display = 'flex';
+        bar.style.background = '#fff3cd'; bar.style.color = '#664d03';
+        bar.style.borderBottom = '1px solid #ffe69c';
+        bar.innerHTML =
+          '<span style="width:16px;height:16px;border:2px solid #664d03;border-right-color:transparent;border-radius:50%;display:inline-block;animation:wtspin .7s linear infinite"></span>' +
+          '<span><strong>กำลังอัปโหลดข้อมูล…</strong> อย่าเพิ่งปิดหรือรีเฟรชหน้านี้' +
+          (count > 1 ? ' <span style="opacity:.7">(เหลือ ' + count + ' รายการ)</span>' : '') + '</span>';
+      } else if (bar.style.display === 'flex') {
+        // Flash "done" then auto-hide — only when the bar was actually showing.
+        bar.style.background = '#d1e7dd'; bar.style.color = '#0f5132';
+        bar.style.borderBottom = '1px solid #badbcc';
+        bar.innerHTML = '<i class="bi bi-check-circle-fill me-1"></i><strong>อัปโหลดข้อมูลครบแล้ว</strong> — ทำงานต่อได้เลย';
+        if (hideTimer) clearTimeout(hideTimer);
+        hideTimer = setTimeout(() => { bar.style.display = 'none'; }, 2500);
+      }
+    };
+    window.addEventListener('sync:uploadstate', onState);
+    this._emitUploadState();
   },
 
   // ── Called by db._set() ────────────────────────────────────────────────────
@@ -814,18 +884,20 @@ var Sync = {
       // still carry pre-write Firestore data (e.g. a snapshot showing a payment
       // as uncancelled that was queued before our cancel but delivered later).
       this._pendingWrite[key] = true;
+      this._emitUploadState();
       this._pushDebounce[key] = setTimeout(() => {
         // Clear the timer ID now so beforeunload won't re-enqueue already-written data.
         this._pushDebounce[key] = null;
         // Read fresh value from DB cache at fire time (not the stale closure val)
         const fresh = (typeof DB !== 'undefined') ? DB._cache[key] ?? val : val;
         this._writeKey(key, fresh)
-          .then(() => { this._pendingWrite[key] = false; })
+          .then(() => { this._pendingWrite[key] = false; this._emitUploadState(); })
           .catch(e => {
             this._pendingWrite[key] = false;
             console.warn('[Sync] push failed, queuing:', key, e.message);
             this._enqueue(key, fresh);
             this._badge('pending');
+            this._emitUploadState();
           });
       }, 600);
       return;
@@ -845,16 +917,19 @@ var Sync = {
       const freshJson = JSON.stringify(fresh);
       if (freshJson === this._lastDocJson[key]) {
         console.log('[Sync] Doc unchanged, skip write:', this.DOCUMENTS[key]);
+        this._emitUploadState();
         return;
       }
       this._writeKey(key, fresh)
-        .then(() => { this._lastDocJson[key] = freshJson; })
+        .then(() => { this._lastDocJson[key] = freshJson; this._emitUploadState(); })
         .catch(e => {
           console.warn('[Sync] push failed, queuing:', key, e.message);
           this._enqueue(key, fresh);
           this._badge('pending');
+          this._emitUploadState();
         });
     }, 600);
+    this._emitUploadState();
   },
 
   // ── Write one key to Firestore ─────────────────────────────────────────────
@@ -1751,6 +1826,7 @@ var Sync = {
     if (i >= 0) q[i] = entry; else q.push(entry);
     try { localStorage.setItem(this._pendingLsKey, JSON.stringify(q)); } catch {}
     this._badge('pending');
+    this._emitUploadState();
     // Register a Background Sync tag so the SW can wake the page (or prompt a
     // background flush) when connectivity resumes — even if the tab is backgrounded.
     // Falls back gracefully: browsers without SyncManager (Safari, Firefox) rely on
@@ -1786,6 +1862,7 @@ var Sync = {
       }
     }
     localStorage.removeItem(this._pendingLsKey);
+    this._emitUploadState();
     console.log('[Sync] Pre-flush done ✓');
   },
 
@@ -1804,6 +1881,7 @@ var Sync = {
     }
     localStorage.removeItem(this._pendingLsKey);
     this._badge('online');
+    this._emitUploadState();
     console.log('[Sync] Queue flushed ✓');
   },
 
