@@ -650,7 +650,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.115"></script><script src="db.js?v=1.0.115"></script><script src="auth.js?v=1.0.115"></script><script src="nav.js?v=1.0.115"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.116"></script><script src="db.js?v=1.0.116"></script><script src="auth.js?v=1.0.116"></script><script src="nav.js?v=1.0.116"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -1377,6 +1377,11 @@ function _payDetailHtml(p) {
   add('หมายเหตุ',          p.notes);
   add('บันทึกโดย',         p.createdBy || p.createdByUser);
   add('บันทึกเมื่อ',       p.createdAt ? Utils.formatDateTimeTH(p.createdAt) : '');
+  if (p.batchId) {
+    add('ชำระพร้อมกัน',     (p.batchCount || (p.batchInvoices || []).length) + ' บิล');
+    add('บิลในกลุ่มนี้',    (p.batchInvoices || []).join(', '));
+    if (p.batchTotal != null) add('ยอดรวมทั้งกลุ่ม', '฿' + Utils.formatNumber(p.batchTotal));
+  }
   if (p.cancelled) {
     add('สถานะ', 'ยกเลิกแล้ว');
     add('เหตุผลยกเลิก', p.cancelNote);
@@ -1487,6 +1492,7 @@ function renderExistingPayments(invNum) {
           <div>
             ${isCancelled ? `<span class="badge bg-danger me-1"><i class="bi bi-x-circle me-1"></i>ยกเลิกแล้ว</span>` : ''}
             <span class="badge bg-primary me-1">${p.method}</span>
+            ${p.batchId ? `<span class="badge bg-info text-dark me-1" title="ชำระพร้อมกัน ${p.batchCount || (p.batchInvoices||[]).length} บิล"><i class="bi bi-collection me-1"></i>กลุ่ม ${p.batchCount || (p.batchInvoices||[]).length} บิล</span>` : ''}
             <strong class="${isCancelled ? 'text-decoration-line-through text-muted' : ''}">
               ฿${Utils.formatNumber(p.amount)}
             </strong>
@@ -2602,6 +2608,10 @@ async function saveMultiPay() {
   const now    = new Date().toISOString();
   const todayISO = Utils.todayInputValue();
 
+  // Shared batch info so each payment can show which invoices were paid together.
+  const batchId       = 'mp_' + Date.now();
+  const batchInvoices = allocations.map(a => a.invNum);
+
   let transferDate = '';
   if (_multiCurTab === 'transfer') {
     const iso = Utils.parseBEToISO(document.getElementById('multiTransferDate').value);
@@ -2646,9 +2656,13 @@ async function saveMultiPay() {
       createdAt:     now,
       createdBy:     session.name,
       createdByUser: session.username,
+      batchId,
+      batchInvoices,
+      batchTotal:    slip,
+      batchCount:    allocations.length,
     });
     DB.logActivity(session.userId, session.username, 'ชำระหลายบิล',
-      { invoiceNumber: inv.invNum, method, amount: inv.alloc });
+      { invoiceNumber: inv.invNum, method, amount: inv.alloc, batchInvoices: batchInvoices.join(', ') });
   }
 
   if (btnSave) { btnSave.disabled = false; btnSave.innerHTML = '<i class="bi bi-check-circle me-1"></i>บันทึกทุกบิล'; }
