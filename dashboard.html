@@ -186,7 +186,7 @@
 </div>
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
-<script src="utils.js?v=1.0.121"></script><script src="db.js?v=1.0.121"></script><script src="auth.js?v=1.0.121"></script><script src="nav.js?v=1.0.121"></script>
+<script src="utils.js?v=1.0.122"></script><script src="db.js?v=1.0.122"></script><script src="auth.js?v=1.0.122"></script><script src="nav.js?v=1.0.122"></script>
 <script>
 // Tauri: unregister stale service workers (old SW could serve pre-fix JS files)
 if (window.IS_TAURI && 'serviceWorker' in navigator) {
@@ -262,6 +262,14 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('adminLabelBar').classList.remove('d-none');
   }
   DB.ready.then(() => load());
+});
+
+// Re-render once Firestore data arrives. load() runs on DB.ready (before the
+// async Firestore pull finishes), so payments may not be present yet → the paid
+// count would stay 0. Re-run when the pull completes or payments/invoices sync in.
+window.addEventListener('sync:pulled', () => load());
+window.addEventListener('sync:updated', (e) => {
+  if (['wt_payments', 'wt_invoices'].includes(e.detail && e.detail.key)) load();
 });
 
 function openLabelModal() {
