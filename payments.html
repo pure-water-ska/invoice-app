@@ -641,7 +641,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.112"></script><script src="db.js?v=1.0.112"></script><script src="auth.js?v=1.0.112"></script><script src="nav.js?v=1.0.112"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.113"></script><script src="db.js?v=1.0.113"></script><script src="auth.js?v=1.0.113"></script><script src="nav.js?v=1.0.113"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -1349,6 +1349,43 @@ function openLightboxSrc(src) {
   }
 }
 
+// Full detail block — lists EVERY stored field for a payment so nothing is hidden,
+// regardless of payment method. Shown in a collapsible section per row.
+function _payDetailHtml(p) {
+  const rows = [];
+  const add = (label, val) => { if (val !== undefined && val !== null && val !== '') rows.push([label, val]); };
+  add('วันที่ชำระ',        p.payDate ? Utils.formatDateTH(p.payDate) : '');
+  add('วิธีชำระ',          p.method);
+  add('จำนวนเงิน',         '฿' + Utils.formatNumber(p.amount));
+  add('ผู้รับ/ผู้เก็บเงิน', p.cashCollector);
+  add('ธนาคารต้นทาง',      p.sourceBank ? Utils.getBankName(p.sourceBank) : '');
+  add('ธนาคารปลายทาง',     p.destBank ? Utils.getBankName(p.destBank) : '');
+  add('ชื่อบัญชีรับเงิน',  p.accountName);
+  add('วันเวลาที่โอน',     p.transferDate ? Utils.formatDateTimeTH(p.transferDate) : '');
+  add('เลขที่เช็ค',        p.chequeNo);
+  add('ธนาคารเช็ค',        p.chequeBank ? Utils.getBankName(p.chequeBank) : '');
+  add('วันที่บนเช็ค',      p.chequeDate ? Utils.formatDateTH(p.chequeDate) : '');
+  add('หมายเหตุ',          p.notes);
+  add('บันทึกโดย',         p.createdBy || p.createdByUser);
+  add('บันทึกเมื่อ',       p.createdAt ? Utils.formatDateTimeTH(p.createdAt) : '');
+  if (p.cancelled) {
+    add('สถานะ', 'ยกเลิกแล้ว');
+    add('เหตุผลยกเลิก', p.cancelNote);
+    add('ยกเลิกโดย', p.cancelledBy);
+    add('ยกเลิกเมื่อ', p.cancelledAt ? Utils.formatDateTimeTH(p.cancelledAt) : '');
+  }
+  return `<div class="collapse mt-2" id="paydetail_${p.id}">
+    <div class="card card-body p-2 border-0 bg-light">
+      <div class="fw-semibold small mb-1"><i class="bi bi-list-ul me-1 text-primary"></i>รายละเอียดทั้งหมด</div>
+      <table class="table table-sm mb-0" style="font-size:12px">
+        <tbody>${rows.map(([k, v]) =>
+          `<tr><td class="text-muted" style="width:42%">${esc(k)}</td><td class="fw-semibold">${esc(String(v))}</td></tr>`
+        ).join('')}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
 // ── Existing payments render ──────────────────────────────────────────────────
 function renderExistingPayments(invNum) {
   const payments = DB.getPaymentsByInvoice(invNum);
@@ -1454,6 +1491,10 @@ function renderExistingPayments(invNum) {
               ? `<div class="text-muted small">ยกเลิกโดย: ${p.cancelledBy || '-'} เมื่อ ${Utils.formatDateTimeTH(p.cancelledAt)}</div>` : ''}
           </div>
           <div class="d-flex gap-1 align-items-center flex-wrap">
+            <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse"
+                    data-bs-target="#paydetail_${p.id}" title="ดูรายละเอียดทั้งหมด">
+              <i class="bi bi-eye me-1"></i>ดู
+            </button>
             ${!isCancelled ? `
               <button class="btn btn-sm btn-outline-primary"
                       onclick="openImageUpdateModal('${p.id}','${invNum}')" title="เพิ่ม/เปลี่ยนรูป">
@@ -1476,6 +1517,7 @@ function renderExistingPayments(invNum) {
           </div>
         </div>
         ${imgs ? `<div class="d-flex gap-2 mt-1 flex-wrap">${imgs}</div>` : ''}
+        ${_payDetailHtml(p)}
         ${timelineHtml}
         ${savingTimeLine}
       </div>`;
