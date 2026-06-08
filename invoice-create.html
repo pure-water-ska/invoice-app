@@ -159,7 +159,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.124"></script><script src="db.js?v=1.0.124"></script><script src="auth.js?v=1.0.124"></script><script src="nav.js?v=1.0.124"></script><script src="idb.js?v=1.0.124"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.125"></script><script src="db.js?v=1.0.125"></script><script src="auth.js?v=1.0.125"></script><script src="nav.js?v=1.0.125"></script><script src="idb.js?v=1.0.125"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -619,6 +619,8 @@ async function doPrint() {
     DB.updateInvoice(p.id, { printCount: (p.printCount||0) + 1, printHistory: history });
   });
   DB.logActivity(session.userId, session.username, 'พิมพ์ใบกำกับ', { invoiceNumber: currentInvNum, reprintCount });
+  // Commit the updated print count to Firestore immediately; upload bar shows progress.
+  try { if (window.Sync && typeof Sync.flushNow === 'function') Sync.flushNow(); } catch (e) {}
 
   const cfg        = DB.getSettings();
   const cust       = DB.getCustomers().find(c => c.id === pages[0].customerId);
@@ -1360,6 +1362,10 @@ async function saveInvoice(shouldPrint = false) {
     setTimeout(retryPush, 5000);
   }
 
+  // Commit the new invoice to Firestore immediately (not after the 600 ms debounce)
+  // so it's uploaded before we navigate away; the upload bar shows progress.
+  try { if (window.Sync && typeof Sync.flushNow === 'function') Sync.flushNow(); } catch (e) {}
+
   Utils.showAlert('<i class="bi bi-hourglass-split me-1"></i>กำลังสร้าง PDF...', 'info');
   await PdfGen.run(_pdfBody, _fn, invNumber);
   // Mark PDF as fresh so doPrint() can skip regeneration
@@ -1609,6 +1615,8 @@ async function saveInvoiceEdit(shouldPrint = false) {
     });
   });
   const _eFn = PdfGen.sanitize(_eCust ? _eCust.name : 'unknown') + '_' + PdfGen.sanitize(currentInvNum) + '.pdf';
+  // Commit edits to Firestore immediately before navigating; upload bar shows progress.
+  try { if (window.Sync && typeof Sync.flushNow === 'function') Sync.flushNow(); } catch (e) {}
   Utils.showAlert('<i class="bi bi-hourglass-split me-1"></i>กำลังสร้าง PDF...', 'info');
   await PdfGen.run(_ePdfBody, _eFn);
   try { sessionStorage.setItem('freshPdf', JSON.stringify({ inv: currentInvNum, file: _eFn })); } catch(e) {}

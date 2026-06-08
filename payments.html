@@ -650,7 +650,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.124"></script><script src="db.js?v=1.0.124"></script><script src="auth.js?v=1.0.124"></script><script src="nav.js?v=1.0.124"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.125"></script><script src="db.js?v=1.0.125"></script><script src="auth.js?v=1.0.125"></script><script src="nav.js?v=1.0.125"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -674,6 +674,13 @@ function clearFilters() {
     if (el._flatpickr) el._flatpickr.clear();
   });
   render();
+}
+
+// Force pending Firestore writes to commit NOW (not after the 600 ms debounce) so
+// an explicit Save/Print is uploaded immediately; the upload bar shows progress
+// until it's done. Fire-and-forget — the bar (Sync._initUploadBar) handles the UI.
+function _commitNow() {
+  try { if (window.Sync && typeof Sync.flushNow === 'function') Sync.flushNow(); } catch (e) {}
 }
 
 function esc(s) {
@@ -1688,6 +1695,7 @@ function confirmCancelPayment() {
   cancelPayModal.hide();
   refreshSummary(invNum);
   render();
+  _commitNow();
 }
 
 async function deletePayment(payId, invNum) {
@@ -1697,6 +1705,7 @@ async function deletePayment(payId, invNum) {
   DB.logActivity(session.userId, session.username, 'ลบรายการชำระ', { invoiceNumber: invNum });
   refreshSummary(invNum);
   render();
+  _commitNow();
 }
 
 function refreshSummary(invNum) {
@@ -1918,6 +1927,7 @@ async function doSaveAllPayments(payments) {
   }
   _pendingPayments = [];
   payModal.hide();
+  _commitNow();   // commit to Firestore immediately + show the upload bar until done
 
   const diff   = newPaid - total;
   if (Math.abs(diff) > 0.01) {
@@ -2679,6 +2689,7 @@ async function saveMultiPay() {
 
   if (btnSave) { btnSave.disabled = false; btnSave.innerHTML = '<i class="bi bi-check-circle me-1"></i>บันทึกทุกบิล'; }
   multiPayModal.hide();
+  _commitNow();
   Utils.showAlert(`บันทึกชำระ ${allocations.length} บิลสำเร็จ`, 'success');
   render();
 }
