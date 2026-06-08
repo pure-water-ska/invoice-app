@@ -139,24 +139,35 @@ const Auth = {
         }
       } catch(e) { console.warn('[Auth] auto restore point failed:', e.message); }
     }
-    // Normal logout — no pending restore point needed on next login
-    try { localStorage.removeItem('wt_restore_pending'); } catch {}
-    sessionStorage.removeItem(this.KEY);
-    // Clear the sync session guard so the login page always does a fresh _pullAll()
-    // and picks up any users added on another device while this session was active.
-    sessionStorage.removeItem('wt_sync_session_pulled');
-    // Invalidate the users_cfg delta timestamp so _pullAll() never skips fetching
-    // wt_users on the next load — stale timestamps would cause the delta optimisation
-    // to think the document is unchanged even when another device added a new user.
-    try {
-      var _docTs = JSON.parse(localStorage.getItem('wt_sync_doc_ts') || '{}');
-      delete _docTs['users_cfg'];
-      localStorage.setItem('wt_sync_doc_ts', JSON.stringify(_docTs));
-    } catch {}
-    sessionStorage.removeItem('mustChangePw');
-    // Sign out of Firebase Auth if available (not loaded in Tauri — auth-compat skipped)
-    try { if (window.firebase && firebase.apps.length && typeof firebase.auth === 'function') firebase.auth().signOut(); } catch {}
-    window.location.href = 'index.html';
+    // Finish clearing session + navigate. Deferred until pending uploads flush so
+    // a just-recorded payment isn't lost when the next login does a fresh full pull.
+    const finish = () => {
+      // Normal logout — no pending restore point needed on next login
+      try { localStorage.removeItem('wt_restore_pending'); } catch {}
+      sessionStorage.removeItem(this.KEY);
+      // Clear the sync session guard so the login page always does a fresh _pullAll()
+      // and picks up any users added on another device while this session was active.
+      sessionStorage.removeItem('wt_sync_session_pulled');
+      // Invalidate the users_cfg delta timestamp so _pullAll() never skips fetching
+      // wt_users on the next load — stale timestamps would cause the delta optimisation
+      // to think the document is unchanged even when another device added a new user.
+      try {
+        var _docTs = JSON.parse(localStorage.getItem('wt_sync_doc_ts') || '{}');
+        delete _docTs['users_cfg'];
+        localStorage.setItem('wt_sync_doc_ts', JSON.stringify(_docTs));
+      } catch {}
+      sessionStorage.removeItem('mustChangePw');
+      // Sign out of Firebase Auth if available (not loaded in Tauri — auth-compat skipped)
+      try { if (window.firebase && firebase.apps.length && typeof firebase.auth === 'function') firebase.auth().signOut(); } catch {}
+      window.location.href = 'index.html';
+    };
+    // Flush pending Firestore uploads BEFORE clearing the session guard / navigating.
+    // flushNow() is time-boxed so logout can never hang.
+    if (window.Sync && typeof Sync.flushNow === 'function') {
+      Sync.flushNow().then(finish, finish);
+    } else {
+      finish();
+    }
   },
 
   session() {

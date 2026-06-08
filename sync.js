@@ -1885,6 +1885,39 @@ var Sync = {
     console.log('[Sync] Queue flushed ✓');
   },
 
+  // Force every pending debounced write to commit NOW and wait for it, then drain
+  // the offline queue. Called by Auth.logout() so a just-recorded payment can't be
+  // lost when the next login does a fresh full pull. Time-boxed so it never hangs
+  // logout — anything not committed in time is enqueued (and flushed next login).
+  async flushNow() {
+    const writes = [];
+    const grab = (key) => (typeof DB !== 'undefined' && DB._cache[key] !== undefined) ? DB._cache[key] : null;
+    for (const key of Object.keys(this._pushDebounce)) {
+      if (this._pushDebounce[key] != null) {
+        clearTimeout(this._pushDebounce[key]); this._pushDebounce[key] = null;
+        const fresh = grab(key);
+        if (fresh != null) {
+          this._pendingWrite[key] = true;
+          writes.push(this._writeKey(key, fresh)
+            .then(() => { this._pendingWrite[key] = false; })
+            .catch(() => { this._pendingWrite[key] = false; this._enqueue(key, fresh); }));
+        }
+      }
+    }
+    for (const key of Object.keys(this._docDebounce)) {
+      if (this._docDebounce[key] != null) {
+        clearTimeout(this._docDebounce[key]); this._docDebounce[key] = null;
+        const fresh = grab(key);
+        if (fresh != null) writes.push(this._writeKey(key, fresh).catch(() => this._enqueue(key, fresh)));
+      }
+    }
+    this._emitUploadState();
+    const timeout = (ms) => new Promise(r => setTimeout(r, ms));
+    try { await Promise.race([Promise.all(writes), timeout(8000)]); } catch {}
+    try { if (this.ready && this._online) await Promise.race([this._flushQueue(), timeout(5000)]); } catch {}
+    this._emitUploadState();
+  },
+
   // ── Helpers ────────────────────────────────────────────────────────────────
   _orgRef() {
     return this._db.collection('orgs').doc(this._orgId);
