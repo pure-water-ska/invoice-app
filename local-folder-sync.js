@@ -141,6 +141,24 @@ if (!window.LocalFolderSync) {
           } else {
             // Handle exists but permission lapsed — show "⚠ ต้องการสิทธิ์" with folder name
             window.dispatchEvent(new CustomEvent('localfolder:permissionlost'));
+            // The File System Access API resets permission to "prompt" on every
+            // app/browser restart and re-granting REQUIRES a user gesture — it
+            // cannot be done silently on page load. So auto re-request on the very
+            // first user interaction, so the user doesn't have to find the
+            // "เชื่อมต่อใหม่" button in settings each time they reopen the app.
+            var _autoGrant = async function () {
+              window.removeEventListener('pointerdown', _autoGrant, true);
+              window.removeEventListener('keydown', _autoGrant, true);
+              if (_handle && !_permOk) {
+                _permOk = await _requestPerm(_handle);
+                if (_permOk) {
+                  window.dispatchEvent(new CustomEvent('localfolder:connected', { detail: { name: _handle.name } }));
+                  try { await pub.writeAll(); } catch (e) {}
+                }
+              }
+            };
+            window.addEventListener('pointerdown', _autoGrant, true);
+            window.addEventListener('keydown', _autoGrant, true);
           }
         }
 

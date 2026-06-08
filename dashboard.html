@@ -186,7 +186,7 @@
 </div>
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
-<script src="utils.js?v=1.0.122"></script><script src="db.js?v=1.0.122"></script><script src="auth.js?v=1.0.122"></script><script src="nav.js?v=1.0.122"></script>
+<script src="utils.js?v=1.0.123"></script><script src="db.js?v=1.0.123"></script><script src="auth.js?v=1.0.123"></script><script src="nav.js?v=1.0.123"></script>
 <script>
 // Tauri: unregister stale service workers (old SW could serve pre-fix JS files)
 if (window.IS_TAURI && 'serviceWorker' in navigator) {
@@ -210,9 +210,14 @@ async function checkSetupBanner() {
     const canAct = Auth.isAdmin() || Auth.can('invoice_create') || Auth.can('invoice_print') || Auth.can('export_backup');
     if (!canAct) return;
     const missing = [];
-    // Check local folder sync
-    const lfs = window.LocalFolderSync ? LocalFolderSync.getStatus() : { connected: false, needsPermission: false, folderName: null };
-    if (!lfs.connected && !lfs.needsPermission) missing.push('Local folder sync');
+    // Check local folder sync by reading the SAVED HANDLE directly from IDB —
+    // NOT LocalFolderSync.getStatus(). getStatus() depends on init() having
+    // already loaded the handle, but this banner runs on a fixed 1.5 s timer that
+    // can fire first → it would report "not connected" even though a folder is
+    // saved (and even when it's only waiting for a permission re-grant after a
+    // restart). A saved handle = configured, exactly like the PDF check below.
+    const lfHandle = (typeof IDB !== 'undefined') ? await IDB.get('local_folder_handle').catch(() => null) : null;
+    if (!lfHandle) missing.push('Local folder sync');
     // Check PDF save folder
     // Bare IDB — window.IDB is always undefined (idb.js declares `const IDB`),
     // so the old check reported "PDF folder not set" even when it WAS set.
