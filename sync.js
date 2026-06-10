@@ -988,46 +988,12 @@ var Sync = {
       // Writing to localStorage here (synchronously) means the tombstones
       // survive even if the user navigates away immediately afterward.
       //
-      // Tombstone state is captured BEFORE we add any inferred ones below, so
-      // `preStones` reflects only EXPLICIT deletions (recorded by push()'s
-      // consecutive-push diff when the user actually deleted a record).
       const preStones = this._getTombstones(colName);
       const stoneNow  = Date.now();
       const knownServerIds = this._serverIds[colName];
       let syncDeletedIds = [];
       if (knownServerIds && knownServerIds.size > 0) {
-        const candidates = [...knownServerIds].filter(id => !localIds.has(id));
-        const explicitSet = new Set(candidates.filter(id =>
-          preStones[id] && stoneNow - preStones[id] <= this._tombstoneTTL));
-        const inferred = candidates.filter(id => !explicitSet.has(id));
-
-        // ── MASS-DELETE GUARD ────────────────────────────────────────────────
-        // "server has the id, local doesn't" is only a safe deletion signal when
-        // local data is COMPLETE. If this device's local array is incomplete
-        // (interrupted pull, cold cache, flaky connection), the set-difference
-        // wipes every record this device merely doesn't have — observed in the
-        // field as "deleting 79 of 95 payments on every save", flipping invoices
-        // paid→unpaid on all devices. Real user deletions are explicitly
-        // tombstoned (push() diff) or are few. So: tombstoned ids always pass;
-        // untombstoned inferred deletions are blocked when they exceed a small
-        // sanity threshold, and logged for diagnosis.
-        const MAX_INFERRED_DELETES = 5;
-        if (inferred.length > MAX_INFERRED_DELETES) {
-          try {
-            if (typeof DB !== 'undefined' && DB.logError) {
-              DB.logError('SYNC-DEL-BLOCKED',
-                `${colName}: blocked ${inferred.length} inferred deletion(s) — local data likely incomplete ` +
-                `(local=${localIds.size}, serverKnown=${knownServerIds.size}). ` +
-                `Sample: [${inferred.slice(0, 8).join(', ')}]`);
-            }
-          } catch {}
-          syncDeletedIds = [...explicitSet];
-        } else {
-          syncDeletedIds = candidates;
-        }
-        if (syncDeletedIds.length > 0) {
-          this._addTombstones(colName, syncDeletedIds);
-        }
+        syncDeletedIds = [...knownServerIds].filter(id => !localIds.has(id));
       }
 
       // ── Belt-and-suspenders: flush active tombstones even if _serverIds is empty ──
@@ -1036,12 +1002,42 @@ var Sync = {
       // calls _flushQueueNow() BEFORE _pullAll(), so _serverIds is not populated yet.
       // Without this, syncDeletedIds stays empty and the record is never deleted from
       // Firestore — the tombstone blocks it for 5 min, then it silently comes back.
-      // Tombstones ARE persisted to localStorage (in push()), so they survive page loads.
-      // Uses preStones (captured above) so blocked inferred ids can't sneak back in.
       for (const [id, ts] of Object.entries(preStones)) {
         if (stoneNow - ts <= this._tombstoneTTL && !localIds.has(id) && !syncDeletedIds.includes(id)) {
           syncDeletedIds.push(id);
         }
+      }
+
+      // ── MASS-DELETE GUARD (applies to EVERYTHING, tombstoned or not) ────────
+      // "server has the id, local doesn't" is only a safe deletion signal when
+      // local data is COMPLETE. If this device's local array is incomplete
+      // (interrupted pull, cold cache, flaky connection), the set-difference
+      // wipes every record this device merely doesn't have — observed in the
+      // field as "deleting 79 of 95 payments on every save", flipping invoices
+      // paid→unpaid on all devices.
+      //
+      // IMPORTANT: tombstones CANNOT be used to whitelist deletions here — each
+      // mass-delete pass tombstoned its own inferred ids (and refreshed them on
+      // every save, TTL 30 min), so a "tombstoned = explicit" exemption let the
+      // very same 79-record wipe straight through (observed on v1.0.129).
+      // Real user deletions are 1–2 records (multi-page invoice deletes are a
+      // handful); anything above the threshold is treated as pathological:
+      // blocked, logged, and its tombstones CLEARED so the poisoned stones can't
+      // re-enter via the belt-and-suspenders loop on the next write.
+      const MAX_DELETES_PER_WRITE = 5;
+      if (syncDeletedIds.length > MAX_DELETES_PER_WRITE) {
+        try {
+          if (typeof DB !== 'undefined' && DB.logError) {
+            DB.logError('SYNC-DEL-BLOCKED',
+              `${colName}: blocked ${syncDeletedIds.length} deletion(s) — local data likely incomplete ` +
+              `(local=${localIds.size}, serverKnown=${knownServerIds ? knownServerIds.size : 0}). ` +
+              `Sample: [${syncDeletedIds.slice(0, 8).join(', ')}]`);
+          }
+        } catch {}
+        this._clearTombstones(colName, syncDeletedIds);  // disinfect poisoned stones
+        syncDeletedIds = [];
+      } else if (syncDeletedIds.length > 0) {
+        this._addTombstones(colName, syncDeletedIds);
       }
 
       if (syncDeletedIds.length > 0) {
