@@ -1036,6 +1036,15 @@ var Sync = {
           }
         } catch {}
         this._clearTombstones(colName, syncDeletedIds);  // disinfect poisoned stones
+        // Forget the blocked ids from the server-id memory (in-memory + the
+        // persisted wt_sync_sids set that _pullAll re-seeds every session).
+        // We are NOT going to delete them, so keeping them around would re-fire
+        // this warning on the first save of every session forever. Safe in both
+        // directions: if an id truly no longer exists on the server, the memory
+        // was stale; if it DOES exist, the pull/listener re-adds it — and a
+        // forgotten id can never be deleted by inference, only kept.
+        if (knownServerIds) syncDeletedIds.forEach(id => knownServerIds.delete(id));
+        if (colName === 'invoices' || colName === 'payments') this._saveServerIds(colName);
         syncDeletedIds = [];
       } else if (syncDeletedIds.length > 0) {
         this._addTombstones(colName, syncDeletedIds);
