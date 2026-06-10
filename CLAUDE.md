@@ -20,6 +20,15 @@ This file provides guidance to Claude when working with code in this repository.
 - Wait for explicit user approval ("ทำเลย" / "do it") before touching any source files.
 - This rule applies even when the request sounds straightforward. Mockup first, code second.
 
+## Show an Example BEFORE Pushing
+
+**For any user-visible change, show a concrete example and get approval BEFORE committing/pushing.**
+
+- Render an actual example (preview screenshot via `preview_start` + `preview_screenshot`, an `mcp__visualize__show_widget` mockup, or — if rendering is unavailable — a clear before/after text/ASCII illustration of the result).
+- Wait for explicit approval ("ทำเลย" / "do it" / "push") before running `npm run bump` + commit + tag + push.
+- Applies to new UI, layout/format/wording changes (e.g. dropdown label order, badges, status bars), and any behavior the user will see or interact with.
+- Exception: pure non-visible fixes (sync logic, internal refactors, diagnostics) may be pushed without a visual example — but still state what changed and why first.
+
 ## Running Locally
 
 No install step. Serve the directory with any HTTP server:
