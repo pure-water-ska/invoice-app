@@ -1800,6 +1800,15 @@ var Sync = {
                 // Records OUTSIDE the archive window will never appear in this date-filtered
                 // listener query — their absence is not a deletion signal, always keep them.
                 if (listenerCutoffISO && (r.createdAt || '') < listenerCutoffISO) return true;
+                // A fromCache snapshot can be stale/incomplete: right after a save,
+                // hasPendingWrites bypasses the fromCache skip guard above, and on a
+                // flapping connection (the "connecting" badge) the SDK cache may hold
+                // only a subset of the server data (observed: 37 of 95 payments).
+                // Treating absence-from-cache as "deleted on another device" dropped
+                // the other records from local → invoices flipped paid→unpaid on
+                // screen instantly after saving. Only a SERVER snapshot
+                // (fromCache:false) is authoritative enough for that inference.
+                if (snap.metadata.fromCache) return true;
                 // For records inside the query window: only keep if added THIS session
                 // (not in pullIds).  Records in pullIds that are missing from Firestore
                 // were deleted on another device.
