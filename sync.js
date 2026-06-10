@@ -1028,8 +1028,9 @@ var Sync = {
       if (syncDeletedIds.length > MAX_DELETES_PER_WRITE) {
         try {
           if (typeof DB !== 'undefined' && DB.logError) {
+            const _ver = (typeof APP_VERSION !== 'undefined' && APP_VERSION.version) ? APP_VERSION.version : '?';
             DB.logError('SYNC-DEL-BLOCKED',
-              `${colName}: blocked ${syncDeletedIds.length} deletion(s) — local data likely incomplete ` +
+              `[v${_ver}] ${colName}: blocked ${syncDeletedIds.length} deletion(s) — local data likely incomplete ` +
               `(local=${localIds.size}, serverKnown=${knownServerIds ? knownServerIds.size : 0}). ` +
               `Sample: [${syncDeletedIds.slice(0, 8).join(', ')}]`);
           }
@@ -1048,8 +1049,9 @@ var Sync = {
         try {
           if ((colName === 'payments' || colName === 'invoices') && typeof DB !== 'undefined' && DB.logError) {
             const src = (new Error().stack || '').split('\n').slice(2, 5).map(s => s.trim()).join(' ← ');
+            const _ver2 = (typeof APP_VERSION !== 'undefined' && APP_VERSION.version) ? APP_VERSION.version : '?';
             DB.logError('SYNC-DEL',
-              `${colName}: deleting ${syncDeletedIds.length} id(s) [${syncDeletedIds.slice(0, 8).join(', ')}] ` +
+              `[v${_ver2}] ${colName}: deleting ${syncDeletedIds.length} id(s) [${syncDeletedIds.slice(0, 8).join(', ')}] ` +
               `| local=${localIds.size} serverKnown=${(knownServerIds ? knownServerIds.size : 0)} | src: ${src}`);
           }
         } catch {}
