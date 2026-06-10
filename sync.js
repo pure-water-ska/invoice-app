@@ -1771,15 +1771,6 @@ var Sync = {
                 // Records OUTSIDE the archive window will never appear in this date-filtered
                 // listener query — their absence is not a deletion signal, always keep them.
                 if (listenerCutoffISO && (r.createdAt || '') < listenerCutoffISO) return true;
-                // A fromCache snapshot can be stale/incomplete (Firestore serves it
-                // when the connection flaps — the "connecting" badge). Its ABSENCE of
-                // a record is NOT a reliable deletion signal, so keep every local
-                // record here. Only a SERVER snapshot (fromCache:false) is
-                // authoritative enough to infer a cross-device delete via pullIds.
-                // Without this, an optimistic fromCache snapshot delivered right after
-                // a save (hasPendingWrites bypasses the skip guard) could drop an
-                // existing payment → invoice flips paid→unpaid instantly after save.
-                if (snap.metadata.fromCache) return true;
                 // For records inside the query window: only keep if added THIS session
                 // (not in pullIds).  Records in pullIds that are missing from Firestore
                 // were deleted on another device.
