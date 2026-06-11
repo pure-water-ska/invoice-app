@@ -895,6 +895,7 @@ var Sync = {
           .catch(e => {
             this._pendingWrite[key] = false;
             console.warn('[Sync] push failed, queuing:', key, e.message);
+            try { if (typeof DB!=='undefined'&&DB.logError) DB.logError('SYNC-PUSH-FAIL', '['+((typeof APP_VERSION!=='undefined'&&APP_VERSION.version)||'?')+'] '+key+': '+(e.code||'')+' '+(e.message||e)); } catch(_e){}
             this._enqueue(key, fresh);
             this._badge('pending');
             this._emitUploadState();
@@ -924,6 +925,7 @@ var Sync = {
         .then(() => { this._lastDocJson[key] = freshJson; this._emitUploadState(); })
         .catch(e => {
           console.warn('[Sync] push failed, queuing:', key, e.message);
+            try { if (typeof DB!=='undefined'&&DB.logError) DB.logError('SYNC-PUSH-FAIL', '['+((typeof APP_VERSION!=='undefined'&&APP_VERSION.version)||'?')+'] '+key+': '+(e.code||'')+' '+(e.message||e)); } catch(_e){}
           this._enqueue(key, fresh);
           this._badge('pending');
           this._emitUploadState();
@@ -1925,6 +1927,7 @@ var Sync = {
         await this._writeKey(key, val);
       } catch (e) {
         console.warn('[Sync] flush error:', key, e.message);
+        try { if (typeof DB!=='undefined'&&DB.logError) DB.logError('SYNC-FLUSH-FAIL', '['+((typeof APP_VERSION!=='undefined'&&APP_VERSION.version)||'?')+'] '+key+': '+(e.code||'')+' '+(e.message||e)); } catch(_e){}
         return; // stop on error, retry next time
       }
     }
