@@ -675,15 +675,21 @@ function toCSV(headers, rows) {
 /* ─── Manual Backup Exports ─────────────────────────────────────────────── */
 function buildBackupPayload(opts = {}) {
   // opts: { includeLogs, includeData, includeConfig }
+  // NOTE: this local builder shadows DB.buildBackupPayload() — keep their key
+  // sets in sync. (The 2.1 keys were added to DB's version but this one was
+  // missed, so Settings exports stayed at 2.0 without returns/cap/price
+  // history/transfer accounts/counter.)
   const { includeLogs = true, includeData = true, includeConfig = true } = opts;
   const d = {
     exportDate:    new Date().toISOString(),
-    exportVersion: '2.0'
+    exportVersion: '2.1'
   };
   if (includeConfig) {
-    d.settings   = DB.getSettings();
-    d.payMethods = DB.getPayMethods();
-    d.pricing    = DB.getPricing();
+    d.settings         = DB.getSettings();
+    d.payMethods       = DB.getPayMethods();
+    d.pricing          = DB.getPricing();
+    d.transferAccounts = DB.getTransferAccounts();
+    d.invCounter       = DB._getObj(DB.K.COUNTER, {});
   }
   if (includeData) {
     d.users      = DB.getUsers().map(u => ({ ...u, password: '[HASHED]' }));
@@ -692,6 +698,11 @@ function buildBackupPayload(opts = {}) {
     d.invoices   = DB.getInvoices();
     d.payments   = DB.getPayments();
     d.versions   = DB.getVersions();
+    d.returns       = DB.getReturns();
+    d.capColors     = DB.getCapColors();
+    d.capReceipts   = DB.getCapReceipts();
+    d.capDeductions = DB.getCapDeductions();
+    d.priceHistory  = DB.getPriceHistory();
   }
   if (includeLogs) {
     d.activity = DB.getActivity();
