@@ -2183,6 +2183,107 @@ async function purgeAllCustomers() {
   } catch (e) { L.push('❌ ' + (e.code || '') + ' ' + (e.message || e)); paint(); }
 }
 
+/* ─── Re-baseline: wipe Firestore for a clean re-import ─────────────────────
+   Deletes ALL business data from the org's Firestore (invoices, payments,
+   customers_v2, products_v2, pricing_v2, and every data/ document) so a vetted
+   v2.1 backup can be imported as the single clean baseline.
+   NEVER touches: users_v2 + legacy data/users* docs (logins keep working on
+   every device) and pdf_pages (stored PDFs stay viewable — invoice numbers
+   come back identical from the backup).
+   Deletes directly via the Firestore API — intentionally NOT through the sync
+   write path, so the mass-delete guard does not apply. */
+async function runRebaseline() {
+  if (!Auth.isAdmin()) return;
+  const out = document.getElementById('rebaseOut');
+  const btn = document.getElementById('rebaseBtn');
+  const L = []; const paint = () => { out.classList.remove('d-none'); out.textContent = L.join('\n'); };
+  if (typeof Sync === 'undefined' || !Sync._db || !Sync.ready) {
+    L.push('❌ Firestore ยังไม่พร้อม — รอ badge sync เป็นปกติก่อนแล้วลองใหม่'); paint(); return;
+  }
+  if (!await Utils.confirm('⚠️ ล้างข้อมูลทั้งหมดบน Firestore?\n\nใบกำกับ / ชำระเงิน / ลูกค้า / สินค้า / ราคา / เอกสารข้อมูล จะถูกลบจากเซิร์ฟเวอร์ถาวร\n(บัญชีผู้ใช้และไฟล์ PDF ไม่ถูกลบ)')) return;
+  if (!await Utils.confirm('ยืนยันครั้งสุดท้าย — มีไฟล์สำรอง exportVersion 2.1 ที่ตรวจแล้วอยู่ในมือใช่หรือไม่?')) return;
+  btn.disabled = true;
+  document.getElementById('rebaseConfirm').value = '';
+
+  // Detach listeners so this device's sync engine doesn't react to the wipe
+  try { (Sync._unsubscribers || []).forEach(u => { try { u(); } catch {} }); Sync._unsubscribers = []; } catch {}
+
+  const base = Sync._orgRef();
+  let grand = 0;
+  const wipeCol = async (name) => {
+    let total = 0;
+    for (;;) {
+      const snap = await base.collection(name).limit(400).get({ source: 'server' });
+      if (snap.empty) break;
+      const batch = Sync._db.batch();
+      snap.docs.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+      total += snap.size;
+      L[L.length - 1] = `… ${name} — ลบแล้ว ${total}`; paint();
+    }
+    return total;
+  };
+
+  L.push('=== Re-baseline: ล้าง Firestore ==='); paint();
+  try {
+    for (const col of ['invoices', 'payments', 'customers_v2', 'products_v2', 'pricing_v2']) {
+      L.push(`… ${col}`); paint();
+      const n = await wipeCol(col);
+      grand += n;
+      L[L.length - 1] = `✓ ${col} — ลบ ${n} docs`; paint();
+    }
+
+    // data/ documents (settings, returns, cap stock, counter, transfer accounts,
+    // legacy array docs, deletions doc, …) — keep only legacy user docs.
+    L.push('… เอกสารข้อมูล (data/)'); paint();
+    const KEEP_DOCS = new Set(['users', 'users_cfg']);  // login data — never touch
+    const dsnap = await base.collection('data').get({ source: 'server' });
+    let batch = Sync._db.batch(), ops = 0, ddel = 0;
+    for (const d of dsnap.docs) {
+      if (KEEP_DOCS.has(d.id)) continue;
+      batch.delete(d.ref); ops++; ddel++;
+      if (ops >= 400) { await batch.commit(); batch = Sync._db.batch(); ops = 0; }
+    }
+    if (ops > 0) await batch.commit();
+    grand += ddel;
+    L[L.length - 1] = `✓ เอกสารข้อมูล — ลบ ${ddel} docs (เก็บบัญชีผู้ใช้ไว้)`; paint();
+
+    // Clear this device's sync metadata so nothing stale survives into the new baseline
+    ['wt_sync_tombstones', 'wt_sync_sids', 'wt_sync_doc_ts', 'wt_sync_pending', 'wt_sync_snap_count']
+      .forEach(k => { try { localStorage.removeItem(k); } catch {} });
+    try {
+      sessionStorage.removeItem('wt_sync_pull_ids');
+      sessionStorage.removeItem('wt_sync_session_pulled');
+    } catch {}
+
+    try { DB.logActivity(session.userId, session.username, 'Re-baseline: ล้าง Firestore', { docs: grand }); } catch {}
+
+    L.push('');
+    L.push(`✅ ล้าง Firestore เสร็จ (${grand} docs)`);
+    L.push('');
+    L.push('ทำต่อตามนี้:');
+    L.push('1. ออกจากระบบ แล้วปิดแอป');
+    L.push('2. ลบโฟลเดอร์ %APPDATA%\\com.wt.invoice\\data (เครื่องเดสก์ท็อปทุกเครื่อง)');
+    L.push('3. เปิดแอป → login → Settings → นำเข้าไฟล์สำรอง (.json ที่ตรวจแล้ว)');
+    L.push('4. รอแถบอัปโหลดเขียว "อัปโหลดข้อมูลครบแล้ว"');
+    L.push('5. เครื่องอื่น: ลบโฟลเดอร์ data แบบเดียวกัน → เปิดแอป → login → เสร็จ');
+    paint();
+
+    // Desktop convenience: open the app-data folder so step 2 is one click away
+    try {
+      if (window.IS_TAURI && window.__TAURI__ && window.__TAURI__.path && window.__TAURI__.shell) {
+        const dir = await window.__TAURI__.path.appDataDir();
+        await window.__TAURI__.shell.open(dir);
+      }
+    } catch {}
+  } catch (e) {
+    L.push('❌ ' + (e.code || '') + ' ' + (e.message || e));
+    L.push('ลบไม่ครบ — แก้สาเหตุแล้วกดใหม่ได้ (ขั้นตอนนี้รันซ้ำได้ปลอดภัย)');
+    paint();
+    btn.disabled = false;
+  }
+}
+
 // Comprehensive customer/sync analysis — dumps the complete picture so the
 // duplicate/id-mismatch situation is visible at a glance.
 async function runCustomerAnalysis() {

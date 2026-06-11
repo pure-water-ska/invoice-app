@@ -518,6 +518,30 @@
           <i class="bi bi-trash me-1"></i>ล้างทั้งหมด
         </button>
       </div>
+
+      <hr>
+
+      <!-- Re-baseline: wipe Firestore for a clean re-import -->
+      <div class="fw-semibold text-danger"><i class="bi bi-arrow-counterclockwise me-1"></i>ตั้งฐานข้อมูลใหม่ (Re-baseline)</div>
+      <p class="small text-muted mb-2">
+        ล้างข้อมูลบน <strong>Firestore ทั้งหมด</strong> (ใบกำกับ, ชำระเงิน, ลูกค้า, สินค้า, ราคา, เอกสารข้อมูล)
+        เพื่อเริ่มจากฐานสะอาด แล้วนำเข้าไฟล์สำรองเป็นชุดเดียว —
+        <strong>ไม่ลบบัญชีผู้ใช้</strong> (ยัง login ได้ทุกเครื่อง) และ<strong>ไม่ลบไฟล์ PDF</strong>
+      </p>
+      <div class="alert alert-warning small py-2 mb-2">
+        <i class="bi bi-exclamation-triangle me-1"></i>ก่อนกด: ทุกเครื่องต้องอัปเดตเป็นเวอร์ชันล่าสุด +
+        <b>ปิดแอปทุกเครื่อง</b> เหลือเครื่องนี้เครื่องเดียว และต้องมี<b>ไฟล์สำรอง (exportVersion 2.1)</b> อยู่ในมือแล้ว
+      </div>
+      <label class="form-label small mb-1">พิมพ์ <code>RESET</code> เพื่อยืนยัน</label>
+      <div class="d-flex gap-2 mb-2">
+        <input type="text" id="rebaseConfirm" class="form-control form-control-sm" style="max-width:160px"
+               placeholder="RESET" autocomplete="off"
+               oninput="document.getElementById('rebaseBtn').disabled = this.value.trim() !== 'RESET'">
+        <button class="btn btn-danger btn-sm" id="rebaseBtn" disabled onclick="runRebaseline()">
+          <i class="bi bi-trash3 me-1"></i>ล้าง Firestore
+        </button>
+      </div>
+      <pre id="rebaseOut" class="d-none small bg-light border rounded p-2 mb-0" style="max-height:280px;overflow:auto;white-space:pre-wrap"></pre>
     </div>
   </div>
 
@@ -841,10 +865,10 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-<script src="utils.js?v=1.0.135"></script><script src="db.js?v=1.0.135"></script><script src="auth.js?v=1.0.135"></script><script src="nav.js?v=1.0.135"></script><script src="idb.js?v=1.0.135"></script>
+<script src="utils.js?v=1.0.136"></script><script src="db.js?v=1.0.136"></script><script src="auth.js?v=1.0.136"></script><script src="nav.js?v=1.0.136"></script><script src="idb.js?v=1.0.136"></script>
 <script src="drive-config.js" onerror="window.GOOGLE_CLIENT_ID=''"></script>
 <script src="drive-store.js"></script>
-<script src="settings.js?v=1.0.135"></script>
+<script src="settings.js?v=1.0.136"></script>
 <script>Nav.render('settings');</script>
 </body>
 </html>
