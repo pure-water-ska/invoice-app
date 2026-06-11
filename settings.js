@@ -827,6 +827,23 @@ async function importData(input, mode) {
     if (data.settings)   DB.saveSettings({ ...DB.getSettings(), ...data.settings });
     if (data.payMethods) DB.savePayMethods(data.payMethods);
     if (data.pricing)    DB.savePricing(data.pricing);
+    // v2.1 backup keys (previously missing from backups entirely)
+    if (Array.isArray(data.transferAccounts) && data.transferAccounts.length) {
+      // Transfer accounts have no id — merge by name|bank
+      const curAcc = DB.getTransferAccounts();
+      const seenAcc = new Set(curAcc.map(a => (a.name || '') + '|' + (a.bank || '')));
+      const addAcc = data.transferAccounts.filter(a => !seenAcc.has((a.name || '') + '|' + (a.bank || '')));
+      if (typeof mode !== 'undefined' && mode === 'overwrite') DB.saveTransferAccounts(data.transferAccounts);
+      else if (addAcc.length)   DB.saveTransferAccounts([...curAcc, ...addAcc]);
+    }
+    if (data.invCounter && typeof data.invCounter === 'object') {
+      // Counter must NEVER go backwards (duplicate invoice numbers) — take the
+      // per-key max regardless of mode.
+      const curCnt = DB._getObj(DB.K.COUNTER, {});
+      const mergedCnt = { ...data.invCounter };
+      for (const k of Object.keys(curCnt)) mergedCnt[k] = Math.max(curCnt[k] || 0, mergedCnt[k] || 0);
+      DB._set(DB.K.COUNTER, mergedCnt);
+    }
 
     // ── Bulk-merge helper — O(n) not O(n²) ───────────────────────────────────
     // Reads existing array once, filters new IDs in one pass, writes once.
@@ -849,7 +866,13 @@ async function importData(input, mode) {
       products:  await importCol(data.products,  () => DB.getProducts(),  DB.saveProducts.bind(DB),  'สินค้า',    35),
       invoices:  await importCol(data.invoices,  () => DB.getInvoices(),  DB.saveInvoices.bind(DB),  'ใบกำกับ',  55),
       payments:  await importCol(data.payments,  () => DB.getPayments(),  DB.savePayments.bind(DB),  'การชำระ',  75),
-      versions:  await importCol(data.versions,  () => DB.getVersions(),  DB.saveVersions.bind(DB),  'เวอร์ชัน', 90),
+      versions:  await importCol(data.versions,  () => DB.getVersions(),  DB.saveVersions.bind(DB),  'เวอร์ชัน', 80),
+      // v2.1 backup keys
+      returns:       await importCol(data.returns,       () => DB.getReturns(),       DB.saveReturns.bind(DB),       'คืนสินค้า',   83),
+      capColors:     await importCol(data.capColors,     () => DB.getCapColors(),     DB.saveCapColors.bind(DB),     'สีฝา',        85),
+      capReceipts:   await importCol(data.capReceipts,   () => DB.getCapReceipts(),   DB.saveCapReceipts.bind(DB),   'รับฝาเข้า',   87),
+      capDeductions: await importCol(data.capDeductions, () => DB.getCapDeductions(), DB.saveCapDeductions.bind(DB), 'ตัดฝาออก',    89),
+      priceHistory:  await importCol(data.priceHistory,  () => DB.getPriceHistory(),  DB.savePriceHistory.bind(DB),  'ประวัติราคา', 92),
     };
 
     // ── Integrity check ──────────────────────────────────────────────────────
@@ -1537,6 +1560,23 @@ async function importZip(input, mode) {
     if (data.settings)   DB.saveSettings({ ...DB.getSettings(), ...data.settings });
     if (data.payMethods) DB.savePayMethods(data.payMethods);
     if (data.pricing)    DB.savePricing(data.pricing);
+    // v2.1 backup keys (previously missing from backups entirely)
+    if (Array.isArray(data.transferAccounts) && data.transferAccounts.length) {
+      // Transfer accounts have no id — merge by name|bank
+      const curAcc = DB.getTransferAccounts();
+      const seenAcc = new Set(curAcc.map(a => (a.name || '') + '|' + (a.bank || '')));
+      const addAcc = data.transferAccounts.filter(a => !seenAcc.has((a.name || '') + '|' + (a.bank || '')));
+      if (typeof mode !== 'undefined' && mode === 'overwrite') DB.saveTransferAccounts(data.transferAccounts);
+      else if (addAcc.length)   DB.saveTransferAccounts([...curAcc, ...addAcc]);
+    }
+    if (data.invCounter && typeof data.invCounter === 'object') {
+      // Counter must NEVER go backwards (duplicate invoice numbers) — take the
+      // per-key max regardless of mode.
+      const curCnt = DB._getObj(DB.K.COUNTER, {});
+      const mergedCnt = { ...data.invCounter };
+      for (const k of Object.keys(curCnt)) mergedCnt[k] = Math.max(curCnt[k] || 0, mergedCnt[k] || 0);
+      DB._set(DB.K.COUNTER, mergedCnt);
+    }
 
     // Bulk-merge: read once, filter, write once (same O(n) approach as importData)
     const importCol = (arr, getAll, saveAll, labelTH) => {
@@ -1555,6 +1595,12 @@ async function importZip(input, mode) {
       invoices:  importCol(data.invoices,  () => DB.getInvoices(),  DB.saveInvoices.bind(DB),  'ใบกำกับ'),
       payments:  importCol(data.payments,  () => DB.getPayments(),  DB.savePayments.bind(DB),  'การชำระ'),
       versions:  importCol(data.versions,  () => DB.getVersions(),  DB.saveVersions.bind(DB),  'เวอร์ชัน'),
+      // v2.1 backup keys
+      returns:       importCol(data.returns,       () => DB.getReturns(),       DB.saveReturns.bind(DB),       'คืนสินค้า'),
+      capColors:     importCol(data.capColors,     () => DB.getCapColors(),     DB.saveCapColors.bind(DB),     'สีฝา'),
+      capReceipts:   importCol(data.capReceipts,   () => DB.getCapReceipts(),   DB.saveCapReceipts.bind(DB),   'รับฝาเข้า'),
+      capDeductions: importCol(data.capDeductions, () => DB.getCapDeductions(), DB.saveCapDeductions.bind(DB), 'ตัดฝาออก'),
+      priceHistory:  importCol(data.priceHistory,  () => DB.getPriceHistory(),  DB.savePriceHistory.bind(DB),  'ประวัติราคา'),
     };
 
     // ── Import PDF files ──

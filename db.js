@@ -1315,7 +1315,7 @@ const DB = {
   },
 
   buildBackupPayload() {
-    const d = { exportDate: new Date().toISOString(), exportVersion: '2.0' };
+    const d = { exportDate: new Date().toISOString(), exportVersion: '2.1' };
     d.settings   = this.getSettings();
     d.payMethods = this.getPayMethods();
     d.pricing    = this.getPricing();
@@ -1327,6 +1327,16 @@ const DB = {
     d.versions   = this.getVersions();
     d.activity   = this.getActivity();
     d.logins     = this.getLogins();
+    // v2.1 — previously MISSING from every backup (returns/cap stock/price
+    // history/transfer accounts/invoice counter silently absent from auto
+    // backups and logout restore points; discovered during data recovery).
+    d.returns          = this.getReturns();
+    d.capColors        = this.getCapColors();
+    d.capReceipts      = this.getCapReceipts();
+    d.capDeductions    = this.getCapDeductions();
+    d.priceHistory     = this.getPriceHistory();
+    d.transferAccounts = this.getTransferAccounts();
+    d.invCounter       = this._getObj(this.K.COUNTER, {});
     return d;
   },
 
