@@ -2193,8 +2193,12 @@ async function checkSyncStatus() {
   }
   const base = Sync._orgRef();
   const serverCount = async (path) => {
-    try { const s = await base.collection(path).count().get(); return s.data().count; }
-    catch (e) { return '?(' + (e.code || e.message) + ')'; }
+    try {
+      const col = base.collection(path);
+      if (typeof col.count === 'function') { const s = await col.count().get(); return s.data().count; }
+      const s = await col.get();                // fallback: this build has no count() aggregation
+      return s.size;
+    } catch (e) { return '?(' + (e.code || e.message) + ')'; }
   };
   // [label, localCount, serverPromise, note, isPricing]
   const rows = [
