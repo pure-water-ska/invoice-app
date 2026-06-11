@@ -98,19 +98,38 @@ const DB = {
         console.error('[DB][Tauri] HDD init failed', e);
       }
     },
+    _inflight: new Set(),   // pending HDD write promises — awaited by DB.waitForHddWrites()
     write(key, val) {
       if (!this.dataDir || !window.IS_TAURI) return;
       const { join } = window.__TAURI__.path;
       const { writeTextFile } = window.__TAURI__.fs;
-      join(this.dataDir, key + '.json')
+      const p = join(this.dataDir, key + '.json')
         .then(p => writeTextFile(p, JSON.stringify(val)))
         .then(() => {
           // HDD write confirmed — clear the sessionStorage shadow copy so it
           // doesn't linger unnecessarily after a clean write.
           try { sessionStorage.removeItem('wt_hdd_shadow_' + key); } catch {}
         })
-        .catch(e => console.warn('[DB][Tauri] Write failed', key, e));
+        .catch(e => console.warn('[DB][Tauri] Write failed', key, e))
+        .finally(() => this._inflight.delete(p));
+      this._inflight.add(p);
     },
+  },
+
+  // Wait until every pending Tauri HDD write has settled (no-op on web).
+  // Used by import/restore so "สำเร็จ" is only reported once the data is truly
+  // on disk — closing the app or restarting the computer right after an import
+  // used to lose everything that was still in the async write queue.
+  async waitForHddWrites(timeoutMs = 15000) {
+    if (!window.IS_TAURI) return true;
+    const deadline = Date.now() + timeoutMs;
+    while (this._tauri._inflight.size > 0 && Date.now() < deadline) {
+      await Promise.race([
+        Promise.allSettled([...this._tauri._inflight]),
+        new Promise(r => setTimeout(r, 250)),
+      ]);
+    }
+    return this._tauri._inflight.size === 0;
   },
 
   // ── LZ-string helpers: read raw localStorage and try to decompress ──────

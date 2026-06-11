@@ -901,6 +901,13 @@ async function importData(input, mode) {
     if (after.invoices  < before.invoices)  losses.push(`ใบกำกับ ${before.invoices}→${after.invoices}`);
     if (after.payments  < before.payments)  losses.push(`ชำระ ${before.payments}→${after.payments}`);
 
+    // ── Wait for the Tauri HDD writes to actually land before claiming success ──
+    // Imports write cache-first with ASYNC disk writes; closing the app or
+    // restarting the computer right after "สำเร็จ" used to lose everything still
+    // in the write queue. No-op on web.
+    Utils.showProgress('กำลังบันทึกลงดิสก์...', 99);
+    const hddOk = await DB.waitForHddWrites(20000);
+
     Utils.hideProgress();
     DB.logActivity(session.userId, session.username, 'Import ข้อมูล', { file: file.name, mode, before, after });
     const modeText = mode === 'overwrite' ? 'Overwrite' : 'Merge';
@@ -909,6 +916,11 @@ async function importData(input, mode) {
       `ลูกค้า: ${c.customers}, สินค้า: ${c.products}, ` +
       `ใบกำกับ: ${c.invoices}, ชำระ: ${c.payments}, ฉลาก: ${c.versions}`
     );
+    if (!hddOk) {
+      setTimeout(() => Utils.showAlert(
+        '<i class="bi bi-exclamation-triangle-fill me-1"></i><strong>การบันทึกลงดิสก์ยังไม่เสร็จ</strong> — อย่าเพิ่งปิดแอป/ปิดเครื่อง รอสักครู่แล้วลองรีเฟรชดูข้อมูล', 'warning'
+      ), 200);
+    }
     if (losses.length) {
       setTimeout(() => Utils.showAlert(
         `<i class="bi bi-exclamation-triangle-fill me-1"></i><strong>ตรวจพบข้อมูลลดลงหลัง Import</strong> — ${losses.join(', ')} — กรุณาตรวจสอบ`, 'warning'
@@ -1644,6 +1656,9 @@ async function importZip(input, mode) {
     } else if (pdfFolder && !dirHandle) {
       pdfFolder.forEach((p, e) => { if (!e.dir) pdfSkipped++; });
     }
+    // Wait for the Tauri HDD writes to land before claiming success (no-op on web)
+    Utils.showProgress('กำลังบันทึกลงดิสก์...', 99);
+    const hddOk = await DB.waitForHddWrites(20000);
     Utils.hideProgress();
 
     DB.logActivity(session.userId, session.username, 'Import ZIP', { file: file.name, mode, pdfs: pdfCount });
@@ -1653,6 +1668,11 @@ async function importZip(input, mode) {
       `<i class="bi bi-check-circle me-1"></i>Import ZIP สำเร็จ [${modeText}] — ` +
       `ลูกค้า: ${c.customers}, สินค้า: ${c.products}, ใบกำกับ: ${c.invoices}, ชำระ: ${c.payments}${pdfMsg}`
     );
+    if (!hddOk) {
+      setTimeout(() => Utils.showAlert(
+        '<i class="bi bi-exclamation-triangle-fill me-1"></i><strong>การบันทึกลงดิสก์ยังไม่เสร็จ</strong> — อย่าเพิ่งปิดแอป/ปิดเครื่อง', 'warning'
+      ), 200);
+    }
     loadCompanySettings(); loadStats(); renderStorageBar(); renderLogCounts();
   } catch(err) {
     Utils.showAlert('ไฟล์ไม่ถูกต้อง: ' + err.message, 'danger');
