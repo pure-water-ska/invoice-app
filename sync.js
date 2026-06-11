@@ -1106,16 +1106,27 @@ var Sync = {
       // never called at all, and the record stayed in Firestore indefinitely.
       let batch = this._db.batch();
       let ops   = 0;
-      const commit = async () => { await batch.commit(); batch = this._db.batch(); ops = 0; };
+      let bytes = 0;
+      const commit = async () => { await batch.commit(); batch = this._db.batch(); ops = 0; bytes = 0; };
 
+      // ── Cap batches by SIZE as well as op count ──────────────────────────
+      // Firestore rejects any commit whose request payload exceeds ~10 MiB
+      // ("invalid-argument: Request payload size exceeds the limit"). Invoice
+      // and payment records can embed base64 images (Google Drive is disabled
+      // in the Tauri build, so signed-invoice/slip photos live inside the
+      // record), so 490 of them in one batch blew past the limit and EVERY
+      // upload failed forever. Flush at ~1.5 MB to stay far under the cap.
+      const MAX_BATCH_BYTES = 1500000;
       for (const record of toUpsert) {
+        const recBytes = JSON.stringify(record).length;
+        if (ops > 0 && (bytes + recBytes > MAX_BATCH_BYTES || ops >= 200)) await commit();
         batch.set(colRef.doc(record.id), {
           ...record,
           _by: this._deviceId,   // per-device ID so remote devices can detect this isn't their own echo
           _byName: this._deviceName(),
           _ts: firebase.firestore.FieldValue.serverTimestamp(),
         }, { merge: true });
-        if (++ops >= 490) await commit();
+        ops++; bytes += recBytes;
       }
 
       // Delete records removed locally — in the same batch as the upserts.
