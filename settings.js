@@ -2226,7 +2226,7 @@ async function runRebaseline() {
 
   L.push('=== Re-baseline: ล้าง Firestore ==='); paint();
   try {
-    for (const col of ['invoices', 'payments', 'customers_v2', 'products_v2', 'pricing_v2']) {
+    for (const col of ['invoices', 'payments', 'customers_v2', 'products_v2', 'pricing_v2', 'pricing_byproduct']) {
       L.push(`… ${col}`); paint();
       const n = await wipeCol(col);
       grand += n;

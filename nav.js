@@ -248,7 +248,7 @@
               // Generic factory + product/pricing instances (load factory first).
               loadScript('./collection-sync.js', function() {
                 loadScript('./product-sync.js', null, function(){});
-                loadScript('./pricing-sync.js', null, function(){});
+                loadScript('./pricing-grouped-sync.js', null, function(){});
                 loadScript('./user-sync.js', null, function(){});
               }, function(){});
             }
