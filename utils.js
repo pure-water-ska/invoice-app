@@ -159,9 +159,9 @@ const LZString = (function () {
 // ── End LZString ────────────────────────────────────────────────────────────
 
 const APP_VERSION = {
-  version: '1.0.142',
-  date: '2026-06-11T16:30:30.623Z',
-  label: 'v1.0.142 (11 มิ.ย. 2569)',
+  version: '1.0.143',
+  date: '2026-06-11T17:16:42.236Z',
+  label: 'v1.0.143 (12 มิ.ย. 2569)',
 };
 
 // Changelog — add new entry here when releasing a new version.
@@ -638,3 +638,20 @@ Utils.compressImage = function(file, maxPx, quality) {
     reader.readAsDataURL(file);
   });
 };
+
+// ── Close-after-logout hop (desktop close guard, see nav.js) ─────────────────
+// When the user chose "ออกจากระบบแล้วปิดโปรแกรม" on the close dialog,
+// Auth.logout() navigated here (index.html) with this sessionStorage flag set.
+// Now that the session is cleared, actually close the window. The close guard
+// in nav.js lets it through because there is no session (and index.html doesn't
+// load nav.js at all).
+(function () {
+  if (!window.IS_TAURI) return;
+  var flag = false;
+  try { flag = sessionStorage.getItem('wt_close_after_logout') === '1'; } catch (e) {}
+  if (!flag) return;
+  try { sessionStorage.removeItem('wt_close_after_logout'); } catch (e) {}
+  var aw = window.__TAURI__ && window.__TAURI__.window && window.__TAURI__.window.appWindow;
+  // Small delay so the logout navigation fully settles before closing.
+  if (aw && typeof aw.close === 'function') setTimeout(function () { aw.close(); }, 300);
+})();

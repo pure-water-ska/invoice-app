@@ -1074,3 +1074,29 @@ function _startIdleTimer() { if (typeof window._startIdleTimer === 'function') w
     } catch(e) {}
   });
 })();
+
+// ── Desktop close guard: ห้ามปิดโปรแกรมก่อนออกจากระบบ ─────────────────────────
+// Intercepts the window X button (Tauri onCloseRequested). While logged in, the
+// close is blocked and a native dialog offers "ออกจากระบบแล้วปิดเลย" — which runs
+// the full logout flow (Sync.flushNow upload + restore point + session clear).
+// After Auth.logout() navigates to index.html, utils.js sees the
+// wt_close_after_logout flag and closes the window for real. Force-kill /
+// power-off cannot be intercepted (covered by HDD writes + pending queue).
+(function () {
+  if (!window.IS_TAURI) return;
+  var aw = window.__TAURI__ && window.__TAURI__.window && window.__TAURI__.window.appWindow;
+  if (!aw || typeof aw.onCloseRequested !== 'function') return;
+  aw.onCloseRequested(async function (event) {
+    var s = null;
+    try { s = window.Auth && Auth.session(); } catch (e) {}
+    if (!s) return;                       // not logged in → close normally
+    event.preventDefault();               // block while logged in
+    var ok = await Utils.confirm(
+      'ยังไม่ได้ออกจากระบบ\n\nต้องการออกจากระบบ (บันทึก/อัปโหลดข้อมูลค้าง) แล้วปิดโปรแกรมเลยหรือไม่?',
+      'ปิดโปรแกรม'
+    );
+    if (!ok) return;                      // stay in the app
+    try { sessionStorage.setItem('wt_close_after_logout', '1'); } catch (e) {}
+    Auth.logout('ปิดโปรแกรม');            // flushes uploads, then navigates to index.html
+  });
+})();
