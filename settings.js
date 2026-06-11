@@ -2183,6 +2183,61 @@ async function purgeAllCustomers() {
   } catch (e) { L.push('❌ ' + (e.code || '') + ' ' + (e.message || e)); paint(); }
 }
 
+/* ─── Sync status: local vs server counts (cheap, via count() aggregation) ── */
+async function checkSyncStatus() {
+  const body = document.getElementById('syncStatusBody');
+  body.innerHTML = '<div class="text-muted small text-center py-3"><span class="spinner-border spinner-border-sm me-1"></span>กำลังตรวจ…</div>';
+  if (typeof Sync === 'undefined' || !Sync._db || !Sync.ready) {
+    body.innerHTML = '<div class="alert alert-warning small py-2 mb-0">Firestore ยังไม่พร้อม — รอ badge sync เป็นปกติก่อน</div>';
+    return;
+  }
+  const base = Sync._orgRef();
+  const serverCount = async (path) => {
+    try { const s = await base.collection(path).count().get(); return s.data().count; }
+    catch (e) { return '?(' + (e.code || e.message) + ')'; }
+  };
+  // [label, localCount, serverPromise, note, isPricing]
+  const rows = [
+    ['ใบกำกับ',  DB.getInvoices().length,  await serverCount('invoices'),         'เครื่องเก็บ 6 เดือนล่าสุด'],
+    ['ชำระเงิน', DB.getPayments().length,   await serverCount('payments'),         ''],
+    ['ลูกค้า',    DB.getCustomers().length,  await serverCount('customers_v2'),      ''],
+    ['สินค้า',    DB.getProducts().length,   await serverCount('products_v2'),       ''],
+    ['ราคา',      DB.getPricing().length,    await serverCount('pricing_byproduct'), 'เครื่องนับเป็นรายการ / server นับเป็นสินค้า', true],
+  ];
+  const cell = (r) => {
+    const [label, local, server, note, isPricing] = r;
+    let status, badge;
+    if (typeof server !== 'number') { status = '<i class="bi bi-question-circle text-muted"></i>'; }
+    else if (isPricing) { status = server > 0 ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-dash-circle text-muted"></i>'; }
+    else if (server >= local) { status = '<i class="bi bi-check-circle-fill text-success"></i>'; }
+    else { status = `<span class="text-danger fw-semibold"><i class="bi bi-arrow-up-circle"></i> ค้าง ${local - server}</span>`; }
+    const localTxt  = isPricing ? `${local.toLocaleString()} รายการ` : local.toLocaleString();
+    const serverTxt = (typeof server === 'number') ? (isPricing ? `${server} สินค้า` : server.toLocaleString()) : server;
+    return `<tr>
+      <td>${label}${note ? ` <span class="text-muted" style="font-size:11px">(${note})</span>` : ''}</td>
+      <td class="text-end">${localTxt}</td>
+      <td class="text-end">${serverTxt}</td>
+      <td class="text-center">${status}</td>
+    </tr>`;
+  };
+  body.innerHTML = `
+    <table class="table table-sm mb-0">
+      <thead class="table-light"><tr><th>ประเภท</th><th class="text-end">ในเครื่อง</th><th class="text-end">บน Server</th><th class="text-center">สถานะ</th></tr></thead>
+      <tbody>${rows.map(cell).join('')}</tbody>
+    </table>`;
+}
+
+// Force any pending debounced/queued Firestore writes to commit now.
+async function flushPendingUploads() {
+  if (typeof Sync === 'undefined' || typeof Sync.flushNow !== 'function') { Utils.showAlert('ระบบซิงค์ยังไม่พร้อม', 'warning'); return; }
+  Utils.showAlert('<i class="bi bi-cloud-upload me-1"></i>กำลังอัปโหลดงานที่ค้าง…', 'info');
+  // Re-push the single-source-of-truth modules (their next-write diff sends anything missing)
+  try { ['CustomerSync', 'ProductSync', 'PricingSync'].forEach(m => { if (window[m]) window[m].onLocalChange(null, (m==='PricingSync'?DB.getPricing():m==='ProductSync'?DB.getProducts():DB.getCustomers())); }); } catch {}
+  try { await Sync.flushNow(); } catch {}
+  Utils.showAlert('<i class="bi bi-check-circle me-1"></i>สั่งอัปโหลดแล้ว — กด "ตรวจสถานะ" เพื่อดูผล');
+  setTimeout(checkSyncStatus, 1500);
+}
+
 /* ─── Re-baseline: wipe Firestore for a clean re-import ─────────────────────
    Deletes ALL business data from the org's Firestore (invoices, payments,
    customers_v2, products_v2, pricing_v2, and every data/ document) so a vetted
