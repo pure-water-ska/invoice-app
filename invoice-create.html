@@ -159,7 +159,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.144"></script><script src="db.js?v=1.0.144"></script><script src="auth.js?v=1.0.144"></script><script src="nav.js?v=1.0.144"></script><script src="idb.js?v=1.0.144"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.145"></script><script src="db.js?v=1.0.145"></script><script src="auth.js?v=1.0.145"></script><script src="nav.js?v=1.0.145"></script><script src="idb.js?v=1.0.145"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -706,48 +706,79 @@ function onCustomerChange() {
   refreshPrices();
 }
 
+// Unit price for a deduct line: customer's current price as of the invoice
+// date (same chain as normal lines), falling back to the product default.
+function _returnUnitPrice(productId) {
+  const custId   = document.getElementById('invCustomer').value;
+  const shipping = document.getElementById('invShipping').value;
+  let p = null;
+  try { p = DB.getPriceAsOf(productId, custId, shipping, _selectedInvISO()); } catch (e) {}
+  if (p == null || p === '') {
+    const prod = DB.getProductById(productId);
+    p = prod ? (prod.defaultPrice || 0) : 0;
+  }
+  return parseFloat(p) || 0;
+}
+
+let _returnDetails = [];   // [{ id, items:[{productId,productName,qty,price}], total, sourceInvoice, reason, returnDate }]
+
 function checkPendingReturns(custId) {
   const alertDiv = document.getElementById('returnsAlert');
+  _returnDetails = [];
   if (!custId) { alertDiv.innerHTML = ''; return; }
 
   const pending = DB.getPendingReturns().filter(r => r.customerId === custId);
   if (!pending.length) { alertDiv.innerHTML = ''; return; }
 
-  const rows = pending.map((r, idx) => `
+  _returnDetails = pending.map(r => {
+    // Multi-item returns store items[]; older records only the legacy first item.
+    const its = (r.items && r.items.length)
+      ? r.items
+      : [{ productId: r.productId, productName: r.productName, qty: r.qty }];
+    const priced = its.map(it => ({ ...it, price: _returnUnitPrice(it.productId) }));
+    const total = priced.reduce((s, it) => s + (parseFloat(it.qty) || 0) * it.price, 0);
+    return { id: r.id, items: priced, total,
+             sourceInvoice: r.sourceInvoice || '', reason: r.reason || '',
+             returnDate: r.returnDate || '' };
+  });
+
+  const rows = _returnDetails.map((d, idx) => `
     <tr>
       <td class="text-center">
-        <input type="checkbox" class="return-chk form-check-input" data-id="${r.id}" id="rchk${idx}" checked onchange="updateReturnBtn()">
+        <input type="checkbox" class="return-chk form-check-input" data-idx="${idx}" data-id="${d.id}" id="rchk${idx}" checked onchange="updateReturnBtn()">
       </td>
-      <td><label for="rchk${idx}" style="cursor:pointer;margin:0">${r.productName || '-'}</label></td>
-      <td class="text-center">${r.qty}</td>
-      <td class="text-muted small">${r.reason || '-'}</td>
-      <td class="text-muted small">${r.sourceInvoice || '-'}</td>
-      <td class="text-muted small">${r.returnDate ? r.returnDate.slice(0,10) : '-'}</td>
+      <td class="text-muted small">${d.returnDate ? Utils.formatDateTH(d.returnDate) : '-'}</td>
+      <td><label for="rchk${idx}" style="cursor:pointer;margin:0">${d.items.map(it => `${it.productName || '-'} × ${it.qty}`).join(', ')}</label></td>
+      <td class="text-muted small">${d.sourceInvoice || '-'}</td>
+      <td class="text-muted small">${d.reason || '-'}</td>
+      <td class="text-end text-danger fw-semibold">−${Utils.formatNumber(d.total)}</td>
     </tr>`).join('');
 
   alertDiv.innerHTML = `
-    <div class="alert alert-warning p-2 mb-0">
+    <div class="alert alert-danger p-2 mb-0">
       <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
-        <i class="bi bi-arrow-return-left text-warning"></i>
-        <strong>มีรายการคืนสินค้าที่ยังไม่ได้หัก ${pending.length} รายการ</strong>
-        <button id="addReturnsBtn" class="btn btn-sm btn-warning ms-auto" onclick="addSelectedReturns()">
-          <i class="bi bi-plus-circle me-1"></i>เพิ่มรายการหักที่เลือก (<span id="returnBtnCount">${pending.length}</span>)
+        <i class="bi bi-arrow-return-left"></i>
+        <strong>ลูกค้ามีรายการคืนสินค้า รอหักออก ${pending.length} รายการ</strong>
+        <button id="addReturnsBtn" class="btn btn-sm btn-danger ms-auto" onclick="addSelectedReturns()">
+          <i class="bi bi-plus-circle me-1"></i>เพิ่มที่เลือกลงใบใหม่ (<span id="returnBtnCount"></span>)
         </button>
       </div>
-      <table class="table table-sm table-bordered mb-0" style="font-size:12px;background:#fff">
+      <table class="table table-sm table-bordered mb-1" style="font-size:12px;background:#fff">
         <thead>
           <tr>
             <th style="width:32px"><input type="checkbox" class="form-check-input" id="rchkAll" checked onchange="toggleAllReturns(this.checked)"></th>
-            <th>สินค้า</th>
-            <th class="text-center" style="width:60px">จำนวน</th>
-            <th>สาเหตุ</th>
-            <th>อ้างอิงบิล</th>
             <th>วันที่คืน</th>
+            <th>สินค้า / จำนวน</th>
+            <th>ใบกำกับต้นทาง</th>
+            <th>สาเหตุ</th>
+            <th class="text-end">ยอดหัก (ราคาปัจจุบัน)</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
       </table>
+      <div class="small text-muted">ราคาหักคิดจากราคาปัจจุบันของลูกค้า — แก้ไขได้ในตารางสินค้าหลังเพิ่ม</div>
     </div>`;
+  updateReturnBtn();
 }
 
 function toggleAllReturns(checked) {
@@ -760,7 +791,9 @@ function updateReturnBtn() {
   const btn = document.getElementById('addReturnsBtn');
   const countEl = document.getElementById('returnBtnCount');
   if (!btn) return;
-  countEl.textContent = checked.length;
+  const sum = checked.reduce((s, el) => s + (_returnDetails[+el.dataset.idx]?.total || 0), 0);
+  countEl.textContent = checked.length === 0 ? 'ไม่มีที่เลือก'
+    : `${checked.length} รายการ, −${Utils.formatNumber(sum)} บ.`;
   btn.disabled = checked.length === 0;
   const all = document.querySelectorAll('.return-chk');
   const chkAll = document.getElementById('rchkAll');
@@ -775,28 +808,40 @@ function addSelectedReturns() {
   if (!checked.length) return;
 
   const added = [];
+  let deductSum = 0;
   checked.forEach(el => {
-    const retId = el.dataset.id;
-    const ret = DB.getReturnById(retId);
-    if (!ret) return;
+    const d = _returnDetails[+el.dataset.idx];
+    if (!d) return;
 
-    let idx = items.findIndex(item => !item.name && !item.qty);
-    if (idx === -1) { items.push(emptyItem()); idx = items.length - 1; }
-
-    items[idx].name = `คืนสินค้า: ${ret.productName}`;
-    items[idx].qty = ret.qty;
-    items[idx].unitSize = 1;
-    items[idx].remainder = 0;
-    items[idx].price = 0;
-    items[idx].total = 0;
-    if (!_deductReturnIds.includes(retId)) _deductReturnIds.push(retId);
-    added.push(ret.productName);
+    // One negative line per returned product (a return may hold several items).
+    d.items.forEach(it => {
+      let idx = items.findIndex(item => !item.name && !item.qty);
+      if (idx === -1) { items.push(emptyItem()); idx = items.length - 1; }
+      const prod = it.productId ? DB.getProductById(it.productId) : null;
+      items[idx].name = `หักคืน ${it.productName || '-'}${d.sourceInvoice ? ` (จากใบ ${d.sourceInvoice})` : ''}`;
+      items[idx].qty = it.qty;
+      items[idx].unitSize = prod ? (prod.unitSize || 1) : 1;
+      items[idx].remainder = 0;
+      items[idx].price = (-it.price).toFixed(2);   // negative = deduction; editable after
+      items[idx].total = -(parseFloat(it.qty) || 0) * it.price;
+      deductSum += items[idx].total;
+      added.push(`${it.productName} × ${it.qty}`);
+    });
+    if (!_deductReturnIds.includes(d.id)) _deductReturnIds.push(d.id);
   });
 
   renderRows();
+  try {
+    const cust = DB.getCustomerById(document.getElementById('invCustomer').value);
+    DB.logActivity(session.userId, session.username, 'โหลดรายการคืนลงใบกำกับ', {
+      customer: cust ? cust.name : '', items: added.join(', '),
+      returns: _deductReturnIds.length, amount: deductSum.toFixed(2),
+    });
+  } catch (e) {}
   document.getElementById('returnsAlert').innerHTML = `
     <div class="alert alert-success p-2 mb-0">
-      <i class="bi bi-check-circle me-1"></i>เพิ่มรายการคืนสินค้า ${added.length} รายการลงใบกำกับแล้ว กรุณากรอกราคาต่อหน่วยที่ต้องการหัก
+      <i class="bi bi-check-circle me-1"></i>เพิ่มรายการหักคืน ${added.length} บรรทัด (−${Utils.formatNumber(Math.abs(deductSum))} บ.) —
+      รายการคืนจะถูกปิดอัตโนมัติเมื่อบันทึกใบกำกับ
     </div>`;
 }
 
@@ -1335,8 +1380,19 @@ async function saveInvoice(shouldPrint = false) {
   });
 
   deductCapStock(invNumber, activeItems, createdAt, customerId);
-  _deductReturnIds.forEach(id => DB.updateReturn(id, { deductedInvoice: invNumber, deductedAt: new Date().toISOString() }));
-  if (_deductReturnIds.length) DB.logActivity(session.userId, session.username, 'หักรายการคืนสินค้า', { invoiceNumber: invNumber, returnIds: _deductReturnIds });
+  // Close out deducted returns: stamp the NEW invoice number + deduction date on
+  // each return record (shows in the returns page "หักออกใบ" column) and log
+  // readable detail (products + source invoices, not raw ids).
+  _deductReturnIds.forEach(id => {
+    const ret = DB.getReturnById(id);
+    DB.updateReturn(id, { deductedInvoice: invNumber, deductedAt: new Date().toISOString() });
+    if (ret) DB.logActivity(session.userId, session.username, 'หักคืนสินค้าในใบกำกับ', {
+      invoiceNumber: invNumber,
+      sourceInvoice: ret.sourceInvoice || '',
+      items: ((ret.items && ret.items.length) ? ret.items : [{ productName: ret.productName, qty: ret.qty }])
+        .map(it => `${it.productName} × ${it.qty}`).join(', '),
+    });
+  });
   _deductReturnIds = [];
   DB.logActivity(session.userId, session.username, 'สร้างใบกำกับ', { invoiceNumber: invNumber, totalAmount, customer: customerId });
 
@@ -1598,8 +1654,16 @@ async function saveInvoiceEdit(shouldPrint = false) {
 
   DB.removeCapDeductionsByInvoice(currentInvNum);
   deductCapStock(currentInvNum, activeItems, createdAt, customerId);
-  _deductReturnIds.forEach(id => DB.updateReturn(id, { deductedInvoice: currentInvNum, deductedAt: new Date().toISOString() }));
-  if (_deductReturnIds.length) DB.logActivity(session.userId, session.username, 'หักรายการคืนสินค้า', { invoiceNumber: currentInvNum, returnIds: _deductReturnIds });
+  _deductReturnIds.forEach(id => {
+    const ret = DB.getReturnById(id);
+    DB.updateReturn(id, { deductedInvoice: currentInvNum, deductedAt: new Date().toISOString() });
+    if (ret) DB.logActivity(session.userId, session.username, 'หักคืนสินค้าในใบกำกับ', {
+      invoiceNumber: currentInvNum,
+      sourceInvoice: ret.sourceInvoice || '',
+      items: ((ret.items && ret.items.length) ? ret.items : [{ productName: ret.productName, qty: ret.qty }])
+        .map(it => `${it.productName} × ${it.qty}`).join(', '),
+    });
+  });
   _deductReturnIds = [];
   DB.logActivity(session.userId, session.username, 'แก้ไขใบกำกับ', { invoiceNumber: currentInvNum, editCount: newEditCount });
 
