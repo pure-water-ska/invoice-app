@@ -358,15 +358,18 @@ added these guards. **Understand them before touching sync.**
   Long-term recommendation to the user: upgrade Firebase to **Blaze**.
 
 ### ⚠️ OPEN BUG (unresolved as of v1.0.146)
-After a **PDF import** on a Tauri device, local `wt_invoices` dropped to **0**
-while the server kept all ~954 (the mass-delete guard logged `SYNC-DEL-BLOCKED`,
-so the server was protected) — and a **logout/login full pull did NOT restore
-local**. v1.0.146 added a diagnostic probe `SYNC-LOCAL-DROP` (in both
-`Sync._lsWrite` and `DB._set`) that logs to the Error Log, with a call stack, any
-write shrinking `wt_invoices`/`wt_payments` by >half from a >50-record array.
-**Next step: get the `SYNC-LOCAL-DROP` line from the user's Error Log to identify
-the culprit path, then fix.** (Was blocked on Firestore read-quota exhaustion from
-heavy debugging — wait for daily reset / Blaze.)
+After a **PDF import on the WEB build (non-Tauri)**, local `wt_invoices` dropped
+to **0** while the server kept all ~954 (the mass-delete guard logged
+`SYNC-DEL-BLOCKED`, so the server was protected) — and a **logout/login full pull
+did NOT restore local**. Note this is the WEB path: local lives in localStorage /
+IDB-overflow (not HDD), so `_lsWrite`/`DB._set` go through the localStorage/IDB
+branches, and the `SYNC-DEL-BLOCKED` came from `pdf-import.html`. v1.0.146 added a
+diagnostic probe `SYNC-LOCAL-DROP` (in both `Sync._lsWrite` and `DB._set`) that
+logs to the Error Log, with a call stack, any write shrinking
+`wt_invoices`/`wt_payments` by >half from a >50-record array. **Next step: get the
+`SYNC-LOCAL-DROP` line from the user's Error Log to identify the culprit path,
+then fix.** (Was blocked on Firestore read-quota exhaustion from heavy
+debugging — wait for daily reset / Blaze.)
 
 ## Troubleshooting Methodology (read before debugging a reported bug)
 
