@@ -192,6 +192,19 @@ const DB = {
     // back on refresh" for array DOCUMENTS (customers, products, users, …).
     const _hadPrev = Object.prototype.hasOwnProperty.call(this._cache, key);
     const _prevVal = _hadPrev ? this._cache[key] : undefined;
+    // ── DIAGNOSTIC PROBE (mirrors Sync._lsWrite): catch app code that shrinks
+    // local invoices/payments by more than half — logs the culprit stack.
+    try {
+      if ((key === this.K.INVOICES || key === this.K.PAYMENTS) && this.logError) {
+        const _ol = Array.isArray(_prevVal) ? _prevVal.length : -1;
+        const _nl = Array.isArray(val) ? val.length : -1;
+        if (_ol > 50 && _nl >= 0 && _nl < _ol / 2) {
+          const _src = (new Error().stack || '').split('\n').slice(2, 6).map(s => s.trim()).join(' ← ');
+          const _vv = (typeof APP_VERSION !== 'undefined' && APP_VERSION.version) ? APP_VERSION.version : '?';
+          this.logError('SYNC-LOCAL-DROP', `[v${_vv}] ${key} (DB._set): local ${_ol} → ${_nl} | src: ${_src}`);
+        }
+      }
+    } catch (e) {}
     if (window.Sync && typeof Sync._recordDocDeletions === 'function') {
       try { Sync._recordDocDeletions(key, _prevVal, val); } catch {}
     }

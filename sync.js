@@ -1242,6 +1242,25 @@ var Sync = {
   // All sync.js writes of wt_* data must go through this helper so that
   // IDB-overflow keys stay in IDB and DB._cache stays current.
   _lsWrite(lsKey, data) {
+    // ── DIAGNOSTIC PROBE: catch whoever nukes local invoices/payments ─────────
+    // Field incident: local invoices dropped to 0 (server intact) after a PDF
+    // import, and a re-login pull did NOT restore them. Every sync-side local
+    // write funnels through here, so log any write that shrinks a large local
+    // array by more than half — with the call stack identifying the culprit path
+    // (pull merge / listener / deletions doc / queue flush).
+    try {
+      if ((lsKey === 'wt_invoices' || lsKey === 'wt_payments') && typeof DB !== 'undefined' && DB.logError) {
+        const prev = DB._cache[lsKey];
+        const oldLen = Array.isArray(prev) ? prev.length : -1;
+        const newLen = Array.isArray(data) ? data.length : -1;
+        if (oldLen > 50 && newLen >= 0 && newLen < oldLen / 2) {
+          const src = (new Error().stack || '').split('\n').slice(2, 6).map(s => s.trim()).join(' ← ');
+          const ver = (typeof APP_VERSION !== 'undefined' && APP_VERSION.version) ? APP_VERSION.version : '?';
+          DB.logError('SYNC-LOCAL-DROP', `[v${ver}] ${lsKey}: local ${oldLen} → ${newLen} | src: ${src}`);
+        }
+      }
+    } catch (e) {}
+
     // Always keep DB._cache current — reads within this tick see new data.
     // DB.invalidate() will be a no-op for IDB keys (they don't have a localStorage
     // copy to re-read from), so the cache set here is the lasting reference.
