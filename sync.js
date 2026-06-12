@@ -1107,7 +1107,15 @@ var Sync = {
       let batch = this._db.batch();
       let ops   = 0;
       let bytes = 0;
-      const commit = async () => { await batch.commit(); batch = this._db.batch(); ops = 0; bytes = 0; };
+      // Per-batch progress events drive the blocking-progress overlay
+      // (Utils.bpWatchUploads): { key, done, total } emitted after every commit.
+      const totalUp = toUpsert.length;
+      let doneUp = 0;
+      const emitProg = () => {
+        try { window.dispatchEvent(new CustomEvent('sync:writeprogress', { detail: { key, done: doneUp, total: totalUp } })); } catch (e) {}
+      };
+      const commit = async () => { await batch.commit(); batch = this._db.batch(); ops = 0; bytes = 0; emitProg(); };
+      if (totalUp > 0) emitProg();
 
       // ── Cap batches by SIZE as well as op count ──────────────────────────
       // Firestore rejects any commit whose request payload exceeds ~10 MiB
@@ -1126,7 +1134,7 @@ var Sync = {
           _byName: this._deviceName(),
           _ts: firebase.firestore.FieldValue.serverTimestamp(),
         }, { merge: true });
-        ops++; bytes += recBytes;
+        ops++; bytes += recBytes; doneUp++;
       }
 
       // Delete records removed locally — in the same batch as the upserts.
@@ -1137,6 +1145,7 @@ var Sync = {
 
       if (ops > 0) {
         await batch.commit();
+        emitProg();
         // Extend the ignore window after the commit so the listener skips
         // our own echo (covers both the upserts and the deletes above).
         this._ignoreUntil[key] = Date.now() + this._skipInitialMs;

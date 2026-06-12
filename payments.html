@@ -650,7 +650,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.143"></script><script src="db.js?v=1.0.143"></script><script src="auth.js?v=1.0.143"></script><script src="nav.js?v=1.0.143"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.144"></script><script src="db.js?v=1.0.144"></script><script src="auth.js?v=1.0.144"></script><script src="nav.js?v=1.0.144"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -2689,7 +2689,29 @@ async function saveMultiPay() {
 
   if (btnSave) { btnSave.disabled = false; btnSave.innerHTML = '<i class="bi bi-check-circle me-1"></i>บันทึกทุกบิล'; }
   multiPayModal.hide();
-  _commitNow();
+  // Blocking overlay until the batch is on disk + Firestore (heavy operation)
+  {
+    const bp = Utils.blockingProgress;
+    bp.open('กำลังบันทึกการชำระหลายบิล', [
+      { id: 'save',   label: 'บันทึกลงเครื่อง' },
+      { id: 'hdd',    label: 'บันทึกลงดิสก์ (HDD)' },
+      { id: 'up_pay', label: 'อัปโหลดการชำระเงินขึ้น Firestore' },
+    ]);
+    bp.step('save', { state: 'done', detail: allocations.length + ' บิล' });
+    bp.step('hdd', { state: 'run' });
+    const onH = (e) => {
+      const d = e.detail || {};
+      if (!d.initial) { bp.step('hdd', { detail: 'เสร็จ' }); return; }
+      bp.step('hdd', { detail: `${d.initial - d.remaining}/${d.initial} ไฟล์`,
+        pct: Math.round((d.initial - d.remaining) / d.initial * 100) });
+    };
+    window.addEventListener('db:hddprogress', onH);
+    await DB.waitForHddWrites(15000);
+    window.removeEventListener('db:hddprogress', onH);
+    bp.step('hdd', { state: 'done', detail: 'เสร็จ' });
+    await Utils.bpWatchUploads(bp, { wt_payments: 'up_pay' }, []);
+    bp.close();
+  }
   Utils.showAlert(`บันทึกชำระ ${allocations.length} บิลสำเร็จ`, 'success');
   render();
 }

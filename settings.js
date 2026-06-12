@@ -807,6 +807,18 @@ async function importData(input, mode) {
   btns.forEach(b => { b.disabled = true; });
 
   try {
+    // ── Blocking overlay: user can do nothing until the import fully lands ──
+    const bp = Utils.blockingProgress;
+    bp.open('กำลังนำเข้าและอัปโหลดข้อมูล', [
+      { id: 'read',     label: 'อ่านไฟล์สำรอง' },
+      { id: 'apply',    label: 'นำเข้าลงเครื่อง' },
+      { id: 'hdd',      label: 'บันทึกลงดิสก์ (HDD)' },
+      { id: 'up_inv',   label: 'อัปโหลดใบกำกับขึ้น Firestore' },
+      { id: 'up_pay',   label: 'อัปโหลดการชำระเงิน' },
+      { id: 'up_other', label: 'อัปโหลดราคา/เอกสารข้อมูล' },
+    ]);
+    bp.step('read', { state: 'run' });
+
     // ── Read & parse JSON ────────────────────────────────────────────────────
     Utils.showProgress('อ่านไฟล์...', 5);
     await new Promise(r => setTimeout(r, 0));
@@ -823,6 +835,8 @@ async function importData(input, mode) {
       const totalRec = (data.customers?.length||0)+(data.invoices?.length||0)+(data.products?.length||0)+(data.payments?.length||0);
       if (totalRec === 0) throw new Error('ไฟล์มีข้อมูลว่างเปล่า ไม่สามารถ Overwrite ได้');
     }
+    bp.step('read',  { state: 'done', detail: 'เสร็จ' });
+    bp.step('apply', { state: 'run' });
 
     // ── Snapshot counts BEFORE import ────────────────────────────────────────
     const before = {
@@ -886,6 +900,9 @@ async function importData(input, mode) {
       priceHistory:  await importCol(data.priceHistory,  () => DB.getPriceHistory(),  DB.savePriceHistory.bind(DB),  'ประวัติราคา', 92),
     };
 
+    bp.step('apply', { state: 'done',
+      detail: `ลูกค้า ${c.customers} · ใบกำกับ ${c.invoices} · ชำระ ${c.payments} · ราคา ${(data.pricing || []).length}` });
+
     // ── Integrity check ──────────────────────────────────────────────────────
     Utils.showProgress('ตรวจสอบข้อมูล...', 97);
     await new Promise(r => setTimeout(r, 0));
@@ -906,9 +923,25 @@ async function importData(input, mode) {
     // restarting the computer right after "สำเร็จ" used to lose everything still
     // in the write queue. No-op on web.
     Utils.showProgress('กำลังบันทึกลงดิสก์...', 99);
+    bp.step('hdd', { state: 'run' });
+    const _onHdd = (e) => {
+      const d = e.detail || {};
+      if (!d.initial) { bp.step('hdd', { detail: 'เสร็จ' }); return; }
+      bp.step('hdd', { detail: `${d.initial - d.remaining}/${d.initial} ไฟล์`,
+        pct: Math.round((d.initial - d.remaining) / d.initial * 100) });
+    };
+    window.addEventListener('db:hddprogress', _onHdd);
     const hddOk = await DB.waitForHddWrites(20000);
+    window.removeEventListener('db:hddprogress', _onHdd);
+    bp.step('hdd', { state: hddOk ? 'done' : 'err', detail: hddOk ? 'เสร็จ' : 'ยังไม่เสร็จ — อย่าเพิ่งปิดแอป' });
+
+    // ── Force the Firestore upload now and show real per-batch progress ──────
+    await Utils.bpWatchUploads(bp,
+      { wt_invoices: 'up_inv', wt_payments: 'up_pay' },
+      ['up_other']);
 
     Utils.hideProgress();
+    bp.close();
     DB.logActivity(session.userId, session.username, 'Import ข้อมูล', { file: file.name, mode, before, after });
     const modeText = mode === 'overwrite' ? 'Overwrite' : 'Merge';
     Utils.showAlert(
@@ -932,6 +965,7 @@ async function importData(input, mode) {
     renderLogCounts();
   } catch (err) {
     Utils.hideProgress();
+    try { Utils.blockingProgress.close(); } catch (e) {}
     Utils.showAlert('<i class="bi bi-x-circle me-1"></i>ไม่สามารถ Import ได้: ' + err.message, 'danger');
   } finally {
     btns.forEach(b => { b.disabled = false; });
@@ -1656,10 +1690,28 @@ async function importZip(input, mode) {
     } else if (pdfFolder && !dirHandle) {
       pdfFolder.forEach((p, e) => { if (!e.dir) pdfSkipped++; });
     }
-    // Wait for the Tauri HDD writes to land before claiming success (no-op on web)
-    Utils.showProgress('กำลังบันทึกลงดิสก์...', 99);
+    // Blocking overlay: HDD write + Firestore upload with real progress
+    const bp = Utils.blockingProgress;
+    bp.open('กำลังบันทึกและอัปโหลดข้อมูล (ZIP)', [
+      { id: 'hdd',      label: 'บันทึกลงดิสก์ (HDD)' },
+      { id: 'up_inv',   label: 'อัปโหลดใบกำกับขึ้น Firestore' },
+      { id: 'up_pay',   label: 'อัปโหลดการชำระเงิน' },
+      { id: 'up_other', label: 'อัปโหลดราคา/เอกสารข้อมูล' },
+    ]);
+    bp.step('hdd', { state: 'run' });
+    const _onHddZ = (e) => {
+      const d = e.detail || {};
+      if (!d.initial) { bp.step('hdd', { detail: 'เสร็จ' }); return; }
+      bp.step('hdd', { detail: `${d.initial - d.remaining}/${d.initial} ไฟล์`,
+        pct: Math.round((d.initial - d.remaining) / d.initial * 100) });
+    };
+    window.addEventListener('db:hddprogress', _onHddZ);
     const hddOk = await DB.waitForHddWrites(20000);
+    window.removeEventListener('db:hddprogress', _onHddZ);
+    bp.step('hdd', { state: hddOk ? 'done' : 'err', detail: hddOk ? 'เสร็จ' : 'ยังไม่เสร็จ — อย่าเพิ่งปิดแอป' });
+    await Utils.bpWatchUploads(bp, { wt_invoices: 'up_inv', wt_payments: 'up_pay' }, ['up_other']);
     Utils.hideProgress();
+    bp.close();
 
     DB.logActivity(session.userId, session.username, 'Import ZIP', { file: file.name, mode, pdfs: pdfCount });
     const modeText = mode === 'overwrite' ? 'Overwrite' : 'Merge';
@@ -1675,6 +1727,7 @@ async function importZip(input, mode) {
     }
     loadCompanySettings(); loadStats(); renderStorageBar(); renderLogCounts();
   } catch(err) {
+    try { Utils.blockingProgress.close(); } catch (e) {}
     Utils.showAlert('ไฟล์ไม่ถูกต้อง: ' + err.message, 'danger');
   }
   input.value = '';
@@ -2251,15 +2304,23 @@ async function checkSyncStatus() {
     </table>`;
 }
 
-// Force any pending debounced/queued Firestore writes to commit now.
+// Force any pending debounced/queued Firestore writes to commit now —
+// with the blocking overlay showing real per-batch progress.
 async function flushPendingUploads() {
   if (typeof Sync === 'undefined' || typeof Sync.flushNow !== 'function') { Utils.showAlert('ระบบซิงค์ยังไม่พร้อม', 'warning'); return; }
-  Utils.showAlert('<i class="bi bi-cloud-upload me-1"></i>กำลังอัปโหลดงานที่ค้าง…', 'info');
+  const bp = Utils.blockingProgress;
+  bp.open('กำลังอัปโหลดข้อมูลที่ค้าง', [
+    { id: 'up_inv',   label: 'อัปโหลดใบกำกับขึ้น Firestore' },
+    { id: 'up_pay',   label: 'อัปโหลดการชำระเงิน' },
+    { id: 'up_other', label: 'อื่น ๆ (ลูกค้า/สินค้า/ราคา/เอกสาร)' },
+  ]);
   // Re-push the single-source-of-truth modules (their next-write diff sends anything missing)
   try { ['CustomerSync', 'ProductSync', 'PricingSync'].forEach(m => { if (window[m]) window[m].onLocalChange(null, (m==='PricingSync'?DB.getPricing():m==='ProductSync'?DB.getProducts():DB.getCustomers())); }); } catch {}
-  try { await Sync.flushNow(); } catch {}
-  Utils.showAlert('<i class="bi bi-check-circle me-1"></i>สั่งอัปโหลดแล้ว — กด "ตรวจสถานะ" เพื่อดูผล');
-  setTimeout(checkSyncStatus, 1500);
+  try {
+    await Utils.bpWatchUploads(bp, { wt_invoices: 'up_inv', wt_payments: 'up_pay' }, ['up_other']);
+  } finally { bp.close(); }
+  Utils.showAlert('<i class="bi bi-check-circle me-1"></i>อัปโหลดเสร็จ — กำลังตรวจสถานะ…');
+  checkSyncStatus();
 }
 
 /* ─── Re-baseline: wipe Firestore for a clean re-import ─────────────────────

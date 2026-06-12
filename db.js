@@ -122,13 +122,22 @@ const DB = {
   // used to lose everything that was still in the async write queue.
   async waitForHddWrites(timeoutMs = 15000) {
     if (!window.IS_TAURI) return true;
+    // Emit db:hddprogress { remaining, initial } so the blocking-progress
+    // overlay can show "เขียนดิสก์ X/Y ไฟล์" while waiting.
+    const initial = this._tauri._inflight.size;
+    const emit = () => {
+      try { window.dispatchEvent(new CustomEvent('db:hddprogress', { detail: { remaining: this._tauri._inflight.size, initial } })); } catch (e) {}
+    };
+    emit();
     const deadline = Date.now() + timeoutMs;
     while (this._tauri._inflight.size > 0 && Date.now() < deadline) {
       await Promise.race([
         Promise.allSettled([...this._tauri._inflight]),
         new Promise(r => setTimeout(r, 250)),
       ]);
+      emit();
     }
+    emit();
     return this._tauri._inflight.size === 0;
   },
 

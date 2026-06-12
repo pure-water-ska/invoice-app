@@ -159,9 +159,9 @@ const LZString = (function () {
 // ── End LZString ────────────────────────────────────────────────────────────
 
 const APP_VERSION = {
-  version: '1.0.143',
-  date: '2026-06-11T17:16:42.236Z',
-  label: 'v1.0.143 (12 มิ.ย. 2569)',
+  version: '1.0.144',
+  date: '2026-06-12T07:03:44.917Z',
+  label: 'v1.0.144 (12 มิ.ย. 2569)',
 };
 
 // Changelog — add new entry here when releasing a new version.
@@ -655,3 +655,118 @@ Utils.compressImage = function(file, maxPx, quality) {
   // Small delay so the logout navigation fully settles before closing.
   if (aw && typeof aw.close === 'function') setTimeout(function () { aw.close(); }, 300);
 })();
+
+// ── Blocking progress overlay ────────────────────────────────────────────────
+// Full-screen blocker for HEAVY operations (import/restore, flush-pending,
+// multi-pay batch). Shows per-step detail + real numbers + overall %, an
+// elapsed-time line, and a "ทำต่อเบื้องหลัง" escape button (closes the overlay
+// only — the work continues; the top upload bar still reflects it).
+// Usage:
+//   Utils.blockingProgress.open('title', [{id,label}, ...]);
+//   Utils.blockingProgress.step('id', { state:'run'|'done'|'err', detail, pct });
+//   Utils.blockingProgress.close();
+Utils.blockingProgress = (function () {
+  let el = null, steps = [], t0 = 0, timer = null;
+  const icon = (s) =>
+    s === 'done' ? '<i class="bi bi-check-circle-fill" style="color:#198754"></i>' :
+    s === 'err'  ? '<i class="bi bi-x-circle-fill" style="color:#dc3545"></i>' :
+    s === 'run'  ? '<span style="width:15px;height:15px;border:2px solid #0d6efd;border-right-color:transparent;border-radius:50%;display:inline-block;animation:wtbpspin .7s linear infinite;flex-shrink:0"></span>' :
+                   '<i class="bi bi-circle" style="color:#adb5bd"></i>';
+  function render() {
+    if (!el) return;
+    el.querySelector('[data-bp-steps]').innerHTML = steps.map(s => `
+      <div style="display:flex;align-items:center;gap:10px;padding:5px 0;font-size:14px;${s.state === 'wait' ? 'color:#888' : ''}">
+        ${icon(s.state)}
+        <span style="flex:1;${s.state === 'run' ? 'font-weight:600' : ''}">${s.label}</span>
+        <span style="font-size:12px;font-weight:${s.state === 'run' ? '600' : '400'};color:${s.state === 'run' ? '#0d6efd' : '#888'}">${s.detail || ''}</span>
+      </div>
+      ${s.state === 'run' && s.pct != null ? `<div style="height:5px;background:#e9ecef;border-radius:3px;margin:0 0 4px 25px"><div style="height:100%;width:${s.pct}%;background:#0d6efd;border-radius:3px"></div></div>` : ''}`
+    ).join('');
+    let total = 0, done = 0;
+    steps.forEach(s => { total++; done += s.state === 'done' ? 1 : (s.state === 'run' && s.pct != null ? s.pct / 100 : 0); });
+    const pct = Math.round(done / Math.max(1, total) * 100);
+    el.querySelector('[data-bp-pct]').textContent = pct + '%';
+    el.querySelector('[data-bp-bar]').style.width = pct + '%';
+  }
+  return {
+    open(title, stepDefs) {
+      this.close();
+      steps = (stepDefs || []).map(s => ({ ...s, state: 'wait', detail: s.detail || '' }));
+      t0 = Date.now();
+      if (!document.getElementById('wtBpCss')) {
+        const st = document.createElement('style'); st.id = 'wtBpCss';
+        st.textContent = '@keyframes wtbpspin{to{transform:rotate(360deg)}}';
+        (document.head || document.documentElement).appendChild(st);
+      }
+      el = document.createElement('div');
+      el.id = 'wtBlockingProgress';
+      el.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.62);z-index:99999;display:flex;align-items:center;justify-content:center;font-family:Sarabun,sans-serif';
+      el.innerHTML = `
+        <div style="background:#fff;border-radius:14px;width:92%;max-width:480px;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.35);color:#212529">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:2px">
+            <span style="width:16px;height:16px;border:2px solid #0d6efd;border-right-color:transparent;border-radius:50%;display:inline-block;animation:wtbpspin .7s linear infinite"></span>
+            <span style="font-weight:700" data-bp-title></span>
+          </div>
+          <div style="font-size:12px;color:#888;margin-bottom:12px">กรุณาอย่าปิดโปรแกรมหรือรีเฟรช จนกว่าจะเสร็จ</div>
+          <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:600;margin-bottom:4px"><span>ความคืบหน้ารวม</span><span data-bp-pct>0%</span></div>
+          <div style="height:8px;background:#e9ecef;border-radius:4px;overflow:hidden;margin-bottom:12px"><div data-bp-bar style="height:100%;width:0%;background:#0d6efd;transition:width .3s"></div></div>
+          <div data-bp-steps></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding-top:8px;border-top:1px solid #eee">
+            <span data-bp-time style="font-size:11px;color:#888"></span>
+            <button data-bp-bg style="font-size:12px;padding:4px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;color:#555;cursor:pointer">ทำต่อเบื้องหลัง</button>
+          </div>
+        </div>`;
+      el.querySelector('[data-bp-title]').textContent = title;
+      el.querySelector('[data-bp-bg]').onclick = () => this.close();
+      document.body.appendChild(el);
+      const startStr = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      timer = setInterval(() => {
+        if (!el) return;
+        el.querySelector('[data-bp-time]').textContent =
+          'เริ่มเมื่อ ' + startStr + ' · ผ่านไป ' + Math.round((Date.now() - t0) / 1000) + ' วินาที';
+      }, 1000);
+      render();
+    },
+    step(id, patch) { const s = steps.find(x => x.id === id); if (!s) return; Object.assign(s, patch); render(); },
+    isOpen() { return !!el; },
+    close() { if (timer) { clearInterval(timer); timer = null; } if (el) { el.remove(); el = null; } steps = []; },
+  };
+})();
+
+// Watch Firestore upload progress for the overlay. `ids` maps a synced key to a
+// step id, e.g. { wt_invoices:'up_inv', wt_payments:'up_pay' }. Fires
+// Sync.flushNow() to force pending debounced writes, then drives each step from
+// the sync:writeprogress events emitted per committed batch. `extraDoneIds` are
+// steps (e.g. module-synced pricing) marked done when the engine goes idle.
+Utils.bpWatchUploads = async function (bp, ids, extraDoneIds, timeoutMs) {
+  timeoutMs = timeoutMs || 180000;
+  const pending = {};                       // key → true=done, false=in progress, null=unseen
+  Object.keys(ids).forEach(k => { pending[k] = null; });
+  const onWp = (e) => {
+    const d = e.detail || {};
+    const sid = ids[d.key]; if (!sid) return;
+    const fin = d.done >= d.total;
+    pending[d.key] = fin;
+    bp.step(sid, { state: fin ? 'done' : 'run',
+      detail: fin ? (d.total + ' รายการ') : (d.done + '/' + d.total),
+      pct: Math.round(d.done / Math.max(1, d.total) * 100) });
+  };
+  window.addEventListener('sync:writeprogress', onWp);
+  Object.values(ids).forEach(sid => bp.step(sid, { state: 'run', detail: 'กำลังเริ่ม…' }));
+  (extraDoneIds || []).forEach(sid => bp.step(sid, { state: 'run' }));
+  try { if (window.Sync && typeof Sync.flushNow === 'function') Sync.flushNow(); } catch (e) {}
+  const t0 = Date.now();
+  for (;;) {
+    if (Object.values(pending).every(v => v === true)) break;
+    if (Date.now() - t0 > timeoutMs) break;
+    // Engine idle after a grace period → keys with no events had nothing to send.
+    if (Date.now() - t0 > 4000 && window.Sync && Sync.isUploading && !Sync.isUploading()) {
+      Object.keys(pending).forEach(k => { if (pending[k] !== false) pending[k] = true; });
+      break;
+    }
+    await new Promise(r => setTimeout(r, 300));
+  }
+  window.removeEventListener('sync:writeprogress', onWp);
+  Object.entries(ids).forEach(([k, sid]) => { if (pending[k] !== false) bp.step(sid, { state: 'done' }); });
+  (extraDoneIds || []).forEach(sid => bp.step(sid, { state: 'done', detail: 'เสร็จ' }));
+};
