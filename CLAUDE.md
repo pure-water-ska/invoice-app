@@ -182,12 +182,24 @@ these files — **not** `sync.js`:
 | `collection-sync.js` | `CollectionSync.create(cfg)` factory | — | — | — |
 | `customer-sync.js` | `window.CustomerSync` | `customers_v2` | `wt_customers` | `name` |
 | `product-sync.js` | `window.ProductSync` | `products_v2` | `wt_products` | `name` |
-| `pricing-sync.js` | `window.PricingSync` | `pricing_v2` | `wt_pricing` | `productId\|customerId\|shippingMethod` |
+| `pricing-grouped-sync.js` | `window.PricingSync` | `pricing_byproduct` | `wt_pricing` | (grouped — see below) |
 | `user-sync.js` | `window.UserSync` | `users_v2` | `wt_users` | `username` |
 
-> `customer-sync.js` is hand-written (the original); the other three are thin
-> `CollectionSync.create({...})` instances. All four are loaded by `nav.js` after
+> `customer-sync.js` is hand-written (the original); product/user are thin
+> `CollectionSync.create({...})` instances. All are loaded by `nav.js` after
 > `sync.js` and are Network-Only in `sw.js`.
+>
+> **Pricing is NOT a CollectionSync instance** (v1.0.137+). `pricing-sync.js`
+> (old, collection `pricing_v2`, 1 doc per rule) is **dormant — do not re-enable**.
+> Pricing now uses `pricing-grouped-sync.js`: **one Firestore doc per product**
+> (`pricing_byproduct/{productId}`, `{ productId, rules:{ruleId:rule}, _by/_ts }`)
+> to cut reads ~100× (3,329 rule-docs → ~32 product-docs; reads were the dominant
+> Firestore cost). The LOCAL shape is unchanged — `wt_pricing` is still a flat
+> array, so `DB.getPricing()`/`getPrice()`/pricing.html/invoice-create are
+> untouched; a translate layer groups on write (1 write per changed product) and
+> flattens on read. Same interface as the old module (`init`/`onLocalChange`/
+> `diagnose`); db.js hook + nav wiring unchanged. Round-trip is covered by
+> `test-pricing-roundtrip.js` (run `node test-pricing-roundtrip.js`).
 
 **The model (one rule): the Firestore collection is the single source of truth.**
 - A live `onSnapshot` listener turns each **server** snapshot into the local array
@@ -305,6 +317,56 @@ const b64 = await Utils.compressImage(file, 900, 0.70);
 - **`window.DB` AND `window.IDB` are `undefined` — use the bare name.** `db.js` declares `const DB = {…}` and `idb.js` declares `const IDB = (…)()` — both lexical globals NOT attached to `window` (a top-level `const` in a classic script does not become a `window` property). `window.Sync` and `window.CustomerSync` etc. ARE on `window` (assigned explicitly), but **`DB` and `IDB` are not**. Never guard with `window.DB ? …` / `window.IDB ? …` — it always takes the false branch. Use the bare name or `typeof DB !== 'undefined'` / `typeof IDB !== 'undefined'`. The `window.DB` form silently disabled the customer backstop for several releases; the `window.IDB` form (v1.0.85 and earlier) silently disabled `sync.js` `_lsWrite()` cache+HDD writes (Firestore-pulled invoices vanished after navigation/logout) and `local-folder-sync.js` handle persistence (the folder path showed as "gone" on every reload). Fixed in v1.0.86. The PDF-folder card never had the bug because it used bare `IDB`.
 - **`DB.getX()` returns the cache array by reference — never diff against db's "prev".** `DB.addCustomer/addProduct/upsertPrice/addUser` do `const a = DB.getX(); a.push(...); DB.saveX(a)`, which mutates the cached array **in place**. So in `DB._set` the captured previous value and the new value are the *same* mutated array (`prev === next`). Any per-record diff must compare against an independent baseline (the sync modules use `_serverFp`), not against db's prev — otherwise new adds are silently never pushed.
 - **Destructive confirms must use `await Utils.confirm(...)`, never `confirm(...)`.** In the Tauri desktop app `window.confirm()` returns a Promise (truthy), so `if (!confirm(msg)) return;` never aborts and the action runs *without* waiting for Yes/No. `Utils.confirm(message, title)` returns a Promise resolving to a boolean (native blocking dialog in Tauri, `window.confirm` on web). Always `await` it and make the enclosing function `async`. For inline action strings, use `Utils.confirm(msg).then(ok => { if (ok) {…} })`.
+
+## Sync safety rails & heavy-operation UX (June 2026, v1.0.130–146)
+
+A multi-day data-loss incident (payments/invoices mass-deleted across devices)
+added these guards. **Understand them before touching sync.**
+
+- **Mass-delete guard (`sync.js _writeKey`, COLLECTIONS):** the set-difference
+  deletion inference (`serverKnown − local`) is only safe when local data is
+  COMPLETE. With an incomplete local array (interrupted pull / cold cache / flaky
+  conn) it deleted everything the device merely didn't have. Now: if a single
+  write would delete **> 5** records it is BLOCKED, logged as `SYNC-DEL-BLOCKED`,
+  and the blocked ids are removed from `_serverIds` (so the warning doesn't recur
+  forever). Small deletions (≤5) still propagate. There is a matching pull-side
+  poison guard in `_applyTombstones` / `_filterArrayTombstones`.
+- **Firestore 10 MiB request cap:** invoice/payment records embed base64 images
+  (Drive is disabled in Tauri), so batches are flushed at **~1.5 MB or 200 ops**
+  in `_writeKey` — without this every upload of imported invoices failed with
+  `invalid-argument: Request payload size exceeds the limit`.
+- **`DB.waitForHddWrites(timeoutMs)`** — awaits pending Tauri HDD writes
+  (`_tauri._inflight`). Import (JSON+ZIP) calls it before reporting success, so a
+  computer restart right after import can't lose still-queued data.
+- **Blocking progress overlay (`Utils.blockingProgress` + `Utils.bpWatchUploads`):**
+  full-screen blocker with per-step detail + real numbers for HEAVY ops only
+  (import, "อัปโหลดที่ค้าง", multi-pay). Driven by `sync:writeprogress`
+  ({key,done,total} per batch) and `db:hddprogress` ({remaining,initial}).
+  Ordinary single saves keep the non-blocking top bar (`Sync._initUploadBar`).
+- **Desktop close guard (`nav.js`):** `appWindow.onCloseRequested` blocks the X
+  while logged in; the user confirms → full `Auth.logout()` (flushes uploads) →
+  `index.html` hop in `utils.js` closes the window for real.
+- **Admin Re-baseline tool (`settings.js runRebaseline`):** Danger Zone, type
+  RESET → deletes invoices/payments/customers_v2/products_v2/pricing_v2/
+  pricing_byproduct + data/ docs (keeps `users`/`users_cfg` + pdf_pages) directly
+  via the Firestore API (bypasses the mass-delete guard on purpose). Used to wipe
+  Firestore for a clean re-import.
+- **Sync-status panel (`settings.js checkSyncStatus`):** local vs server counts.
+  This build's compat Firestore has **no `count()`** → falls back to `.get().size`
+  (a FULL read of the collection — expensive; don't spam it). Reads are the
+  dominant Firestore cost; a full pull on every login re-reads all ~950 invoices.
+  Long-term recommendation to the user: upgrade Firebase to **Blaze**.
+
+### ⚠️ OPEN BUG (unresolved as of v1.0.146)
+After a **PDF import** on a Tauri device, local `wt_invoices` dropped to **0**
+while the server kept all ~954 (the mass-delete guard logged `SYNC-DEL-BLOCKED`,
+so the server was protected) — and a **logout/login full pull did NOT restore
+local**. v1.0.146 added a diagnostic probe `SYNC-LOCAL-DROP` (in both
+`Sync._lsWrite` and `DB._set`) that logs to the Error Log, with a call stack, any
+write shrinking `wt_invoices`/`wt_payments` by >half from a >50-record array.
+**Next step: get the `SYNC-LOCAL-DROP` line from the user's Error Log to identify
+the culprit path, then fix.** (Was blocked on Firestore read-quota exhaustion from
+heavy debugging — wait for daily reset / Blaze.)
 
 ## Troubleshooting Methodology (read before debugging a reported bug)
 
