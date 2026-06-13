@@ -159,9 +159,9 @@ const LZString = (function () {
 // ── End LZString ────────────────────────────────────────────────────────────
 
 const APP_VERSION = {
-  version: '1.0.147',
-  date: '2026-06-13T16:05:00.440Z',
-  label: 'v1.0.147 (13 มิ.ย. 2569)',
+  version: '1.0.148',
+  date: '2026-06-13T16:29:29.434Z',
+  label: 'v1.0.148 (13 มิ.ย. 2569)',
 };
 
 // Changelog — add new entry here when releasing a new version.
@@ -639,21 +639,69 @@ Utils.compressImage = function(file, maxPx, quality) {
   });
 };
 
-// ── Close-after-logout hop (desktop close guard, see nav.js) ─────────────────
-// When the user chose "ออกจากระบบแล้วปิดโปรแกรม" on the close dialog,
-// Auth.logout() navigated here (index.html) with this sessionStorage flag set.
-// Now that the session is cleared, actually close the window. The close guard
-// in nav.js lets it through because there is no session (and index.html doesn't
-// load nav.js at all).
+// ── Desktop close guard (registered on EVERY page, incl. index.html login) ───
+// MUST live in utils.js, not nav.js: index.html (login page) does NOT load nav.js,
+// so after logging out the login page had NO live close handler. Tauri 1.x keeps
+// routing the X-button through JS once onCloseRequested has ever been registered,
+// and its wrapper only closes when a live handler runs WITHOUT preventDefault —
+// with no handler on index.html the close request hung ("can't close after logout").
+// Registering here means every page has a live handler:
+//   • logged out / login page (no session) → return without preventDefault → closes
+//   • logged in → flush uploads + wait for HDD writes, then aw.close()
+// No forced logout and no backup-download save dialog (that dialog stalled the close).
+// Force-kill / power-off still can't be intercepted (covered by immediate HDD writes
+// + the wt_sync_pending queue that flushes on next launch).
 (function () {
   if (!window.IS_TAURI) return;
-  var flag = false;
-  try { flag = sessionStorage.getItem('wt_close_after_logout') === '1'; } catch (e) {}
-  if (!flag) return;
-  try { sessionStorage.removeItem('wt_close_after_logout'); } catch (e) {}
   var aw = window.__TAURI__ && window.__TAURI__.window && window.__TAURI__.window.appWindow;
-  // Small delay so the logout navigation fully settles before closing.
-  if (aw && typeof aw.close === 'function') setTimeout(function () { aw.close(); }, 300);
+  if (!aw || typeof aw.onCloseRequested !== 'function') return;
+  var _closing = false;
+  aw.onCloseRequested(async function (event) {
+    if (_closing) return;                 // already flushed → let Tauri close for real
+    var s = null;
+    try { s = window.Auth && Auth.session && Auth.session(); } catch (e) {}
+    if (!s) return;                       // logged out / login page → close normally
+
+    event.preventDefault();               // hold the close until data is safe
+    var bp = (window.Utils && Utils.blockingProgress) || null;
+    try {
+      if (bp) bp.open('กำลังบันทึกข้อมูลก่อนปิดโปรแกรม', [
+        { id: 'up',  label: 'อัปโหลดข้อมูลที่ค้างขึ้น server' },
+        { id: 'hdd', label: 'เขียนข้อมูลลงดิสก์ให้ครบ' },
+      ]);
+    } catch (e) {}
+
+    // 1) Flush pending Firestore uploads — time-boxed so a quota-blocked/offline
+    //    Firestore can never make the close hang.
+    try {
+      if (bp) bp.step('up', { state: 'run' });
+      if (window.Sync && typeof Sync.flushNow === 'function') {
+        await Promise.race([ Sync.flushNow(), new Promise(function (r) { setTimeout(r, 8000); }) ]);
+      }
+      if (bp) bp.step('up', { state: 'done' });
+    } catch (e) { try { if (bp) bp.step('up', { state: 'err' }); } catch (e2) {} }
+
+    // 2) Wait for HDD writes to land (the durable store on desktop).
+    try {
+      if (bp) bp.step('hdd', { state: 'run' });
+      if (typeof DB !== 'undefined' && typeof DB.waitForHddWrites === 'function') await DB.waitForHddWrites(8000);
+      if (bp) bp.step('hdd', { state: 'done' });
+    } catch (e) { try { if (bp) bp.step('hdd', { state: 'err' }); } catch (e2) {} }
+
+    // 3) Best-effort restore point written straight to the data folder (no save
+    //    dialog) — a redundant safety net beside the wt_*.json files.
+    try {
+      var t = (typeof DB !== 'undefined') && DB._tauri;
+      if (t && t.dataDir && window.__TAURI__ && window.__TAURI__.fs && typeof DB.buildBackupPayload === 'function') {
+        var p = await window.__TAURI__.path.join(t.dataDir, '_restore_on_close.json');
+        await window.__TAURI__.fs.writeTextFile(p, JSON.stringify(DB.buildBackupPayload()));
+      }
+    } catch (e) {}
+
+    _closing = true;
+    try { if (bp) bp.close(); } catch (e) {}
+    try { aw.close(); } catch (e) {}      // re-fires close-requested; _closing → passes through
+  });
 })();
 
 // ── Blocking progress overlay ────────────────────────────────────────────────
