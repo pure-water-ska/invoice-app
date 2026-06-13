@@ -136,7 +136,7 @@
 </div>
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
-<script src="utils.js?v=1.0.146"></script><script src="db.js?v=1.0.146"></script><script src="auth.js?v=1.0.146"></script><script src="nav.js?v=1.0.146"></script><script src="idb.js?v=1.0.146"></script>
+<script src="utils.js?v=1.0.147"></script><script src="db.js?v=1.0.147"></script><script src="auth.js?v=1.0.147"></script><script src="nav.js?v=1.0.147"></script><script src="idb.js?v=1.0.147"></script>
 <script src="drive-config.js" onerror="window.GOOGLE_CLIENT_ID=''"></script>
 <script src="drive-store.js"></script>
 <script>
@@ -149,6 +149,29 @@ Nav.render('pdf-import');
 
 let _cards = [];
 let _custs  = [];
+let _probedIncomplete = false;
+
+// ── Diagnostic: catch importing onto an INCOMPLETE local invoice set ──────────
+// The "invoices disappear after import" incident traced to this: local invoices
+// were already near-empty when import ran (cache loaded a depleted HDD/localStorage
+// set), so addInvoice built a tiny array and the push tripped the mass-delete
+// guard. SYNC-LOCAL-DROP can't catch this (the set was already small — never a
+// >50→<half shrink). This logs the state going IN, once per page, so the culprit
+// is visible in the Error Log even when DevTools is disabled in release builds.
+function probeImportIncomplete() {
+  if (_probedIncomplete) return;
+  _probedIncomplete = true;
+  try {
+    const local  = DB.getInvoices().length;
+    const known  = (window.Sync && Sync._serverIds && Sync._serverIds.invoices) ? Sync._serverIds.invoices.size : -1;
+    if (known > 50 && local < known / 2) {
+      const ver = (typeof APP_VERSION !== 'undefined' && APP_VERSION.version) ? APP_VERSION.version : '?';
+      DB.logError('IMPORT-ON-INCOMPLETE',
+        `[v${ver}] importing onto incomplete local: getInvoices=${local}, serverKnown=${known}. ` +
+        `กู้ด้วย ตั้งค่า → ดึงใบกำกับทั้งหมด ก่อน import`);
+    }
+  } catch (e) {}
+}
 
 // _custs is refreshed at the start of handleFiles() so it always reflects
 // the latest CustomerSync snapshot rather than a one-time DOMContentLoaded
@@ -799,6 +822,7 @@ async function saveSingleCard(ci) {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลังบันทึก...';
 
+  probeImportIncomplete();   // log if local invoice set is incomplete BEFORE we add
   const createdAt = d.invoiceDate ? new Date(d.invoiceDate).toISOString() : new Date().toISOString();
   DB.addInvoice({
     id: Utils.uuid(), invoiceNumber: d.invoiceNumber, page: 1, totalPages: 1,

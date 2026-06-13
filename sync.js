@@ -1590,6 +1590,58 @@ var Sync = {
     console.log('[Sync] Initial pull complete');
   },
 
+  // ── Recover an archive collection IN FULL (no date filter) ─────────────────
+  // _pullAll() only fetches the last ARCHIVE_MONTHS of invoices/payments, so once
+  // local is wiped the older records can NEVER return from a normal pull. This
+  // reads the ENTIRE collection and merges it additively into local — it keeps
+  // every existing local record and only ADDS server records that are missing
+  // locally; it never deletes. Read-heavy (full collection read) → gated behind
+  // an explicit admin button. onProgress({ phase:'fetch'|'merge'|'done', total }).
+  async recoverCollectionFull(colName, onProgress) {
+    if (!this.ready || !this._db) throw new Error('Sync not ready');
+    const lsKey = Object.keys(this.COLLECTIONS).find(k => this.COLLECTIONS[k] === colName) || ('wt_' + colName);
+    const base  = this._orgRef();
+    if (onProgress) onProgress({ phase: 'fetch', total: 0 });
+    const snap  = await base.collection(colName).get();   // full collection (no where-clause)
+    const total = snap.size;
+    if (onProgress) onProgress({ phase: 'merge', total });
+
+    // Strip metadata + drop records with a still-fresh tombstone (don't resurrect deletes)
+    const stones = this._getTombstones(colName);
+    const now    = Date.now();
+    const serverRecs = [];
+    snap.docs.forEach(d => {
+      if (stones[d.id] && now - stones[d.id] <= this._tombstoneTTL) return;
+      const { _by, _ts, ...rec } = d.data();
+      serverRecs.push(rec);
+    });
+
+    // Merge additively by id — keep ALL local records, add missing server ones.
+    let localArr = [];
+    try { localArr = JSON.parse(this._localRead(lsKey) || '[]'); } catch {}
+    const byId = new Map();
+    for (const r of localArr)   if (r && r.id) byId.set(r.id, r);
+    let added = 0;
+    for (const r of serverRecs) if (r && r.id && !byId.has(r.id)) { byId.set(r.id, r); added++; }
+    const merged = [...byId.values()];
+
+    // Seed sync state so the next write doesn't mis-infer deletions or re-push everything.
+    if (!this._serverIds[colName]) this._serverIds[colName] = new Set();
+    snap.docs.forEach(d => this._serverIds[colName].add(d.id));
+    this._saveServerIds(colName);
+    this._pullIds[colName] = new Set(snap.docs.map(d => d.id));
+    this._savePullIds(colName);
+    if (!this._lastSyncedRecs[colName]) this._lastSyncedRecs[colName] = new Map();
+    for (const r of merged) { if (r.id) { const { _by, _ts, ...rc } = r; this._lastSyncedRecs[colName].set(r.id, JSON.stringify(rc)); } }
+
+    // Write merged set to local (cache + HDD on Tauri). Array grows → no SYNC-LOCAL-DROP.
+    this._lsWrite(lsKey, merged);
+    if ((typeof DB !== 'undefined')) DB.invalidate(lsKey);
+    if (onProgress) onProgress({ phase: 'done', total, added, localCount: merged.length });
+    console.log(`[Sync] recoverCollectionFull ${colName}: server=${total}, added=${added}, local now=${merged.length}`);
+    return { total, added, localCount: merged.length };
+  },
+
   // ── Force-push ALL local data to Firestore (use after LZString migration) ──
   async pushAll(onProgress) {
     if (!this.ready) throw new Error('Sync not ready');

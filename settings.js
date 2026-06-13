@@ -2323,6 +2323,38 @@ async function flushPendingUploads() {
   checkSyncStatus();
 }
 
+// Recover ALL invoices from Firestore (full pull, no 6-month filter) and merge
+// additively into local. Restores archived invoices that a local wipe removed —
+// the normal date-filtered pull can never bring those back. Read-heavy → admin button.
+async function recoverAllInvoices() {
+  const btn = document.getElementById('recoverInvBtn');
+  const out = document.getElementById('recoverInvOut');
+  const show = (html, cls) => { out.classList.remove('d-none'); out.className = 'small mt-2 ' + (cls || ''); out.innerHTML = html; };
+  if (typeof Sync === 'undefined' || !Sync.ready || typeof Sync.recoverCollectionFull !== 'function') {
+    show('<i class="bi bi-exclamation-triangle me-1"></i>ระบบซิงค์ยังไม่พร้อม — รอ badge sync เป็นปกติก่อน', 'text-warning');
+    return;
+  }
+  if (!await Utils.confirm('ดึงใบกำกับทั้งหมดจาก server มาเก็บในเครื่องนี้?\n\nจะอ่านทุกใบ (ใช้ read โควต้าเยอะ) และเพิ่มเข้าของเดิม ไม่ลบอะไรทิ้ง', 'กู้ใบกำกับทั้งหมด')) return;
+  btn.disabled = true;
+  show('<span class="spinner-border spinner-border-sm me-1"></span>กำลังดึงใบกำกับจาก server…', 'text-primary');
+  try {
+    const r = await Sync.recoverCollectionFull('invoices', (p) => {
+      if (p.phase === 'fetch') show('<span class="spinner-border spinner-border-sm me-1"></span>กำลังอ่านใบกำกับจาก server…', 'text-primary');
+      else if (p.phase === 'merge') show(`<span class="spinner-border spinner-border-sm me-1"></span>กำลังรวมเข้าเครื่อง… (${p.total} ใบบน server)`, 'text-primary');
+    });
+    try { if (typeof DB.waitForHddWrites === 'function') await DB.waitForHddWrites(15000); } catch {}
+    show(`<i class="bi bi-check-circle-fill text-success me-1"></i>กู้สำเร็จ — เพิ่ม ${r.added} ใบ (ในเครื่องตอนนี้ ${r.localCount} ใบ)`, 'text-success');
+    checkSyncStatus();
+  } catch (e) {
+    const msg = (e.code === 'resource-exhausted')
+      ? 'โควต้า Firestore หมด — รอรีเซ็ตรายวันแล้วลองใหม่'
+      : (e.message || e.code || 'เกิดข้อผิดพลาด');
+    show(`<i class="bi bi-x-circle-fill text-danger me-1"></i>กู้ไม่สำเร็จ: ${msg}`, 'text-danger');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 /* ─── Re-baseline: wipe Firestore for a clean re-import ─────────────────────
    Deletes ALL business data from the org's Firestore (invoices, payments,
    customers_v2, products_v2, pricing_v2, and every data/ document) so a vetted

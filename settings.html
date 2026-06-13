@@ -557,6 +557,24 @@
     <div class="card-body">
       <div class="small text-muted mb-2">เทียบจำนวนข้อมูลในเครื่องกับบน Firestore (ใช้ count — ~1 read ต่อรายการ ไม่เปลืองโควต้า)</div>
       <div id="syncStatusBody"><div class="text-muted small text-center py-3">กด "ตรวจสถานะ" เพื่อเทียบจำนวน</div></div>
+
+      <!-- ── กู้ใบกำกับทั้งหมดจาก server (full pull, ไม่จำกัด 6 เดือน) ───────── -->
+      <hr class="my-3">
+      <div class="d-flex align-items-center gap-2 mb-1">
+        <i class="bi bi-cloud-download text-primary"></i>
+        <span class="fw-semibold">กู้ใบกำกับทั้งหมดจาก server</span>
+      </div>
+      <div class="small text-muted mb-2">
+        ดึงใบกำกับ <b>ทุกใบ</b> (ไม่จำกัด 6 เดือน) จาก server กลับมาเก็บในเครื่องนี้
+        ใช้เมื่อรายการในเครื่องหายหรือไม่ครบ — <b>เพิ่มเข้า</b>ของเดิม ไม่ลบอะไรทิ้ง
+      </div>
+      <div class="alert alert-warning py-2 px-2 small mb-2">
+        <i class="bi bi-exclamation-triangle me-1"></i>ใช้ read โควต้า Firestore เยอะ (อ่านทุกใบ) ทำเมื่อจำเป็น — โควต้าหมดแล้วรอรีเซ็ตรายวัน
+      </div>
+      <button class="btn btn-sm btn-outline-primary" id="recoverInvBtn" onclick="recoverAllInvoices()">
+        <i class="bi bi-cloud-download me-1"></i>ดึงใบกำกับทั้งหมด
+      </button>
+      <div id="recoverInvOut" class="small mt-2 d-none"></div>
     </div>
   </div>
 
@@ -880,10 +898,10 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-<script src="utils.js?v=1.0.146"></script><script src="db.js?v=1.0.146"></script><script src="auth.js?v=1.0.146"></script><script src="nav.js?v=1.0.146"></script><script src="idb.js?v=1.0.146"></script>
+<script src="utils.js?v=1.0.147"></script><script src="db.js?v=1.0.147"></script><script src="auth.js?v=1.0.147"></script><script src="nav.js?v=1.0.147"></script><script src="idb.js?v=1.0.147"></script>
 <script src="drive-config.js" onerror="window.GOOGLE_CLIENT_ID=''"></script>
 <script src="drive-store.js"></script>
-<script src="settings.js?v=1.0.146"></script>
+<script src="settings.js?v=1.0.147"></script>
 <script>Nav.render('settings');</script>
 </body>
 </html>
