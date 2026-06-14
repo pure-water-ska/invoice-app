@@ -1896,6 +1896,73 @@ async function clearErrorLog() {
   Utils.showAlert('ล้าง Error Log แล้ว', 'warning');
 }
 
+/* ─── HDD self-test (desktop) ───────────────────────────────────────────────
+   Answers on-screen (no log-hunting): is DB._tauri.dataDir set? does a write+read
+   roundtrip work? do the actual HDD files hold the data, or only the in-memory
+   cache (→ lost on restart)? Built to diagnose "data gone after app restart". */
+function _hddPaint(lines) {
+  const out = document.getElementById('healthCheckResult');
+  out.innerHTML = '';
+  const pre = document.createElement('pre');
+  pre.className = 'small mb-0 p-3';
+  pre.style.whiteSpace = 'pre-wrap';
+  pre.textContent = lines.join('\n');
+  out.appendChild(pre);
+  const wrap = document.createElement('div');
+  wrap.className = 'px-3 pb-3';
+  const btn = document.createElement('button');
+  btn.className = 'btn btn-sm btn-outline-secondary';
+  btn.innerHTML = '<i class="bi bi-clipboard me-1"></i>คัดลอก';
+  btn.onclick = () => { try { navigator.clipboard.writeText(pre.textContent); btn.innerHTML = '<i class="bi bi-check me-1"></i>คัดลอกแล้ว'; } catch (e) {} };
+  wrap.appendChild(btn);
+  out.appendChild(wrap);
+}
+async function runHddCheck() {
+  const ver = (typeof APP_VERSION !== 'undefined' && APP_VERSION.version) ? APP_VERSION.version : '?';
+  const L = ['=== ตรวจ HDD (เดสก์ท็อป) · v' + ver + ' ==='];
+  if (!window.IS_TAURI) { L.push('ℹ️ ใช้ได้เฉพาะแอปเดสก์ท็อป — บนเว็บไม่ได้ใช้ HDD'); _hddPaint(L); return; }
+  const t = DB._tauri;
+  L.push('dataDir: ' + (t && t.dataDir ? t.dataDir : '❌ NULL — HDD เขียนไม่ได้! (ข้อมูลจะหายตอนปิดแอป)'));
+  L.push('cache invoices: ' + (Array.isArray(DB._cache['wt_invoices']) ? DB._cache['wt_invoices'].length : 'none'));
+  L.push('cache payments: ' + (Array.isArray(DB._cache['wt_payments']) ? DB._cache['wt_payments'].length : 'none'));
+  _hddPaint(L);
+  if (!t || !t.dataDir) {
+    L.push('');
+    L.push('สรุป: dataDir ว่าง → ทุกการเขียน HDD ถูกข้าม → กู้ได้แค่ใน cache แล้วหายตอนรีสตาร์ท');
+    _hddPaint(L); return;
+  }
+  const { join } = window.__TAURI__.path;
+  const { writeTextFile, readTextFile } = window.__TAURI__.fs;
+  // 1) write + read roundtrip
+  try {
+    const tp = await join(t.dataDir, '_hddtest.json');
+    const token = 'tok-' + ver + '-' + (DB._cache['wt_invoices']?.length ?? 0);
+    await writeTextFile(tp, JSON.stringify({ token }));
+    const back = JSON.parse((await readTextFile(tp)) || '{}');
+    L.push('ทดสอบเขียน+อ่าน HDD: ' + (back.token === token ? '✅ OK' : '❌ อ่านกลับไม่ตรง'));
+  } catch (e) {
+    L.push('ทดสอบเขียน+อ่าน HDD: ❌ FAILED — ' + (e && (e.message || e)));
+  }
+  _hddPaint(L);
+  // 2) actual on-disk record counts vs cache
+  for (const key of ['wt_invoices', 'wt_payments']) {
+    try {
+      const p = await join(t.dataDir, key + '.json');
+      const arr = JSON.parse((await readTextFile(p)) || '[]');
+      const n = Array.isArray(arr) ? arr.length : -1;
+      const cacheN = Array.isArray(DB._cache[key]) ? DB._cache[key].length : -1;
+      const flag = (n === cacheN) ? '' : '  ⚠️ ไม่ตรงกับ cache (' + cacheN + ')';
+      L.push('ไฟล์ HDD ' + key + '.json: ' + n + ' รายการ' + flag);
+    } catch (e) {
+      L.push('ไฟล์ HDD ' + key + '.json: ❌ อ่านไม่ได้/ไม่มีไฟล์ — ' + (e && (e.message || e)));
+    }
+  }
+  L.push('');
+  L.push('อ่านผล: ถ้า dataDir มีค่า + ทดสอบ OK + ไฟล์ HDD = cache → ดิสก์ปกติ');
+  L.push('ถ้าไฟล์ HDD = 0 แต่ cache = 960 → การเขียนลงดิสก์ไม่เกิด (นี่คือบั๊ก)');
+  _hddPaint(L);
+}
+
 /* ─── Health Check ──────────────────────────────────────────────────────── */
 function runHealthCheck() {
   const checks = [];
