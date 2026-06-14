@@ -1986,6 +1986,34 @@ var Sync = {
                 // write) will include these records and push them to Firestore naturally.
                 finalArr = [...fsArr, ...localOnly];
               }
+
+              // ── Listener mass-drop guard (mirror of the push-side delete guard) ──
+              // Field incident: after a PDF import local invoices eroded to 0 with NO
+              // SYNC-LOCAL-DROP logged. Cause: a date-filtered / occasionally-incomplete
+              // SERVER snapshot omits windowed records that the keep-logic above can't
+              // rescue (they're in pullIds, so `!pullIds.has` drops them). Each snapshot
+              // trims only a FEW records — never >half — so the >50→<half write probe
+              // never fires, yet local erodes toward 0 over many snapshots.
+              // Fix: if applying this snapshot would drop more than 5 local records
+              // WITHOUT an explicit server "removed" signal, keep them. Genuine multi-
+              // deletes (≤5, or any size reported as type:"removed") still propagate —
+              // same ≤5 policy the push-side SYNC-DEL-BLOCKED guard already uses.
+              if (colName === 'invoices' || colName === 'payments') {
+                const finalIds = new Set(finalArr.filter(r => r && r.id).map(r => r.id));
+                const dropped  = localArr.filter(r =>
+                  r && r.id && !finalIds.has(r.id) && !removedIds.has(r.id) &&
+                  !(stones[r.id] && now - stones[r.id] <= this._tombstoneTTL)
+                );
+                if (dropped.length > 5) {
+                  const ver = (typeof APP_VERSION !== 'undefined' && APP_VERSION.version) ? APP_VERSION.version : '?';
+                  try {
+                    DB.logError('SYNC-LISTENER-DROP-BLOCKED',
+                      `[v${ver}] ${colName}: snapshot would drop ${dropped.length} local recs without a removed-signal — KEPT ` +
+                      `(fsArr=${fsArr.length}, local=${localArr.length}, fromCache=${snap.metadata.fromCache})`);
+                  } catch {}
+                  finalArr = [...finalArr, ...dropped];
+                }
+              }
             }
           } catch {}
           this._lsWrite(lsKey, finalArr);
