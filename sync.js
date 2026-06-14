@@ -1253,10 +1253,15 @@ var Sync = {
         const prev = DB._cache[lsKey];
         const oldLen = Array.isArray(prev) ? prev.length : -1;
         const newLen = Array.isArray(data) ? data.length : -1;
+        const ver = (typeof APP_VERSION !== 'undefined' && APP_VERSION.version) ? APP_VERSION.version : '?';
         if (oldLen > 50 && newLen >= 0 && newLen < oldLen / 2) {
           const src = (new Error().stack || '').split('\n').slice(2, 6).map(s => s.trim()).join(' ← ');
-          const ver = (typeof APP_VERSION !== 'undefined' && APP_VERSION.version) ? APP_VERSION.version : '?';
           DB.logError('SYNC-LOCAL-DROP', `[v${ver}] ${lsKey}: local ${oldLen} → ${newLen} | src: ${src}`);
+        } else if ((newLen >= 0 && newLen < oldLen) || newLen <= 5) {
+          // INV-TRACE: catch ANY shrink, or a near-empty result, even small→small
+          // (gradual erosion the >50→<half probe misses). Local-only, no quota cost.
+          const src = (new Error().stack || '').split('\n').slice(2, 5).map(s => s.trim()).join(' ← ');
+          DB.logError('INV-TRACE', `[v${ver}] _lsWrite ${lsKey}: ${oldLen}→${newLen} | ${src}`);
         }
       }
     } catch (e) {}

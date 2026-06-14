@@ -74,6 +74,19 @@ const DB = {
           }
         }
         console.log(`[DB][Tauri] HDD storage loaded → ${this.dataDir} (${loaded} keys)`);
+        // INV-TRACE: record what the HDD load produced for invoices/payments on every
+        // page load. If this shows 0/none, the depletion is PERSISTED on disk (problem
+        // upstream); if it shows the full count but the list later goes 0, a runtime
+        // write erased it (the _lsWrite/_set INV-TRACE will show which). Local-only log.
+        try {
+          if (DB.logError) {
+            const _ic = Array.isArray(DB._cache['wt_invoices']) ? DB._cache['wt_invoices'].length : 'none';
+            const _pc = Array.isArray(DB._cache['wt_payments']) ? DB._cache['wt_payments'].length : 'none';
+            const _vv = (typeof APP_VERSION !== 'undefined' && APP_VERSION.version) ? APP_VERSION.version : '?';
+            const _pg = (location.pathname.split('/').pop() || 'index');
+            DB.logError('INV-TRACE', `[v${_vv}] tauri.init HDD load: invoices=${_ic} payments=${_pc} (page=${_pg})`);
+          }
+        } catch (e) {}
 
         // Apply any shadow copies that were written to sessionStorage but whose
         // HDD counterpart hadn't been confirmed before the last page reload.
@@ -198,10 +211,15 @@ const DB = {
       if ((key === this.K.INVOICES || key === this.K.PAYMENTS) && this.logError) {
         const _ol = Array.isArray(_prevVal) ? _prevVal.length : -1;
         const _nl = Array.isArray(val) ? val.length : -1;
+        const _vv = (typeof APP_VERSION !== 'undefined' && APP_VERSION.version) ? APP_VERSION.version : '?';
         if (_ol > 50 && _nl >= 0 && _nl < _ol / 2) {
           const _src = (new Error().stack || '').split('\n').slice(2, 6).map(s => s.trim()).join(' ← ');
-          const _vv = (typeof APP_VERSION !== 'undefined' && APP_VERSION.version) ? APP_VERSION.version : '?';
           this.logError('SYNC-LOCAL-DROP', `[v${_vv}] ${key} (DB._set): local ${_ol} → ${_nl} | src: ${_src}`);
+        } else if ((_nl >= 0 && _nl < _ol) || _nl <= 5) {
+          // INV-TRACE: catch ANY shrink, or a near-empty result, even small→small
+          // (the gradual erosion the >50→<half probe can't see). Local-only log.
+          const _src = (new Error().stack || '').split('\n').slice(2, 5).map(s => s.trim()).join(' ← ');
+          this.logError('INV-TRACE', `[v${_vv}] _set ${key}: ${_ol}→${_nl} | ${_src}`);
         }
       }
     } catch (e) {}
