@@ -1642,6 +1642,67 @@ var Sync = {
     return { total, added, localCount: merged.length };
   },
 
+  // ── Recover ONLY the records missing locally (quota-friendly) ──────────────
+  // Computes missing = knownServerIds − localIds entirely from the PERSISTED
+  // _serverIds set (wt_sync_sids) — zero reads to plan. Then fetches ONLY the
+  // missing docs (batched documentId 'in' queries, ≤10 ids each) → read cost =
+  // number of missing records, not the whole collection. Merges additively.
+  // Caveat: only recovers ids this device has seen on the server before; for docs
+  // created on another device that never reached _serverIds, use recoverCollectionFull.
+  async recoverCollectionMissing(colName, onProgress) {
+    if (!this.ready || !this._db) throw new Error('Sync not ready');
+    const lsKey = Object.keys(this.COLLECTIONS).find(k => this.COLLECTIONS[k] === colName) || ('wt_' + colName);
+    const base  = this._orgRef();
+
+    let localArr = [];
+    try { localArr = JSON.parse(this._localRead(lsKey) || '[]'); } catch {}
+    const localIds = new Set(localArr.filter(r => r && r.id).map(r => r.id));
+    const known    = this._serverIds[colName] || this._loadSavedServerIds(colName) || new Set();
+    const missing  = [...known].filter(id => !localIds.has(id));
+    if (onProgress) onProgress({ phase: 'plan', missing: missing.length, known: known.size, local: localIds.size });
+    if (missing.length === 0) return { added: 0, fetched: 0, missing: 0, known: known.size, localCount: localArr.length };
+
+    const FieldPath = firebase.firestore.FieldPath;
+    const stones = this._getTombstones(colName);
+    const now    = Date.now();
+    const fetched = [];
+    let done = 0;
+    for (let i = 0; i < missing.length; i += 10) {           // documentId 'in' takes ≤10 ids
+      const chunk = missing.slice(i, i + 10);
+      try {
+        const snap = await base.collection(colName).where(FieldPath.documentId(), 'in', chunk).get();
+        snap.docs.forEach(d => {
+          if (stones[d.id] && now - stones[d.id] <= this._tombstoneTTL) return;
+          const { _by, _ts, ...rec } = d.data();
+          fetched.push(rec);
+        });
+      } catch (e) { console.warn('[Sync] recoverMissing chunk failed:', e.message); }
+      done += chunk.length;
+      if (onProgress) onProgress({ phase: 'fetch', done, total: missing.length });
+    }
+
+    // Merge additively — keep ALL local, add the fetched missing ones.
+    const byId = new Map();
+    for (const r of localArr) if (r && r.id) byId.set(r.id, r);
+    let added = 0;
+    for (const r of fetched)  if (r && r.id && !byId.has(r.id)) { byId.set(r.id, r); added++; }
+    const merged = [...byId.values()];
+
+    // These ids are server-confirmed → mark them present-at-session-start so the
+    // listener doesn't mis-handle them, and seed fingerprints to avoid re-push.
+    if (!this._pullIds[colName]) this._pullIds[colName] = new Set();
+    if (!this._lastSyncedRecs[colName]) this._lastSyncedRecs[colName] = new Map();
+    for (const r of fetched) if (r.id) this._pullIds[colName].add(r.id);
+    this._savePullIds(colName);
+    for (const r of merged) { if (r.id) { const { _by, _ts, ...rc } = r; this._lastSyncedRecs[colName].set(r.id, JSON.stringify(rc)); } }
+
+    this._lsWrite(lsKey, merged);
+    if ((typeof DB !== 'undefined')) DB.invalidate(lsKey);
+    if (onProgress) onProgress({ phase: 'done', added, fetched: fetched.length, missing: missing.length, localCount: merged.length });
+    console.log(`[Sync] recoverCollectionMissing ${colName}: missing=${missing.length}, fetched=${fetched.length}, added=${added}, local now=${merged.length}`);
+    return { added, fetched: fetched.length, missing: missing.length, known: known.size, localCount: merged.length };
+  },
+
   // ── Force-push ALL local data to Firestore (use after LZString migration) ──
   async pushAll(onProgress) {
     if (!this.ready) throw new Error('Sync not ready');

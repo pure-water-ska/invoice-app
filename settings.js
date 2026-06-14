@@ -2323,35 +2323,74 @@ async function flushPendingUploads() {
   checkSyncStatus();
 }
 
-// Recover ALL invoices from Firestore (full pull, no 6-month filter) and merge
-// additively into local. Restores archived invoices that a local wipe removed —
-// the normal date-filtered pull can never bring those back. Read-heavy → admin button.
-async function recoverAllInvoices() {
-  const btn = document.getElementById('recoverInvBtn');
+// Shared output helper for the recover-invoice buttons.
+function _recoverInvShow(html, cls) {
   const out = document.getElementById('recoverInvOut');
-  const show = (html, cls) => { out.classList.remove('d-none'); out.className = 'small mt-2 ' + (cls || ''); out.innerHTML = html; };
-  if (typeof Sync === 'undefined' || !Sync.ready || typeof Sync.recoverCollectionFull !== 'function') {
-    show('<i class="bi bi-exclamation-triangle me-1"></i>ระบบซิงค์ยังไม่พร้อม — รอ badge sync เป็นปกติก่อน', 'text-warning');
+  out.classList.remove('d-none');
+  out.className = 'small mt-2 ' + (cls || '');
+  out.innerHTML = html;
+}
+function _recoverInvBusy(busy) {
+  ['recoverMissingBtn', 'recoverInvBtn'].forEach(id => { const b = document.getElementById(id); if (b) b.disabled = busy; });
+}
+
+// Recover ONLY the invoices missing locally. Plans missing = knownServerIds − local
+// from the persisted set (0 reads) and fetches just the gap → read cost = #missing,
+// not the whole collection. This is the quota-friendly default.
+async function recoverMissingInvoices() {
+  if (typeof Sync === 'undefined' || !Sync.ready || typeof Sync.recoverCollectionMissing !== 'function') {
+    _recoverInvShow('<i class="bi bi-exclamation-triangle me-1"></i>ระบบซิงค์ยังไม่พร้อม — รอ badge sync เป็นปกติก่อน', 'text-warning');
     return;
   }
-  if (!await Utils.confirm('ดึงใบกำกับทั้งหมดจาก server มาเก็บในเครื่องนี้?\n\nจะอ่านทุกใบ (ใช้ read โควต้าเยอะ) และเพิ่มเข้าของเดิม ไม่ลบอะไรทิ้ง', 'กู้ใบกำกับทั้งหมด')) return;
-  btn.disabled = true;
-  show('<span class="spinner-border spinner-border-sm me-1"></span>กำลังดึงใบกำกับจาก server…', 'text-primary');
+  _recoverInvBusy(true);
+  _recoverInvShow('<span class="spinner-border spinner-border-sm me-1"></span>กำลังตรวจว่าขาดใบไหน…', 'text-primary');
   try {
-    const r = await Sync.recoverCollectionFull('invoices', (p) => {
-      if (p.phase === 'fetch') show('<span class="spinner-border spinner-border-sm me-1"></span>กำลังอ่านใบกำกับจาก server…', 'text-primary');
-      else if (p.phase === 'merge') show(`<span class="spinner-border spinner-border-sm me-1"></span>กำลังรวมเข้าเครื่อง… (${p.total} ใบบน server)`, 'text-primary');
+    let planned = -1;
+    const r = await Sync.recoverCollectionMissing('invoices', (p) => {
+      if (p.phase === 'plan') {
+        planned = p.missing;
+        if (p.missing === 0) _recoverInvShow(`<i class="bi bi-check-circle-fill text-success me-1"></i>ครบแล้ว — ไม่มีใบที่ขาด (ในเครื่อง ${p.local} / เคยเห็นบน server ${p.known})`, 'text-success');
+        else _recoverInvShow(`<span class="spinner-border spinner-border-sm me-1"></span>พบที่ขาด ${p.missing} ใบ — กำลังดึง (อ่านแค่ ${p.missing} reads)…`, 'text-primary');
+      } else if (p.phase === 'fetch') {
+        _recoverInvShow(`<span class="spinner-border spinner-border-sm me-1"></span>กำลังดึง… ${p.done}/${p.total}`, 'text-primary');
+      }
     });
+    if (planned === 0) return;
     try { if (typeof DB.waitForHddWrites === 'function') await DB.waitForHddWrites(15000); } catch {}
-    show(`<i class="bi bi-check-circle-fill text-success me-1"></i>กู้สำเร็จ — เพิ่ม ${r.added} ใบ (ในเครื่องตอนนี้ ${r.localCount} ใบ)`, 'text-success');
+    _recoverInvShow(`<i class="bi bi-check-circle-fill text-success me-1"></i>กู้สำเร็จ — เพิ่ม ${r.added} ใบ จากที่ขาด ${r.missing} (ในเครื่องตอนนี้ ${r.localCount} ใบ)`, 'text-success');
     checkSyncStatus();
   } catch (e) {
-    const msg = (e.code === 'resource-exhausted')
-      ? 'โควต้า Firestore หมด — รอรีเซ็ตรายวันแล้วลองใหม่'
-      : (e.message || e.code || 'เกิดข้อผิดพลาด');
-    show(`<i class="bi bi-x-circle-fill text-danger me-1"></i>กู้ไม่สำเร็จ: ${msg}`, 'text-danger');
+    const msg = (e.code === 'resource-exhausted') ? 'โควต้า Firestore หมด — รอรีเซ็ตรายวันแล้วลองใหม่' : (e.message || e.code || 'เกิดข้อผิดพลาด');
+    _recoverInvShow(`<i class="bi bi-x-circle-fill text-danger me-1"></i>กู้ไม่สำเร็จ: ${msg}`, 'text-danger');
   } finally {
-    btn.disabled = false;
+    _recoverInvBusy(false);
+  }
+}
+
+// Recover ALL invoices (full pull, no 6-month filter) — reads the WHOLE collection.
+// Use only when "ดึงเฉพาะที่ขาด" misses records created on another device that this
+// device has never seen (so they aren't in the persisted known-id set).
+async function recoverAllInvoices() {
+  if (typeof Sync === 'undefined' || !Sync.ready || typeof Sync.recoverCollectionFull !== 'function') {
+    _recoverInvShow('<i class="bi bi-exclamation-triangle me-1"></i>ระบบซิงค์ยังไม่พร้อม — รอ badge sync เป็นปกติก่อน', 'text-warning');
+    return;
+  }
+  if (!await Utils.confirm('ดึงใบกำกับทั้งหมดจาก server (อ่านทุกใบ ใช้ read โควต้าเยอะ)?\n\nปกติใช้ "ดึงเฉพาะที่ขาด" ก็พอ — อันนี้ใช้เมื่อมีใบจากเครื่องอื่นที่เครื่องนี้ไม่เคยเห็น', 'ดึงใบกำกับทั้งหมด')) return;
+  _recoverInvBusy(true);
+  _recoverInvShow('<span class="spinner-border spinner-border-sm me-1"></span>กำลังดึงใบกำกับทั้งหมดจาก server…', 'text-primary');
+  try {
+    const r = await Sync.recoverCollectionFull('invoices', (p) => {
+      if (p.phase === 'fetch') _recoverInvShow('<span class="spinner-border spinner-border-sm me-1"></span>กำลังอ่านใบกำกับจาก server…', 'text-primary');
+      else if (p.phase === 'merge') _recoverInvShow(`<span class="spinner-border spinner-border-sm me-1"></span>กำลังรวมเข้าเครื่อง… (${p.total} ใบบน server)`, 'text-primary');
+    });
+    try { if (typeof DB.waitForHddWrites === 'function') await DB.waitForHddWrites(15000); } catch {}
+    _recoverInvShow(`<i class="bi bi-check-circle-fill text-success me-1"></i>กู้สำเร็จ — เพิ่ม ${r.added} ใบ (ในเครื่องตอนนี้ ${r.localCount} ใบ)`, 'text-success');
+    checkSyncStatus();
+  } catch (e) {
+    const msg = (e.code === 'resource-exhausted') ? 'โควต้า Firestore หมด — รอรีเซ็ตรายวันแล้วลองใหม่' : (e.message || e.code || 'เกิดข้อผิดพลาด');
+    _recoverInvShow(`<i class="bi bi-x-circle-fill text-danger me-1"></i>กู้ไม่สำเร็จ: ${msg}`, 'text-danger');
+  } finally {
+    _recoverInvBusy(false);
   }
 }
 

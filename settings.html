@@ -565,15 +565,20 @@
         <span class="fw-semibold">กู้ใบกำกับทั้งหมดจาก server</span>
       </div>
       <div class="small text-muted mb-2">
-        ดึงใบกำกับ <b>ทุกใบ</b> (ไม่จำกัด 6 เดือน) จาก server กลับมาเก็บในเครื่องนี้
-        ใช้เมื่อรายการในเครื่องหายหรือไม่ครบ — <b>เพิ่มเข้า</b>ของเดิม ไม่ลบอะไรทิ้ง
+        ดึงใบกำกับที่หายจาก server กลับมาเก็บในเครื่องนี้ — <b>เพิ่มเข้า</b>ของเดิม ไม่ลบอะไรทิ้ง
       </div>
-      <div class="alert alert-warning py-2 px-2 small mb-2">
-        <i class="bi bi-exclamation-triangle me-1"></i>ใช้ read โควต้า Firestore เยอะ (อ่านทุกใบ) ทำเมื่อจำเป็น — โควต้าหมดแล้วรอรีเซ็ตรายวัน
+      <div class="d-flex flex-wrap gap-2 align-items-center">
+        <button class="btn btn-sm btn-primary" id="recoverMissingBtn" onclick="recoverMissingInvoices()">
+          <i class="bi bi-cloud-download me-1"></i>ดึงเฉพาะที่ขาด <span class="badge bg-light text-primary ms-1">ประหยัดโควต้า</span>
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" id="recoverInvBtn" onclick="recoverAllInvoices()">
+          ดึงทั้งหมด (อ่านทุกใบ)
+        </button>
       </div>
-      <button class="btn btn-sm btn-outline-primary" id="recoverInvBtn" onclick="recoverAllInvoices()">
-        <i class="bi bi-cloud-download me-1"></i>ดึงใบกำกับทั้งหมด
-      </button>
+      <div class="form-text mt-1">
+        <i class="bi bi-info-circle me-1"></i>“ดึงเฉพาะที่ขาด” อ่านแค่ใบที่หายจริง (read = จำนวนที่ขาด) — ใช้อันนี้ก่อนเสมอ.
+        “ดึงทั้งหมด” อ่านทุกใบ ใช้เฉพาะเมื่อมีใบจากเครื่องอื่นที่เครื่องนี้ไม่เคยเห็น
+      </div>
       <div id="recoverInvOut" class="small mt-2 d-none"></div>
     </div>
   </div>
@@ -898,10 +903,10 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-<script src="utils.js?v=1.0.148"></script><script src="db.js?v=1.0.148"></script><script src="auth.js?v=1.0.148"></script><script src="nav.js?v=1.0.148"></script><script src="idb.js?v=1.0.148"></script>
+<script src="utils.js?v=1.0.149"></script><script src="db.js?v=1.0.149"></script><script src="auth.js?v=1.0.149"></script><script src="nav.js?v=1.0.149"></script><script src="idb.js?v=1.0.149"></script>
 <script src="drive-config.js" onerror="window.GOOGLE_CLIENT_ID=''"></script>
 <script src="drive-store.js"></script>
-<script src="settings.js?v=1.0.148"></script>
+<script src="settings.js?v=1.0.149"></script>
 <script>Nav.render('settings');</script>
 </body>
 </html>
