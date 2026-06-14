@@ -765,7 +765,10 @@ var Sync = {
     // Warn before refresh/close while an upload is still in flight — the
     // same-device "payment reverts after refresh" guard. Also paints the bar.
     window.addEventListener('beforeunload', (e) => {
-      if (this.isUploading()) { e.preventDefault(); e.returnValue = ''; return ''; }
+      // Only warn when writes are genuinely in flight AND we're online (they can
+      // still land). Queued/offline writes (quota out) persist to disk and flush on
+      // the next launch — closing loses nothing, so don't trap the user.
+      if (this._online && this._uploadActiveCount() > 0) { e.preventDefault(); e.returnValue = ''; return ''; }
     });
     this._initUploadBar();
   },
@@ -782,6 +785,19 @@ var Sync = {
     return n;
   },
   isUploading() { return this._uploadBusyCount() > 0; },
+  // "Active" = writes genuinely in flight or about to fire (debounced) — these can
+  // still land and are worth waiting for. EXCLUDES the offline queue, which only
+  // holds writes that already FAILED (quota/offline) and will retry later: those
+  // must not show an alarming "don't close" bar or block page close, since waiting
+  // can't help and the queue persists to disk + flushes on the next launch.
+  _uploadActiveCount() {
+    let n = 0;
+    for (const k in this._pendingWrite) if (this._pendingWrite[k]) n++;
+    for (const k in this._pushDebounce)  if (this._pushDebounce[k] != null) n++;
+    for (const k in this._docDebounce)   if (this._docDebounce[k] != null) n++;
+    return n;
+  },
+  _queuedCount() { try { return this._getQueue().length; } catch { return 0; } },
   _emitUploadState() {
     try {
       window.dispatchEvent(new CustomEvent('sync:uploadstate',
@@ -809,9 +825,10 @@ var Sync = {
       }
       const nav = document.querySelector('.navbar');
       bar.style.top = ((nav ? nav.offsetHeight : 52)) + 'px';
-      const busy  = e.detail && e.detail.busy;
-      const count = (e.detail && e.detail.count) || 0;
-      if (busy) {
+      const activeN = this._uploadActiveCount();
+      const queuedN = this._queuedCount();
+      if (activeN > 0 && this._online) {
+        // Genuinely uploading right now — keep the "please wait" amber bar.
         if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
         bar.style.display = 'flex';
         bar.style.background = '#fff3cd'; bar.style.color = '#664d03';
@@ -819,7 +836,19 @@ var Sync = {
         bar.innerHTML =
           '<span style="width:16px;height:16px;border:2px solid #664d03;border-right-color:transparent;border-radius:50%;display:inline-block;animation:wtspin .7s linear infinite"></span>' +
           '<span><strong>กำลังอัปโหลดข้อมูล…</strong> อย่าเพิ่งปิดหรือรีเฟรชหน้านี้' +
-          (count > 1 ? ' <span style="opacity:.7">(เหลือ ' + count + ' รายการ)</span>' : '') + '</span>';
+          (activeN > 1 ? ' <span style="opacity:.7">(เหลือ ' + activeN + ' รายการ)</span>' : '') + '</span>';
+      } else if (queuedN > 0 || (!this._online && activeN > 0)) {
+        // Writes are deferred (quota out / offline). They persist on disk and flush
+        // on the next launch — calm blue bar, NOT alarming, safe to close.
+        if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+        bar.style.display = 'flex';
+        bar.style.background = '#cfe2ff'; bar.style.color = '#084298';
+        bar.style.borderBottom = '1px solid #b6d4fe';
+        const _defN = queuedN || activeN;
+        bar.innerHTML =
+          '<i class="bi bi-clock-history" style="font-size:16px"></i>' +
+          '<span><strong>ค้างอัปโหลด ' + _defN + ' รายการ</strong> — จะอัปโหลดเองเมื่อเน็ต/โควต้ากลับมา · ' +
+          '<strong>ปิดได้</strong> ข้อมูลบันทึกในเครื่องแล้ว</span>';
       } else if (bar.style.display === 'flex') {
         // Flash "done" then auto-hide — only when the bar was actually showing.
         bar.style.background = '#d1e7dd'; bar.style.color = '#0f5132';
