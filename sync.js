@@ -765,10 +765,11 @@ var Sync = {
     // Warn before refresh/close while an upload is still in flight — the
     // same-device "payment reverts after refresh" guard. Also paints the bar.
     window.addEventListener('beforeunload', (e) => {
-      // Only warn when writes are genuinely in flight AND we're online (they can
-      // still land). Queued/offline writes (quota out) persist to disk and flush on
+      // Only warn when writes are genuinely in flight, online, AND not stuck. Queued
+      // or stuck writes (quota out / no ack after 12s) persist to disk and flush on
       // the next launch — closing loses nothing, so don't trap the user.
-      if (this._online && this._uploadActiveCount() > 0) { e.preventDefault(); e.returnValue = ''; return ''; }
+      const stuck = this._activeSince && (Date.now() - this._activeSince > 12000);
+      if (this._online && this._uploadActiveCount() > 0 && !stuck) { e.preventDefault(); e.returnValue = ''; return ''; }
     });
     this._initUploadBar();
   },
@@ -827,7 +828,21 @@ var Sync = {
       bar.style.top = ((nav ? nav.offsetHeight : 52)) + 'px';
       const activeN = this._uploadActiveCount();
       const queuedN = this._queuedCount();
+      // A genuine upload completes in a few seconds. If writes stay "in flight" longer
+      // than this, the server isn't acking (write quota exhausted, or no offline
+      // persistence so commit() waits forever) — treat it as deferred so the amber
+      // "do not close" bar and the close-block can never hang the user indefinitely.
+      const STUCK_MS = 12000;
       if (activeN > 0 && this._online) {
+        if (!this._activeSince) this._activeSince = Date.now();
+        // Re-check after the stuck window even if no further uploadstate event fires.
+        if (!this._stuckTimer) this._stuckTimer = setTimeout(() => { this._stuckTimer = null; this._emitUploadState(); }, STUCK_MS + 200);
+      } else {
+        this._activeSince = 0;
+        if (this._stuckTimer) { clearTimeout(this._stuckTimer); this._stuckTimer = null; }
+      }
+      const stuck = this._activeSince && (Date.now() - this._activeSince > STUCK_MS);
+      if (activeN > 0 && this._online && !stuck) {
         // Genuinely uploading right now — keep the "please wait" amber bar.
         if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
         bar.style.display = 'flex';
@@ -837,7 +852,7 @@ var Sync = {
           '<span style="width:16px;height:16px;border:2px solid #664d03;border-right-color:transparent;border-radius:50%;display:inline-block;animation:wtspin .7s linear infinite"></span>' +
           '<span><strong>กำลังอัปโหลดข้อมูล…</strong> อย่าเพิ่งปิดหรือรีเฟรชหน้านี้' +
           (activeN > 1 ? ' <span style="opacity:.7">(เหลือ ' + activeN + ' รายการ)</span>' : '') + '</span>';
-      } else if (queuedN > 0 || (!this._online && activeN > 0)) {
+      } else if (queuedN > 0 || stuck || (!this._online && activeN > 0)) {
         // Writes are deferred (quota out / offline). They persist on disk and flush
         // on the next launch — calm blue bar, NOT alarming, safe to close.
         if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
