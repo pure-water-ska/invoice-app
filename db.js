@@ -101,6 +101,18 @@ const DB = {
           const dataKey = sk.slice(PREFIX.length);
           try {
             const val = JSON.parse(sessionStorage.getItem(sk));
+            // GUARD: never let a stale EMPTY invoices/payments shadow wipe the real
+            // HDD data we just loaded into the cache. An empty shadow for these
+            // collections is always a transient/incomplete artifact, never a real
+            // "deleted everything" — applying it (and re-writing it to HDD) was a way
+            // local could reach 0 across a page navigation.
+            if ((dataKey === 'wt_invoices' || dataKey === 'wt_payments') &&
+                Array.isArray(val) && val.length === 0 &&
+                Array.isArray(DB._cache[dataKey]) && DB._cache[dataKey].length > 0) {
+              try { sessionStorage.removeItem(sk); } catch {}
+              try { if (DB.logError) DB.logError('INV-TRACE', `[v${(typeof APP_VERSION!=='undefined'&&APP_VERSION.version)||'?'}] init: skipped EMPTY ${dataKey} shadow over ${DB._cache[dataKey].length} on HDD`); } catch {}
+              continue;
+            }
             DB._cache[dataKey] = val;
             // Re-issue the HDD write now that dataDir is available
             this.write(dataKey, val);
@@ -115,9 +127,29 @@ const DB = {
     write(key, val) {
       if (!this.dataDir || !window.IS_TAURI) return;
       const { join } = window.__TAURI__.path;
-      const { writeTextFile } = window.__TAURI__.fs;
+      const { writeTextFile, readTextFile } = window.__TAURI__.fs;
+      // DURABLE BACKSTOP: never overwrite a non-empty invoices/payments HDD file with
+      // an empty array. The "vanish after import" loss ended with [] persisted to both
+      // wt_invoices.json and wt_payments.json (seen via INV-TRACE: HDD load 0/0); once
+      // on disk it perpetuated every session. These collections are never legitimately
+      // emptied wholesale in this app, so a 0-length write is always a bug/transient —
+      // keep the existing file instead. This is the single HDD chokepoint, so it
+      // protects against EVERY caller path regardless of where the [] came from.
+      const guardEmpty = (key === 'wt_invoices' || key === 'wt_payments') &&
+                         Array.isArray(val) && val.length === 0;
       const p = join(this.dataDir, key + '.json')
-        .then(p => writeTextFile(p, JSON.stringify(val)))
+        .then(async (path) => {
+          if (guardEmpty) {
+            try {
+              const cur = JSON.parse((await readTextFile(path)) || '[]');
+              if (Array.isArray(cur) && cur.length > 0) {
+                try { if (DB.logError) DB.logError('INV-TRACE', `[v${(typeof APP_VERSION!=='undefined'&&APP_VERSION.version)||'?'}] _tauri.write BLOCKED empty ${key} over ${cur.length} on HDD`); } catch {}
+                return; // keep the non-empty file on disk
+              }
+            } catch {}   // file missing/unreadable → fall through and write []
+          }
+          return writeTextFile(path, JSON.stringify(val));
+        })
         .then(() => {
           // HDD write confirmed — clear the sessionStorage shadow copy so it
           // doesn't linger unnecessarily after a clean write.
