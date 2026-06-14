@@ -255,6 +255,18 @@ const DB = {
         }
       }
     } catch (e) {}
+
+    // ── HARD GUARD: never let app code clobber a non-empty invoices/payments set
+    // with an empty array (mirror of Sync._lsWrite's skip). These collections are
+    // never legitimately emptied wholesale here; an empty write is always a bug.
+    // Skip cache/HDD/push so recovered data can't be wiped to 0.
+    if ((key === this.K.INVOICES || key === this.K.PAYMENTS) &&
+        Array.isArray(val) && val.length === 0 &&
+        Array.isArray(_prevVal) && _prevVal.length > 0) {
+      try { if (this.logError) this.logError('INV-TRACE', `[v${(typeof APP_VERSION!=='undefined'&&APP_VERSION.version)||'?'}] _set SKIPPED empty ${key} over ${_prevVal.length}`); } catch {}
+      return;
+    }
+
     if (window.Sync && typeof Sync._recordDocDeletions === 'function') {
       try { Sync._recordDocDeletions(key, _prevVal, val); } catch {}
     }

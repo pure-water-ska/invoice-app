@@ -1266,6 +1266,26 @@ var Sync = {
       }
     } catch (e) {}
 
+    // ── HARD GUARD: never write an EMPTY invoices/payments set through sync ─────
+    // An empty array for these collections is always a transient/incomplete artifact
+    // (an empty or partial server snapshot with an empty local cache → finalArr=[]),
+    // never a real state in this app. Writing it zeroed both the in-memory cache AND
+    // the HDD file (INV-TRACE showed `tauri.init HDD load: invoices=0 payments=0`),
+    // and it perpetuated every session. Skip entirely — touch neither cache, shadow,
+    // nor HDD — so a recovered/non-empty set can never be clobbered back to 0 by a
+    // listener/pull tick. This is the chokepoint for ALL sync-side local writes.
+    if ((lsKey === 'wt_invoices' || lsKey === 'wt_payments') && Array.isArray(data) && data.length === 0) {
+      try {
+        if (typeof DB !== 'undefined' && DB.logError) {
+          const _cur = Array.isArray(DB._cache[lsKey]) ? DB._cache[lsKey].length : 'none';
+          const _v = (typeof APP_VERSION !== 'undefined' && APP_VERSION.version) ? APP_VERSION.version : '?';
+          const _s = (new Error().stack || '').split('\n').slice(2, 5).map(s => s.trim()).join(' ← ');
+          DB.logError('INV-TRACE', `[v${_v}] _lsWrite SKIPPED empty ${lsKey} (cache=${_cur}) | ${_s}`);
+        }
+      } catch (e) {}
+      return;
+    }
+
     // Always keep DB._cache current — reads within this tick see new data.
     // DB.invalidate() will be a no-op for IDB keys (they don't have a localStorage
     // copy to re-read from), so the cache set here is the lasting reference.
