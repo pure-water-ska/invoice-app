@@ -1979,10 +1979,22 @@ var Sync = {
                 // screen instantly after saving. Only a SERVER snapshot
                 // (fromCache:false) is authoritative enough for that inference.
                 if (snap.metadata.fromCache) return true;
-                // For records inside the query window: only keep if added THIS session
-                // (not in pullIds).  Records in pullIds that are missing from Firestore
-                // were deleted on another device.
-                return !pullIds.has(r.id);
+                // DELETION-BY-ABSENCE IS UNSAFE — never infer "deleted on another
+                // device" just because an in-window record is missing from THIS
+                // snapshot. A date-filtered / merely-incomplete SERVER snapshot omits
+                // a few in-window records at a time; the old `return !pullIds.has(r.id)`
+                // then dropped them — typically ≤5 per snapshot — eroding local toward 0
+                // over many snapshots WITHOUT tripping any guard (each drop is <half so
+                // SYNC-LOCAL-DROP stays quiet, and ≤5 so the >5 listener guard passes it
+                // as a "legit delete"). Root cause of "invoices vanish after import".
+                // Genuine deletes still propagate: removedIds (server type:"removed") and
+                // tombstones are handled above, and the dedicated deletions-doc listener
+                // covers cross-device deletes. So: KEEP every record absent from the
+                // snapshot. The listener is now purely additive (union) for in-window
+                // records — it can ADD server records and apply explicit removals, but it
+                // can never silently drop local records by inference.
+                void pullIds;   // retained for clarity; no longer used for dropping
+                return true;
               });
               if (localOnly.length > 0) {
                 console.log(`[Sync] Listener merge: keeping ${localOnly.length} new-session ${colName} records (not pushing — next write will sync)`);
