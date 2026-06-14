@@ -128,34 +128,43 @@ const DB = {
       if (!this.dataDir || !window.IS_TAURI) return;
       const { join } = window.__TAURI__.path;
       const { writeTextFile, readTextFile } = window.__TAURI__.fs;
+      const _trace = (key === 'wt_invoices' || key === 'wt_payments');
+      const _ver = () => (typeof APP_VERSION !== 'undefined' && APP_VERSION.version) ? APP_VERSION.version : '?';
+      // INV-TRACE: record who calls _tauri.write for invoices/payments and the count,
+      // so a write that lands [] on disk (or one that SILENTLY FAILS — the old
+      // `.catch(console.warn)` hid disk-write errors from the release Error Log,
+      // while waitForHddWrites still reported success) is finally visible with a stack.
+      const _stack = _trace ? (new Error().stack || '').split('\n').slice(2, 5).map(s => s.trim()).join(' ← ') : '';
+      const _len = Array.isArray(val) ? val.length : -1;
       // DURABLE BACKSTOP: never overwrite a non-empty invoices/payments HDD file with
-      // an empty array. The "vanish after import" loss ended with [] persisted to both
-      // wt_invoices.json and wt_payments.json (seen via INV-TRACE: HDD load 0/0); once
-      // on disk it perpetuated every session. These collections are never legitimately
-      // emptied wholesale in this app, so a 0-length write is always a bug/transient —
-      // keep the existing file instead. This is the single HDD chokepoint, so it
-      // protects against EVERY caller path regardless of where the [] came from.
-      const guardEmpty = (key === 'wt_invoices' || key === 'wt_payments') &&
-                         Array.isArray(val) && val.length === 0;
+      // an empty array. These collections are never legitimately emptied wholesale, so
+      // a 0-length write is always a bug/transient — keep the existing file instead.
+      const guardEmpty = _trace && Array.isArray(val) && val.length === 0;
       const p = join(this.dataDir, key + '.json')
         .then(async (path) => {
           if (guardEmpty) {
             try {
               const cur = JSON.parse((await readTextFile(path)) || '[]');
               if (Array.isArray(cur) && cur.length > 0) {
-                try { if (DB.logError) DB.logError('INV-TRACE', `[v${(typeof APP_VERSION!=='undefined'&&APP_VERSION.version)||'?'}] _tauri.write BLOCKED empty ${key} over ${cur.length} on HDD`); } catch {}
+                try { if (DB.logError) DB.logError('INV-TRACE', `[v${_ver()}] _tauri.write BLOCKED empty ${key} over ${cur.length} on HDD | ${_stack}`); } catch {}
                 return; // keep the non-empty file on disk
               }
             } catch {}   // file missing/unreadable → fall through and write []
           }
-          return writeTextFile(path, JSON.stringify(val));
+          await writeTextFile(path, JSON.stringify(val));
+          if (_trace) { try { if (DB.logError) DB.logError('INV-TRACE', `[v${_ver()}] _tauri.write OK ${key} len=${_len} | ${_stack}`); } catch {} }
         })
         .then(() => {
           // HDD write confirmed — clear the sessionStorage shadow copy so it
           // doesn't linger unnecessarily after a clean write.
           try { sessionStorage.removeItem('wt_hdd_shadow_' + key); } catch {}
         })
-        .catch(e => console.warn('[DB][Tauri] Write failed', key, e))
+        .catch(e => {
+          console.warn('[DB][Tauri] Write failed', key, e);
+          // Surface the failure to the Error Log — a SILENT write failure here is the
+          // prime suspect for "cache=960 but HDD=0 on the next page".
+          if (_trace) { try { if (DB.logError) DB.logError('INV-TRACE', `[v${_ver()}] _tauri.write FAILED ${key} len=${_len} err=${(e && (e.message||e))||'?'} | ${_stack}`); } catch {} }
+        })
         .finally(() => this._inflight.delete(p));
       this._inflight.add(p);
     },
