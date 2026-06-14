@@ -392,12 +392,47 @@ release cycles because fixes were shipped against a guessed cause. Follow this:
    page and Settings) before concluding a fix "didn't work". Check that the code path
    you think runs actually runs (log it).
 4. **When the data layer is suspect, prove where the value is lost** — cache vs
-   `_get` vs the accessor vs the server — with explicit probes, before editing.
+   `_get` vs the accessor vs the server **vs the OS/platform I/O boundary** — with
+   explicit probes, before editing. The suspect list is NOT only app-layer code: a
+   bug can live in **config/permissions** (e.g. the Tauri `fs` allowlist `scope`),
+   not in `.js` at all. If reads come back empty and writes "succeed" but nothing
+   persists, suspect the I/O/permission boundary **before** the app logic.
 5. **One change at a time, then re-measure.** Don't stack multiple speculative fixes
    in one release; you won't know which mattered (or which regressed).
+6. **Prefer an ACTIVE round-trip test over a PASSIVE state probe.** Reporting state
+   (counts, a recent-action log — the `*.diagnose()` style) is necessary but often
+   not sufficient: it shows *what* but not *why*. To pin an I/O failure, **exercise
+   the suspect operation directly and surface its raw error** — write a probe file
+   then read it back, and print the actual exception string on screen. The on-screen
+   **ตรวจ HDD** button (`runHddCheck` in settings.js) is the canonical example: it
+   surfaced `"path not allowed on the configured scope: …\data\wt_invoices.json"` —
+   the exact `fs` scope bug that ~8 passive symptom-fixes never revealed.
+7. **Audit error handlers in the suspect path — a swallowed error blinds every probe
+   above it.** `_tauri.write` used `.catch(e => console.warn(...))`; `console.warn`
+   is invisible in release Tauri, AND the caught rejection let `waitForHddWrites`
+   report false success. So higher-layer probes (`SYNC-LOCAL-DROP` at the array-write
+   layer) stayed silent while the real failure was eaten at the I/O layer. Before
+   trusting "no probe fired", confirm the failing call isn't being caught-and-hidden.
+8. **A working fallback can mask a broken primary for a long time.** HDD persistence
+   was broken from day one but invisible because Firestore re-pulled the data into
+   cache on every login — until the read quota ran out and exposed it. If a symptom
+   only appears under a *special* condition (quota exhausted, offline, a specific
+   device), suspect that a fallback was hiding a deeper failure, and **test the
+   primary path in isolation** (e.g. read the HDD file directly, ignore the cache).
 
 If you cannot clearly explain *why* a change fixes the observed log/behavior, you do
 not yet understand the bug — gather more evidence instead of shipping.
+
+> **Case study (v1.0.146→160, "invoices vanish / lost on restart"):** ~8 releases
+> shipped symptom-guards (additive listener, empty-write skips, import-waits-for-ready)
+> because probes were placed at the array-write layer while the value was actually
+> lost at the Tauri `fs` permission boundary. The fix was a one-line config change —
+> `fs.scope` `"$APPDATA/*"` → `"$APPDATA/**"` (a single-star glob doesn't cross `/`,
+> so the two-levels-deep `data/wt_*.json` store was denied). Found only once an
+> **active write+read round-trip test** printed the raw scope error on screen. The
+> guards from those 8 releases were kept as defense-in-depth, but the root cause was
+> config, surfaced by exercising I/O — not by reading more app logic. (Binary change:
+> needed a fresh `.msi`, not the JS auto-update.)
 
 ## sessionStorage keys used by sync
 
