@@ -1048,7 +1048,10 @@ function _checkOverdueAlert() {
         .forEach(function(e) { document.addEventListener(e, _reset, { passive: true }); });
       setTimeout(_tick, 15000);
     };
-    if (window.DB && DB.ready && typeof DB.ready.then === 'function') DB.ready.then(start);
+    // bare DB — window.DB is always undefined (db.js declares `const DB`), so this
+    // guard ran start() before DB.ready and read default settings instead of the
+    // user's saved session-timeout. Use typeof DB so it actually waits for the cache.
+    if (typeof DB !== 'undefined' && DB.ready && typeof DB.ready.then === 'function') DB.ready.then(start);
     else start();
   };
 })();

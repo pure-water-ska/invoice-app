@@ -159,7 +159,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.160"></script><script src="db.js?v=1.0.160"></script><script src="auth.js?v=1.0.160"></script><script src="nav.js?v=1.0.160"></script><script src="idb.js?v=1.0.160"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.161"></script><script src="db.js?v=1.0.161"></script><script src="auth.js?v=1.0.161"></script><script src="nav.js?v=1.0.161"></script><script src="idb.js?v=1.0.161"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -561,7 +561,11 @@ window.addEventListener('DOMContentLoaded', () => {
   }; // end _startInit
 
   // Run init only after the local cache is populated (HDD load in Tauri).
-  if (window.DB && DB.ready && typeof DB.ready.then === 'function') DB.ready.then(_startInit);
+  // NOTE: bare DB — db.js declares `const DB`, so window.DB is ALWAYS undefined.
+  // Using `window.DB` here made the guard false → _startInit() ran SYNCHRONOUSLY
+  // before DB.ready (HDD cache load in Tauri), so generateInvoiceNumberForDate read
+  // an empty counter + empty getInvoices() and produced -001 even when -001 existed.
+  if (typeof DB !== 'undefined' && DB.ready && typeof DB.ready.then === 'function') DB.ready.then(_startInit);
   else _startInit();
 });
 
