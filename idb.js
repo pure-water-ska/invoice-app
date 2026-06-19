@@ -81,6 +81,49 @@ const IDB = (() => {
     }
   };
 
+  // ── Images store (base64 blobs, kept OUT of DB._cache to save RAM) ────────
+  // Its own database so preloadFromIDB()/IDB.data.getAll() never pull image blobs
+  // into the in-memory cache. Loaded on demand by image-store.js (Images.get).
+  let _imgDb = null;
+  function _openImg() {
+    if (_imgDb) return Promise.resolve(_imgDb);
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open('wt_images_v1', 1);
+      req.onupgradeneeded = e => e.target.result.createObjectStore('images');
+      req.onsuccess = e => { _imgDb = e.target.result; resolve(_imgDb); };
+      req.onerror = e => reject(e.target.error);
+    });
+  }
+  const images = {
+    async set(id, base64) {
+      const db = await _openImg();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('images', 'readwrite');
+        if (base64 == null) tx.objectStore('images').delete(id); else tx.objectStore('images').put(base64, id);
+        tx.oncomplete = () => resolve();
+        tx.onerror = e => reject(e.target.error);
+      });
+    },
+    async get(id) {
+      const db = await _openImg();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('images', 'readonly');
+        const req = tx.objectStore('images').get(id);
+        req.onsuccess = e => resolve(e.target.result ?? null);
+        req.onerror = e => reject(e.target.error);
+      });
+    },
+    async delete(id) {
+      const db = await _openImg();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('images', 'readwrite');
+        tx.objectStore('images').delete(id);
+        tx.oncomplete = () => resolve();
+        tx.onerror = e => reject(e.target.error);
+      });
+    }
+  };
+
   return {
     // Handles store methods (unchanged)
     async set(key, value) {
@@ -103,6 +146,8 @@ const IDB = (() => {
       });
     },
     // Data store namespace
-    data
+    data,
+    // Images store namespace (separate DB, never loaded into DB._cache)
+    images
   };
 })();

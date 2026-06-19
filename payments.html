@@ -650,7 +650,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.162"></script><script src="db.js?v=1.0.162"></script><script src="auth.js?v=1.0.162"></script><script src="nav.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.163"></script><script src="db.js?v=1.0.163"></script><script src="auth.js?v=1.0.163"></script><script src="nav.js?v=1.0.163"></script><script src="idb.js?v=1.0.163"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -751,15 +751,24 @@ function _b64ToBlob(b64) {
 }
 
 async function _drvUpload(b64, filename) {
-  if (!b64 || !window.DriveStore?.ready) return b64;
-  try {
-    const blob = _b64ToBlob(b64);
-    const meta = await DriveStore.upload(blob, filename, {});
-    return `drv|${meta.driveId}|${meta.uploadedAt}`;
-  } catch (e) {
-    console.warn('[_drvUpload]', e.message);
-    return b64;
+  if (!b64) return b64;
+  if (window.DriveStore?.ready) {
+    try {
+      const blob = _b64ToBlob(b64);
+      const meta = await DriveStore.upload(blob, filename, {});
+      return `drv|${meta.driveId}|${meta.uploadedAt}`;
+    } catch (e) {
+      console.warn('[_drvUpload]', e.message);
+      return b64;
+    }
   }
+  // Drive not configured (e.g. desktop) → offload the base64 to the image-store so it
+  // stays OUT of the record and the in-memory cache (RAM). Returns an "img:<id>" ref.
+  if (window.Images && Images.isInline(b64)) {
+    try { return await Images.store(b64); }
+    catch (e) { console.warn('[_drvUpload→Images]', e.message); }
+  }
+  return b64;
 }
 
 function _imgTagHtml(field, cls, title) {
@@ -768,17 +777,30 @@ function _imgTagHtml(field, cls, title) {
   if (_isDrv(field)) {
     return `<img src="" data-drv="${field}" class="${cls}"${attr} onclick="openLightboxSrc('${field}')">`;
   }
+  if (window.Images && Images.isRef(field)) {
+    return `<img src="" data-imgref="${field}" class="${cls}"${attr} onclick="openLightboxSrc('${field}')">`;
+  }
   return `<img src="${field}" class="${cls}"${attr} onclick="openLightboxSrc('${field}')">`;
 }
 
 function _loadDrvImages() {
-  if (!window.DriveStore?.ready) return;
-  document.querySelectorAll('[data-drv]').forEach(async img => {
-    const field = img.dataset.drv;
-    if (!field || img.src) return;
-    const [, driveId, uploadedAt] = field.split('|');
-    try { img.src = await DriveStore.getFileURL(driveId, uploadedAt); } catch {}
-  });
+  // Drive-backed images (web with Drive configured)
+  if (window.DriveStore?.ready) {
+    document.querySelectorAll('[data-drv]').forEach(async img => {
+      const field = img.dataset.drv;
+      if (!field || img.src) return;
+      const [, driveId, uploadedAt] = field.split('|');
+      try { img.src = await DriveStore.getFileURL(driveId, uploadedAt); } catch {}
+    });
+  }
+  // image-store refs (desktop / offloaded) — resolve from IDB/Firestore on demand
+  if (window.Images) {
+    document.querySelectorAll('[data-imgref]').forEach(async img => {
+      const ref = img.dataset.imgref;
+      if (!ref || img.getAttribute('src')) return;
+      try { const b = await Images.resolve(ref); if (b) img.src = b; } catch {}
+    });
+  }
 }
 
 async function _uploadPaymentImages(p) {
@@ -1358,6 +1380,10 @@ function openLightboxSrc(src) {
     DriveStore.getFileURL(driveId, uploadedAt)
       .then(url => { lbImg.src = url; })
       .catch(() => {});
+  } else if (window.Images && Images.isRef(src)) {
+    lbImg.src = '';
+    lb.style.display = 'flex';
+    Images.resolve(src).then(b => { if (b) lbImg.src = b; }).catch(() => {});
   } else {
     const el = document.getElementById(src);
     lbImg.src = el ? (el.querySelector('img')?.src || '') : src;
@@ -1632,7 +1658,9 @@ async function uploadSignedInvoice(invNum, inputEl) {
   try {
     Utils.showAlert('<i class="bi bi-hourglass-split me-1"></i>กำลังบันทึกรูป...', 'info');
     let signedSrc = await Utils.compressImage(file, 1400, 0.82);
-    if (window.DriveStore && DriveStore.ready && signedSrc.startsWith('data:')) {
+    // Always offload via _drvUpload — Drive when configured, else the image-store
+    // (so the base64 doesn't sit inside the invoice record / in-memory cache).
+    if (signedSrc.startsWith('data:')) {
       try { signedSrc = await _drvUpload(signedSrc, `signed_${invNum}_${Date.now()}.jpg`); } catch {}
     }
     DB.updateInvoice(inv.id, { signedImage: signedSrc });
