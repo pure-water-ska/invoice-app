@@ -33,7 +33,10 @@
     // IDB copy FIRST (durable, offline) then pushes to Firestore best-effort. If the
     // Firestore push fails (offline/quota) the local copy still exists and a later
     // resolve on THIS device works; cross-device will fill in once it syncs.
-    async store(base64) {
+    // opts.requireRemote: if true, THROW when the Firestore push fails — used by the
+    // Phase-2 migration so it only strips the original base64 once the image is safely
+    // on the server (cross-device + crash-safe). Normal saves omit it (local-first).
+    async store(base64, opts) {
       if (!base64 || typeof base64 !== 'string') return base64 || '';
       if (this.isRef(base64)) return base64;                 // already a ref
       if (!this.isInline(base64)) return base64;             // not an image — leave as-is
@@ -42,10 +45,16 @@
         : ('i' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
       try { if (typeof IDB !== 'undefined' && IDB.images) await IDB.images.set(id, base64); } catch (e) { console.warn('[Images] IDB set failed', e); }
       _memo(id, base64);
+      let remoteOK = false;
       try {
         const col = _orgCol();
-        if (col) await col.doc(id).set({ data: base64, _ts: Date.now(), _by: (window.Sync && Sync._deviceId) || '' });
-      } catch (e) { console.warn('[Images] Firestore put failed (kept local, will not cross-device until synced):', e.message); }
+        if (col) { await col.doc(id).set({ data: base64, _ts: Date.now(), _by: (window.Sync && Sync._deviceId) || '' }); remoteOK = true; }
+      } catch (e) { console.warn('[Images] Firestore put failed (kept local):', e.message); }
+      if (opts && opts.requireRemote && !remoteOK) {
+        try { if (typeof IDB !== 'undefined' && IDB.images) await IDB.images.delete(id); } catch (e) {}
+        _mem.delete(id);
+        throw new Error('image upload to server failed (offline/quota)');
+      }
       return PREFIX + id;
     },
 

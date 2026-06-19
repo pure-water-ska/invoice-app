@@ -629,6 +629,26 @@
     </div>
   </div>
 
+  <!-- ── Reduce RAM: migrate old images out of memory ───────────────────── -->
+  <div class="card mb-4 admin-only">
+    <div class="card-header bg-dark text-white fw-semibold py-2">
+      <i class="bi bi-image me-1"></i>ลดหน่วยความจำ — ย้ายรูปเก่าออกจาก RAM
+    </div>
+    <div class="card-body">
+      <div class="small text-muted mb-2">
+        ย้ายรูปสลิป/เช็ค/ใบเซ็นที่ฝังอยู่ในข้อมูล (กิน RAM) ออกไปเก็บแยก แล้วโหลดเฉพาะตอนเปิดดู
+        — รูปอัปโหลดขึ้น server เพื่อให้ยัง<b>เห็นข้ามเครื่อง</b> · กดดู "ตรวจ RAM" ก่อน/หลังเพื่อเทียบ
+      </div>
+      <div class="alert alert-warning py-2 px-2 small mb-2">
+        <i class="bi bi-exclamation-triangle me-1"></i>ใช้ write quota ~400 ครั้ง (อ่านแทบไม่ใช้) · หยุดกลางคันได้ กดซ้ำเพื่อทำต่อ · รูปไม่หาย (ตัด base64 เฉพาะเมื่ออัปโหลดสำเร็จ)
+      </div>
+      <button class="btn btn-sm btn-outline-primary" id="migrateImgBtn" onclick="migrateImagesToStore()">
+        <i class="bi bi-arrow-right-circle me-1"></i>เริ่มย้ายรูปเก่า
+      </button>
+      <div id="migrateImgOut" class="small mt-2 d-none"></div>
+    </div>
+  </div>
+
   <!-- ── App Version ───────────────────────────────────────────────────── -->
   <div class="card mb-4">
     <div class="card-header bg-secondary text-white fw-semibold py-2">
@@ -911,10 +931,10 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-<script src="utils.js?v=1.0.163"></script><script src="db.js?v=1.0.163"></script><script src="auth.js?v=1.0.163"></script><script src="nav.js?v=1.0.163"></script><script src="idb.js?v=1.0.163"></script>
+<script src="utils.js?v=1.0.164"></script><script src="db.js?v=1.0.164"></script><script src="auth.js?v=1.0.164"></script><script src="nav.js?v=1.0.164"></script><script src="idb.js?v=1.0.164"></script><script src="image-store.js?v=1.0.163"></script>
 <script src="drive-config.js" onerror="window.GOOGLE_CLIENT_ID=''"></script>
 <script src="drive-store.js"></script>
-<script src="settings.js?v=1.0.163"></script>
+<script src="settings.js?v=1.0.164"></script>
 <script>Nav.render('settings');</script>
 </body>
 </html>

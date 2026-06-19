@@ -2014,6 +2014,110 @@ function runRamCheck() {
   _hddPaint(L);
 }
 
+/* ─── Phase 2: migrate existing embedded base64 images into the image-store ───
+   Moves base64 out of payment/invoice records (which load into DB._cache = RAM) and
+   into IDB.images + Firestore images/{id}, replacing the field with a small "img:<id>"
+   reference. SAFE: stores each image with requireRemote (only strips the original
+   base64 once the image is confirmed on the server) — so a quota/offline failure
+   keeps the base64 and the run can be retried. Idempotent: already-migrated (ref)
+   images are skipped. Write-heavy, ~0 reads. */
+function _migPaint(lines, busy) {
+  const out = document.getElementById('migrateImgOut');
+  if (!out) return;
+  out.classList.remove('d-none');
+  out.innerHTML = (busy ? '<span class="spinner-border spinner-border-sm me-1"></span>' : '') +
+    '<pre class="small mb-0 mt-1" style="white-space:pre-wrap">' +
+    lines.map(s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')).join('\n') + '</pre>';
+}
+async function migrateImagesToStore() {
+  if (!window.Images) { _migPaint(['❌ image-store ยังไม่พร้อม (รีเฟรชหน้า)']); return; }
+  if (typeof Sync === 'undefined' || !Sync.ready) { _migPaint(['❌ ต้องรอ Firestore พร้อม (badge sync เขียว) ก่อน — รูปต้องขึ้น server เพื่อให้เห็นข้ามเครื่อง']); return; }
+  if (!await Utils.confirm('ย้ายรูปเก่าทั้งหมดออกจากหน่วยความจำ?\n\nรูปจะถูกอัปโหลดขึ้น server แล้วเก็บแยก (โหลดตอนเปิดดู) — ใช้ write quota ~400 ครั้ง, อ่านแทบไม่ใช้\nหยุดกลางคันได้ กดซ้ำเพื่อทำต่อ', 'ย้ายรูปเก่า (ลด RAM)')) return;
+
+  const btn = document.getElementById('migrateImgBtn');
+  if (btn) btn.disabled = true;
+  let migrated = 0, failed = 0, recsChanged = 0;
+  let stopped = false;
+  const t0 = Date.now();
+
+  // Build the work list first (count) so progress has a denominator.
+  const payments = DB.getPayments();
+  const invoices = DB.getInvoices();
+  const countInline = (v) => (window.Images && Images.isInline(v)) ? 1 : 0;
+  let totalImgs = 0;
+  payments.forEach(p => {
+    totalImgs += countInline(p.transferImage) + countInline(p.chequeImage) + countInline(p.signedImage);
+    if (Array.isArray(p.imageHistory)) p.imageHistory.forEach(h => totalImgs += countInline(h && h.image));
+  });
+  invoices.forEach(inv => { totalImgs += countInline(inv.signedImage); });
+
+  if (totalImgs === 0) { _migPaint(['✅ ไม่มีรูปเก่าที่ต้องย้ายแล้ว — ทุกอย่างเป็น ref หมดแล้ว']); if (btn) btn.disabled = false; return; }
+
+  const paint = () => _migPaint([
+    'กำลังย้ายรูปเก่าออกจากหน่วยความจำ…',
+    `ย้ายแล้ว ${migrated}/${totalImgs} รูป · เรกคอร์ดแก้ ${recsChanged}` + (failed ? ` · ล้มเหลว ${failed}` : ''),
+    'อย่าปิดหน้านี้จนกว่าจะเสร็จ',
+  ], true);
+  paint();
+
+  // Move one base64 → ref. Returns the ref, or null on failure (keeps base64).
+  const move = async (b64) => {
+    try {
+      const ref = await Images.store(b64, { requireRemote: true });
+      if (Images.isRef(ref)) { migrated++; return ref; }
+    } catch (e) { /* quota/offline */ }
+    failed++; stopped = true; return null;   // stop on first hard failure (likely quota)
+  };
+
+  // ── Payments ──
+  for (const p of payments) {
+    if (stopped) break;
+    const patch = {};
+    for (const f of ['transferImage', 'chequeImage', 'signedImage']) {
+      if (stopped) break;
+      if (Images.isInline(p[f])) { const r = await move(p[f]); if (r) patch[f] = r; }
+    }
+    if (!stopped && Array.isArray(p.imageHistory)) {
+      let histChanged = false;
+      const hist = p.imageHistory.slice();
+      for (let i = 0; i < hist.length; i++) {
+        if (stopped) break;
+        if (hist[i] && Images.isInline(hist[i].image)) {
+          const r = await move(hist[i].image);
+          if (r) { hist[i] = { ...hist[i], image: r }; histChanged = true; }
+        }
+      }
+      if (histChanged) patch.imageHistory = hist;
+    }
+    if (Object.keys(patch).length) { DB.updatePayment(p.id, patch); recsChanged++; paint(); await new Promise(r => setTimeout(r, 0)); }
+  }
+
+  // ── Invoices (signedImage) ──
+  for (const inv of invoices) {
+    if (stopped) break;
+    if (Images.isInline(inv.signedImage)) {
+      const r = await move(inv.signedImage);
+      if (r) { DB.updateInvoice(inv.id, { signedImage: r }); recsChanged++; paint(); await new Promise(rr => setTimeout(rr, 0)); }
+    }
+  }
+
+  try { if (typeof DB.waitForHddWrites === 'function') await DB.waitForHddWrites(20000); } catch (e) {}
+  const secs = Math.round((Date.now() - t0) / 1000);
+  if (stopped) {
+    _migPaint([
+      `⏸ หยุดที่ ${migrated}/${totalImgs} รูป (เรกคอร์ดแก้ ${recsChanged}) ใน ${secs} วิ`,
+      'น่าจะเพราะ write quota หมด/เน็ตหลุด — รูปที่เหลือยังเป็น base64 ครบ (ไม่หาย)',
+      'กด "เริ่มย้ายรูปเก่า" ซ้ำเพื่อทำต่อเมื่อ quota ว่าง',
+    ]);
+  } else {
+    _migPaint([
+      `✅ ย้ายเสร็จ ${migrated} รูป · เรกคอร์ดแก้ ${recsChanged} · ${secs} วิ`,
+      'ไปกด "ตรวจ RAM" ดูได้ว่า cache ลดลงแล้ว (อาจต้องปิด-เปิดแอปให้ cache โหลดใหม่)',
+    ]);
+  }
+  if (btn) btn.disabled = false;
+}
+
 /* ─── Health Check ──────────────────────────────────────────────────────── */
 function runHealthCheck() {
   const checks = [];
