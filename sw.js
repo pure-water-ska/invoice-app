@@ -106,6 +106,8 @@ self.addEventListener('fetch', (event) => {
                           url.pathname.endsWith('/user-sync.js') ||
                           url.pathname.endsWith('/db.js') ||
                           url.pathname.endsWith('/connection-status.js') ||
+                          url.pathname.endsWith('/image-store.js') ||
+                          url.pathname.endsWith('/idb.js') ||
                           url.pathname.endsWith('/settings.js');
 
     if (isNetworkOnly) {
