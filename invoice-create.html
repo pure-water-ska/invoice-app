@@ -159,7 +159,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.161"></script><script src="db.js?v=1.0.161"></script><script src="auth.js?v=1.0.161"></script><script src="nav.js?v=1.0.161"></script><script src="idb.js?v=1.0.161"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.162"></script><script src="db.js?v=1.0.162"></script><script src="auth.js?v=1.0.162"></script><script src="nav.js?v=1.0.162"></script><script src="idb.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -641,6 +641,7 @@ async function doPrint() {
 
   // Print first — immediately, no waiting for PDF
   document.getElementById('printArea').innerHTML = html;
+  _fitPrintPages();   // scale any overflowing page down to fit one A5 (14-row pages)
   window.print();
 
   // Save PDF in background after print dialog opens
@@ -1865,8 +1866,9 @@ function buildInvoicePage(page, cust, cfg, pageNum, totalPages, copyType = '', r
   }
 
   return `
-  <div class="invoice-preview inv-page" style="position:relative;display:flex;flex-direction:column;font-family:'Sarabun','TH Sarabun New',sans-serif;padding:10px">
+  <div class="invoice-preview inv-page" style="position:relative;font-family:'Sarabun','TH Sarabun New',sans-serif;padding:10px">
     ${wmHtml}
+    <div class="inv-fit" style="display:flex;flex-direction:column;min-height:100%;transform-origin:top left">
     <!-- Header info table -->
     <table class="inv-header-table" style="width:100%;border:1.5px solid #444;border-collapse:collapse;margin-bottom:0">
       ${companyHeaderHtml}
@@ -1945,7 +1947,41 @@ function buildInvoicePage(page, cust, cfg, pageNum, totalPages, copyType = '', r
       <span>issued : ${Utils.formatDateTimeTH(page.createdAt)}</span>
       <span>หน้าที่ ${pageNum}/${totalPages}</span>
     </div>
+    </div><!-- /.inv-fit -->
   </div>`;
+}
+
+// Scale each printed .inv-page's content down to fit one A5 page when it overflows
+// (a full 14-row page + header + signatures can exceed 210mm and get clipped by
+// overflow:hidden). Measures at A5 dimensions off-screen, then applies transform:scale
+// to the .inv-fit wrapper. Pages that already fit are left untouched. Call right
+// before window.print(). NOTE: print scaling can't be verified without a real printer
+// — first version aims to never clip; minor factor tuning may follow from a test print.
+function _fitPrintPages() {
+  const area = document.getElementById('printArea');
+  if (!area) return;
+  const saved = area.getAttribute('style') || 'display:none';
+  area.style.cssText = 'display:block;position:fixed;left:-10000px;top:0;width:148mm;visibility:hidden';
+  area.querySelectorAll('.inv-page').forEach(pg => {
+    const fit = pg.querySelector('.inv-fit');
+    if (!fit) return;
+    fit.style.transform = '';
+    fit.style.width = '';
+    const prev = pg.getAttribute('style') || '';
+    pg.style.width = '148mm'; pg.style.height = '210mm'; pg.style.overflow = 'hidden';
+    let padY = 20;
+    try { const cs = getComputedStyle(pg); padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0); } catch (e) {}
+    const target = pg.clientHeight - padY - 4;   // available height for .inv-fit (− safety)
+    const h = fit.scrollHeight;                  // natural content height
+    pg.setAttribute('style', prev);              // restore; print CSS sets the real 210mm box
+    if (target > 0 && h > target) {
+      const s = Math.max(0.5, target / h);
+      fit.style.transformOrigin = 'top left';
+      fit.style.transform = 'scale(' + s + ')';
+      fit.style.width = (100 / s) + '%';         // pre-scale width so it fills the page after scaling
+    }
+  });
+  area.setAttribute('style', saved);
 }
 </script>
 </body>

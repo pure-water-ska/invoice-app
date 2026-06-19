@@ -1963,6 +1963,57 @@ async function runHddCheck() {
   _hddPaint(L);
 }
 
+/* ─── RAM / memory report ───────────────────────────────────────────────────
+   On-screen, read-only: shows JS heap usage, the size of every DB._cache key, and
+   the total bytes of embedded base64 images — so any RAM optimisation targets the
+   real culprit (usually images embedded in records) instead of guessing. */
+function _fmtBytes(b) {
+  if (b >= 1048576) return (b / 1048576).toFixed(1) + ' MB';
+  if (b >= 1024) return (b / 1024).toFixed(0) + ' KB';
+  return b + ' B';
+}
+function _scanImages(obj, acc, depth) {
+  if (depth > 5 || obj == null) return;
+  if (typeof obj === 'string') { if (obj.length > 100 && obj.lastIndexOf('data:', 0) === 0) { acc.bytes += obj.length; acc.n++; } return; }
+  if (Array.isArray(obj)) { for (let i = 0; i < obj.length; i++) _scanImages(obj[i], acc, depth + 1); return; }
+  if (typeof obj === 'object') { for (const k in obj) _scanImages(obj[k], acc, depth + 1); }
+}
+function runRamCheck() {
+  const ver = (typeof APP_VERSION !== 'undefined' && APP_VERSION.version) ? APP_VERSION.version : '?';
+  const L = ['=== ตรวจ RAM / หน่วยความจำ · v' + ver + ' ==='];
+  try {
+    const pm = (typeof performance !== 'undefined') && performance.memory;
+    if (pm) L.push('JS heap (โปรแกรมใช้จริง): ' + _fmtBytes(pm.usedJSHeapSize) + ' / ' + _fmtBytes(pm.totalJSHeapSize) + ' · เพดาน ' + _fmtBytes(pm.jsHeapSizeLimit));
+    else L.push('JS heap: (WebView ไม่รายงานค่านี้) — ดูจาก cache ด้านล่างแทน');
+  } catch (e) {}
+  L.push('หมายเหตุ: WebView2 เองกินพื้นฐาน ~150–300MB (ลดไม่ได้) — ส่วนที่จัดการได้คือ cache ด้านล่าง');
+  L.push('');
+  const cache = (typeof DB !== 'undefined' && DB._cache) ? DB._cache : {};
+  const rows = [];
+  let total = 0, imgBytes = 0, imgN = 0;
+  for (const k of Object.keys(cache)) {
+    let bytes = 0;
+    try { bytes = JSON.stringify(cache[k]).length * 2; } catch (e) {}   // JS strings are UTF-16 → ×2 ≈ RAM
+    total += bytes;
+    const acc = { bytes: 0, n: 0 };
+    try { _scanImages(cache[k], acc, 0); } catch (e) {}
+    imgBytes += acc.bytes * 2; imgN += acc.n;
+    rows.push({ k, bytes, img: acc.bytes * 2, imgN: acc.n, n: Array.isArray(cache[k]) ? cache[k].length : 1 });
+  }
+  rows.sort((a, b) => b.bytes - a.bytes);
+  L.push('cache รวมในหน่วยความจำ: ' + _fmtBytes(total) + ' (' + rows.length + ' keys)');
+  L.push('รูป base64 ฝังใน cache: ' + _fmtBytes(imgBytes) + ' · ' + imgN + ' รูป' + (total > 0 && imgBytes > total * 0.4 ? '   ⚠️ ตัวกิน RAM หลัก' : ''));
+  L.push('');
+  L.push('เรียงตามขนาด (Top 12):');
+  for (const r of rows.slice(0, 12)) {
+    L.push('  ' + r.k + ' = ' + _fmtBytes(r.bytes) + (r.n > 1 ? ' · ' + r.n + ' รายการ' : '') + (r.img ? ' · รูป ' + _fmtBytes(r.img) + ' ×' + r.imgN : ''));
+  }
+  L.push('');
+  L.push('แปลผล: ถ้า "รูป base64" สูง → ย้ายรูปออกจาก record คือวิธีลด RAM ที่ได้ผลสุด');
+  L.push('ถ้า key ใดใหญ่ผิดปกติ → พิจารณา lazy-load เฉพาะ key นั้น');
+  _hddPaint(L);
+}
+
 /* ─── Health Check ──────────────────────────────────────────────────────── */
 function runHealthCheck() {
   const checks = [];
