@@ -959,7 +959,7 @@ const DB = {
       // device-local (never synced) and tiny, so keep it in localStorage and protect
       // it from the wipe. This avoids the HDD-load/cache-poison timing that left it
       // blank after restart (the "PC name gone on restart" bug).
-      const _keep = new Set(['wt_last_user', 'wt_restore_pending', 'wt_sync_pending', 'wt_sync_tombstones', 'wt_sync_sids', 'wt_device_label']);
+      const _keep = new Set(['wt_last_user', 'wt_restore_pending', 'wt_sync_pending', 'wt_sync_tombstones', 'wt_sync_sids', 'wt_device_label', 'wt_sync_delta_ts']);
       const _allLs = [];
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);

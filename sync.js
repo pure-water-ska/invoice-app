@@ -429,6 +429,23 @@ var Sync = {
     } catch { return new Set(); }
   },
 
+  // ── Delta-pull cursor (persists across logins/restart) ──────────────────────
+  // Per COLLECTION: { full: <ts of last FULL pull>, cursor: <ts of last pull> }.
+  // Stored in localStorage (kept across the Tauri wipe via db.js keep-list). Lets
+  // a subsequent login fetch only records whose _ts is newer than `cursor` instead
+  // of re-reading the whole collection — a few reads instead of ~1,000.
+  _DELTA_KEY: 'wt_sync_delta_ts',
+  _loadDeltaState() {
+    try { return JSON.parse(localStorage.getItem(this._DELTA_KEY) || '{}'); } catch { return {}; }
+  },
+  _saveDeltaState(colName, val) {
+    try {
+      const s = this._loadDeltaState();
+      s[colName] = val;
+      localStorage.setItem(this._DELTA_KEY, JSON.stringify(s));
+    } catch {}
+  },
+
   // ── Emit Firestore connection state (fromCache) for the connection banner ──
   // Called by every onSnapshot callback with the snapshot's metadata.fromCache value.
   // Deduplicates: only dispatches when the state actually changes so the banner
@@ -1517,6 +1534,61 @@ var Sync = {
         } catch {}
         return;
       }
+      // ── DELTA pull (changed-only) ────────────────────────────────────────────
+      // When we have a cursor and a full pull isn't due, fetch ONLY records whose _ts
+      // is newer than the cursor — a few reads instead of the whole collection. Deletes
+      // are handled by the deletions-doc listener + tombstones (unchanged), so absence
+      // here never removes data. A full pull still runs the first time and at least
+      // every 24h as a backstop. On any delta error we fall through to the full pull.
+      const _delta   = this._loadDeltaState();
+      const _dCursor = (_delta[colName] && _delta[colName].cursor) || 0;
+      const _dFull   = (_delta[colName] && _delta[colName].full)   || 0;
+      const _FULL_EVERY = 24 * 3600 * 1000;
+      const _SKEW       = 60 * 60 * 1000;   // tolerate up to 1h cross-device clock skew
+      let _needFull   = !_dCursor || (Date.now() - _dFull > _FULL_EVERY);
+      // Safety: never run a delta onto an unexpectedly EMPTY local set (e.g. a cold/
+      // depleted cache) — a delta would leave local with only the few changed records.
+      // If we know there should be data (persisted server-ids) but local is empty, do
+      // a full pull instead to rebuild the baseline.
+      if (!_needFull) {
+        const _known = this._loadSavedServerIds(colName);
+        let _localN = 0;
+        try { const _a = JSON.parse(this._localRead(lsKey) || '[]'); _localN = Array.isArray(_a) ? _a.length : 0; } catch {}
+        if (_localN === 0 && _known.size > 5) { _needFull = true; }
+      }
+      if (!_needFull) {
+        this._serverIds[colName] = this._loadSavedServerIds(colName);
+        this._pullIds[colName]   = this._loadSavedPullIds(colName);
+        try {
+          const _pullStart = Date.now();
+          const dsnap = await base.collection(colName).where('_ts', '>', _dCursor - _SKEW).get();
+          const stones = this._getTombstones(colName);
+          const nowMs  = Date.now();
+          const changed = dsnap.docs
+            .filter(d => !(stones[d.id] && nowMs - stones[d.id] <= this._tombstoneTTL))
+            .map(d => { const { _by, _ts, ...rec } = d.data(); return rec; });
+          let localArr = [];
+          try { localArr = JSON.parse(this._localRead(lsKey) || '[]'); } catch {}
+          if (!Array.isArray(localArr)) localArr = [];
+          const byId = new Map(localArr.filter(r => r && r.id).map(r => [r.id, r]));
+          let added = 0, updated = 0;
+          for (const r of changed) { if (!r.id) continue; if (byId.has(r.id)) updated++; else added++; byId.set(r.id, r); }
+          dsnap.docs.forEach(d => { this._serverIds[colName].add(d.id); this._pullIds[colName].add(d.id); });
+          this._saveServerIds(colName); this._savePullIds(colName);
+          const merged = [...byId.values()];
+          if (!this._lastSyncedRecs[colName]) this._lastSyncedRecs[colName] = new Map();
+          for (const r of merged) { if (r.id) { const { _by, _ts, ...rc } = r; this._lastSyncedRecs[colName].set(r.id, JSON.stringify(rc)); } }
+          if (added || updated) { this._lsWrite(lsKey, merged); if ((typeof DB !== 'undefined')) DB.invalidate(lsKey); }
+          this._saveDeltaState(colName, { full: _dFull, cursor: _pullStart });
+          try { if (typeof DB !== 'undefined' && DB.logError) DB.logError('SYNC-DELTA', `${colName}: read ${dsnap.size} → +${added} ~${updated} (since ${new Date(_dCursor).toISOString()})`); } catch {}
+          return;   // delta done — skip the full pull below
+        } catch (e) {
+          console.warn('[Sync] delta pull failed → full pull:', colName, e.message);
+        }
+      }
+
+      // ── FULL pull (first time / 24h backstop / delta fallback) ────────────────
+      const _fullStart = Date.now();
       // Archive collections seed _serverIds from the persisted set (date-windowed
       // pull won't include archive ids). Other collections seed from the snapshot.
       if (colName === 'invoices' || colName === 'payments') {
@@ -1533,6 +1605,9 @@ var Sync = {
         : base.collection(colName);
       try {
         const snap = await colQuery.get();
+        // Record the delta cursor now that the full read succeeded — subsequent
+        // logins fetch only what changed after this point.
+        this._saveDeltaState(colName, { full: _fullStart, cursor: _fullStart });
         if (!snap.empty) {
           // Cache server IDs — used by _writeKey() to tombstone deletions synchronously.
           // Archive collections: MERGE fetched IDs into the seeded persisted set (not replace)
