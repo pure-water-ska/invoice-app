@@ -302,6 +302,77 @@ const b64 = await Utils.compressImage(file);
 const b64 = await Utils.compressImage(file, 900, 0.70);
 ```
 
+### Image Offload Store (`image-store.js` + `IDB.images`) — RAM reduction (v1.0.16x)
+
+Base64 images embedded in invoice/payment records dominated RAM (`DB._cache`
+held ~88 MB of base64). `image-store.js` moves images OUT of the cached records
+and loads them lazily.
+
+- **`window.Images`** API:
+  - `Images.store(base64, opts)` → writes to local IndexedDB (`wt_images_v1`
+    store via `IDB.images`) **and** Firestore `images/{id}` collection, returns a
+    short reference string `"img:<id>"`. `opts.requireRemote: true` makes it throw
+    if the Firestore push fails (used by migration so base64 is never stripped
+    before the server confirms).
+  - `Images.resolve(value)` → returns the base64. Resolves `"img:<id>"` via
+    in-session memo (max 24) → IDB → Firestore; passes through inline `data:` URLs
+    unchanged. `Images.isRef(v)` / `Images.isInline(v)` classify a value.
+  - `Images.del(value)` → removes from IDB + Firestore.
+- **New IndexedDB store:** `idb.js` adds `wt_images_v1` (separate DB from
+  `wt_data_v1`), exposed as `IDB.images` (`.set/.get/.delete`).
+- **Phase 1 (stop new growth):** `payments.html` image upload paths offload to
+  `Images.store()` (when Drive not configured) and render `img:<id>` refs lazily
+  via `data-imgref` attributes resolved on display. Same for invoice signed images.
+- **Phase 2 (migrate existing):** Settings card "ลดหน่วยความจำ — ย้ายรูปเก่าออกจาก
+  RAM" → `migrateImagesToStore()` in `settings.js`. Iterates payment images
+  (`transferImage`/`chequeImage`/`signedImage`/`imageHistory[].image`) and invoice
+  `signedImage`, calls `Images.store(b64, {requireRemote:true})`, strips the inline
+  base64 only after server-confirm. **Stops on first failure** (quota/offline) and
+  is resumable by pressing the button again.
+- **`sw.js`:** `image-store.js` and `idb.js` are **Network-Only** (never served
+  stale) — the `requireRemote` safety guard must always be the latest code.
+
+> **Gotcha:** `scripts/bump-version.js` does NOT auto-bump `?v=` for JS files added
+> mid-stream (it scans a fixed list). New files like `image-store.js` rely on the
+> Network-Only entry in `sw.js` instead. If you add a new always-fresh JS file,
+> add it to the `sw.js` Network-Only list.
+
+### Delta Sync (`sync.js`) — Firestore read-quota reduction (v1.0.166)
+
+A full COLLECTIONS pull on every login re-read all ~950 invoices (~1,160 reads).
+Delta sync pulls **only records changed since the last pull**.
+
+- **Cursor:** `_DELTA_KEY = 'wt_sync_delta_ts'` persists per-collection
+  `{ full, cursor }` in localStorage (`_loadDeltaState`/`_saveDeltaState`).
+- **Delta path:** in `_pullAll()` COLLECTIONS, if a cursor exists and < 24 h since
+  the last **full** pull → query `where('_ts', '>', cursor - 1h)` (1 h overlap
+  guards clock skew). Otherwise a full pull runs.
+- **Backstop:** a full pull is forced every **24 h** and the cursor is recorded as
+  `{ full: _fullStart, cursor: _fullStart }`.
+- **Safety:** if local is empty but `_serverIds.size > 5`, delta is skipped and a
+  full pull runs (`_needFull = true`) — never trust an empty local against a
+  populated server. On any delta query error it falls through to a full pull.
+- **Cross-device:** other devices' changes carry a newer `_ts`, so each device's
+  next delta query picks them up; the real-time `onSnapshot` listener still
+  delivers live changes within a session.
+
+### Customer balance & overpayment allocation (v1.0.167–169)
+
+- **`DB.getCustomerBalance(custId)`** → `{ net, owed, over, owedCount, overCount }`.
+  Per invoice **number**, computes `page-1 totalAmount − getInvoicePaidAmount(num)`;
+  positive diffs sum into `owed`, negative into `over`; `net = owed − over`. This is
+  the single source of truth — the **invoice-create warning bar** and the
+  **customers.html card badge** both use it (same formula). The card shows ONE net
+  badge: `net > 0` → red "ค้างสุทธิ ฿X"; `net < 0` → green "ชำระเกินสุทธิ ฿X";
+  `net ≈ 0` → no badge.
+- **Overpayment multi-invoice allocation (`payments.html`):** when a payment
+  exceeds the invoice total, an overpay modal lets the user cut the excess across
+  other outstanding invoices (oldest first). `pendingOverpayData.diff` tracks the
+  remaining excess; the modal stays open and re-renders (`_renderOverpayBody`) after
+  each cut. `applyOverpayToOutstanding()` = manual per-invoice; `autoApplyOverpay()`
+  = auto all-oldest-first until excess = 0. `closeOverpay(createNew)` only redirects
+  to invoice-create if `Math.abs(diff) > 0.01` remains.
+
 ## Key Conventions
 
 - **No reactivity:** The DOM is not auto-synced to data. After writing to DB, call render functions explicitly.
