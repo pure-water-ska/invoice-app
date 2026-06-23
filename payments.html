@@ -650,7 +650,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.166"></script><script src="db.js?v=1.0.166"></script><script src="auth.js?v=1.0.166"></script><script src="nav.js?v=1.0.166"></script><script src="idb.js?v=1.0.166"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.167"></script><script src="db.js?v=1.0.167"></script><script src="auth.js?v=1.0.167"></script><script src="nav.js?v=1.0.167"></script><script src="idb.js?v=1.0.167"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -1961,52 +1961,10 @@ async function doSaveAllPayments(payments) {
   if (Math.abs(diff) > 0.01) {
     const custId = payments[0].customerId;
     const lastMethod = payments[payments.length - 1]?.method || 'โอน';
-    pendingOverpayData = { custId, invNum, diff, method: lastMethod };
-    const isOver = diff > 0;
-
-    // ── Outstanding interlock (overpayment only) ──────────────────────────────
-    let interlockHtml = '';
-    if (isOver) {
-      const allInvs = DB.getInvoices().filter(i => i.customerId === custId);
-      const nums    = [...new Set(allInvs.map(i => i.invoiceNumber))].filter(n => n !== invNum);
-      const outstanding = nums.map(num => {
-        const pg1 = allInvs.find(i => i.invoiceNumber === num && i.page === 1)
-                 || allInvs.find(i => i.invoiceNumber === num);
-        if (!pg1) return null;
-        const t   = parseFloat(pg1.totalAmount) || 0;
-        const rem = t - DB.getInvoicePaidAmount(num);
-        if (rem <= 0.005) return null;
-        return { num, date: pg1.createdAt, rem };
-      }).filter(Boolean).sort((a, b) => new Date(a.date) - new Date(b.date));
-
-      if (outstanding.length) {
-        interlockHtml = `
-          <hr class="my-2">
-          <p class="fw-semibold mb-2"><i class="bi bi-arrow-right-circle text-info me-1"></i>นำยอดเกิน <strong class="text-danger">฿${Utils.formatNumber(diff)}</strong> ตัดยอดค้างชำระ:</p>
-          <div class="list-group list-group-flush border rounded mb-2">
-            ${outstanding.map(o => {
-              const apply = Utils.formatNumber(Math.min(diff, o.rem));
-              return `<div class="list-group-item d-flex justify-content-between align-items-center py-2 px-2">
-                <div>
-                  <div class="fw-semibold small">${o.num}</div>
-                  <div class="text-muted" style="font-size:11px">${Utils.formatDateTH(o.date)} · ค้าง ฿${Utils.formatNumber(o.rem)}</div>
-                </div>
-                <button class="btn btn-sm btn-outline-info" onclick="applyOverpayToOutstanding('${o.num}',${o.rem})">
-                  <i class="bi bi-arrow-right me-1"></i>ตัด ฿${apply}
-                </button>
-              </div>`;
-            }).join('')}
-          </div>`;
-      }
-    }
-
-    document.getElementById('overpayBody').innerHTML =
-      '<p>ยอดชำระ <strong>฿' + Utils.formatNumber(newPaid) + '</strong> ' +
-      (isOver ? '<span class="text-danger">เกินกว่า</span>' : '<span class="text-warning">ขาดจาก</span>') +
-      ' ยอดใบกำกับ <strong>฿' + Utils.formatNumber(total) + '</strong></p>' +
-      '<p>ส่วนต่าง: <strong class="' + (isOver ? 'text-danger' : 'text-warning') + '">฿' + Utils.formatNumber(Math.abs(diff)) + '</strong></p>' +
-      interlockHtml +
-      '<p class="mb-0 text-muted small">หรือต้องการสร้างใบกำกับใหม่สำหรับส่วนต่างนี้?</p>';
+    // diff = unallocated excess (decremented as we cut old invoices). initialDiff +
+    // total + newPaid are kept for the header. _renderOverpayBody() (re)draws the body.
+    pendingOverpayData = { custId, invNum, diff, initialDiff: diff, method: lastMethod, total, newPaid };
+    _renderOverpayBody();
     overpayModal.show();
   } else {
     Utils.showAlert('บันทึกชำระเงิน ' + payments.length + ' รายการสำเร็จ', 'success');
@@ -2014,38 +1972,120 @@ async function doSaveAllPayments(payments) {
   }
 }
 
+// Build the list of OTHER outstanding invoices for this customer (oldest first).
+function _overpayOutstanding() {
+  if (!pendingOverpayData) return [];
+  const { custId, invNum } = pendingOverpayData;
+  const allInvs = DB.getInvoices().filter(i => i.customerId === custId);
+  const nums    = [...new Set(allInvs.map(i => i.invoiceNumber))].filter(n => n !== invNum);
+  return nums.map(num => {
+    const pg1 = allInvs.find(i => i.invoiceNumber === num && i.page === 1)
+             || allInvs.find(i => i.invoiceNumber === num);
+    if (!pg1) return null;
+    const rem = (parseFloat(pg1.totalAmount) || 0) - DB.getInvoicePaidAmount(num);
+    if (rem <= 0.005) return null;
+    return { num, date: pg1.createdAt, rem };
+  }).filter(Boolean).sort((a, b) => new Date(a.date) - new Date(b.date));
+}
+
+// (Re)draw the overpay modal body from the CURRENT remaining excess (pendingOverpayData.diff)
+// and the up-to-date outstanding list. Called on open and after every cut so the modal
+// stays put and the numbers update until the excess is fully allocated.
+function _renderOverpayBody() {
+  if (!pendingOverpayData) return;
+  const { initialDiff, total, newPaid } = pendingOverpayData;
+  const remain  = Math.max(0, pendingOverpayData.diff || 0);
+  const isOver  = initialDiff > 0;
+  let html = '<p>ยอดชำระ <strong>฿' + Utils.formatNumber(newPaid) + '</strong> '
+    + (isOver ? '<span class="text-danger">เกินกว่า</span>' : '<span class="text-warning">ขาดจาก</span>')
+    + ' ยอดใบกำกับ <strong>฿' + Utils.formatNumber(total) + '</strong></p>';
+
+  if (isOver) {
+    html += '<div class="d-flex justify-content-between align-items-center rounded px-2 py-1 mb-2" style="background:rgba(255,193,7,.2)">'
+      + '<span class="small fw-semibold">ส่วนเกินคงเหลือ</span>'
+      + '<span class="fw-bold ' + (remain > 0.005 ? 'text-danger' : 'text-success') + '">฿' + Utils.formatNumber(remain)
+      + (remain > 0.005 ? '' : ' — ตัดครบแล้ว') + '</span></div>';
+
+    const outstanding = _overpayOutstanding();
+    if (remain > 0.005 && outstanding.length) {
+      html += '<button class="btn btn-sm btn-info w-100 mb-2" onclick="autoApplyOverpay()">'
+        + '<i class="bi bi-arrows-collapse me-1"></i>ตัดยอดเกินให้ใบค้างทั้งหมดอัตโนมัติ (เก่าสุดก่อน)</button>';
+      html += '<div class="list-group list-group-flush border rounded mb-2">'
+        + outstanding.map(o => {
+            const apply = Math.min(remain, o.rem);
+            return '<div class="list-group-item d-flex justify-content-between align-items-center py-2 px-2">'
+              + '<div><div class="fw-semibold small">' + o.num + '</div>'
+              + '<div class="text-muted" style="font-size:11px">' + Utils.formatDateTH(o.date) + ' · ค้าง ฿' + Utils.formatNumber(o.rem) + '</div></div>'
+              + '<button class="btn btn-sm btn-outline-info" onclick="applyOverpayToOutstanding(\'' + o.num + '\',' + o.rem + ')">'
+              + '<i class="bi bi-arrow-right me-1"></i>ตัด ฿' + Utils.formatNumber(apply) + '</button></div>';
+          }).join('')
+        + '</div>';
+    } else if (remain <= 0.005) {
+      html += '<p class="text-success small mb-2"><i class="bi bi-check-circle me-1"></i>นำยอดเกินไปตัดใบค้างครบแล้ว</p>';
+    } else {
+      html += '<p class="text-muted small mb-2">ไม่มีใบค้างชำระอื่นให้ตัด</p>';
+    }
+  }
+  html += '<p class="mb-0 text-muted small">' + (remain > 0.005
+    ? 'หรือสร้างใบกำกับใหม่สำหรับส่วนเกินที่เหลือ ฿' + Utils.formatNumber(remain)
+    : 'กด "ไม่ต้องสร้างใบใหม่" เพื่อปิด') + '</p>';
+  document.getElementById('overpayBody').innerHTML = html;
+}
+
+// Cut the overpaid excess into ONE old invoice (manual, repeatable). Modal stays open;
+// the remaining excess + list are re-rendered so the user can keep cutting.
 function applyOverpayToOutstanding(targetInvNum, targetRem) {
   if (!pendingOverpayData) return;
   const { custId, invNum: sourceInvNum, diff, method } = pendingOverpayData;
   const applyAmount = Math.min(diff, targetRem);
+  if (applyAmount <= 0.005) return;
   DB.addPayment({
-    id:            Utils.uuid(),
-    invoiceNumber: targetInvNum,
-    customerId:    custId,
-    method:        method || 'โอน',
-    amount:        applyAmount,
-    notes:         `ตัดยอดเกินจากใบ ${sourceInvNum}`,
-    payDate:       Utils.todayInputValue(),
-    createdAt:     new Date().toISOString(),
-    createdBy:     session.name,
-    createdByUser: session.username,
-    imageHistory:  [],
+    id: Utils.uuid(), invoiceNumber: targetInvNum, customerId: custId,
+    method: method || 'โอน', amount: applyAmount,
+    notes: `ตัดยอดเกินจากใบ ${sourceInvNum}`, payDate: Utils.todayInputValue(),
+    createdAt: new Date().toISOString(), createdBy: session.name, createdByUser: session.username,
+    imageHistory: [],
   });
-  DB.logActivity(session.userId, session.username, 'ตัดยอดเกินชำระ',
-    { sourceInvNum, targetInvNum, amount: applyAmount });
-  overpayModal.hide();
-  Utils.showAlert(
-    `<i class="bi bi-check-circle me-1 text-success"></i>` +
-    `นำยอดเกิน <strong>฿${Utils.formatNumber(applyAmount)}</strong> ` +
-    `ตัดยอดใบ <strong>${targetInvNum}</strong> สำเร็จ`,
-    'success'
-  );
+  DB.logActivity(session.userId, session.username, 'ตัดยอดเกินชำระ', { sourceInvNum, targetInvNum, amount: applyAmount });
+  pendingOverpayData.diff = diff - applyAmount;   // shrink remaining excess
+  Utils.showAlert(`<i class="bi bi-check-circle me-1 text-success"></i>นำยอดเกิน ฿${Utils.formatNumber(applyAmount)} ตัดใบ ${targetInvNum} สำเร็จ`, 'success');
+  _commitNow();
+  _renderOverpayBody();   // modal stays open — list + remaining update
+  render();
+}
+
+// Cut the excess across ALL outstanding invoices automatically, oldest first.
+function autoApplyOverpay() {
+  if (!pendingOverpayData) return;
+  const { custId, invNum: sourceInvNum, method } = pendingOverpayData;
+  let remain = pendingOverpayData.diff || 0;
+  let applied = 0, cuts = 0;
+  for (const o of _overpayOutstanding()) {
+    if (remain <= 0.005) break;
+    const amt = Math.min(remain, o.rem);
+    DB.addPayment({
+      id: Utils.uuid(), invoiceNumber: o.num, customerId: custId,
+      method: method || 'โอน', amount: amt,
+      notes: `ตัดยอดเกินจากใบ ${sourceInvNum}`, payDate: Utils.todayInputValue(),
+      createdAt: new Date().toISOString(), createdBy: session.name, createdByUser: session.username,
+      imageHistory: [],
+    });
+    remain -= amt; applied += amt; cuts++;
+  }
+  if (!cuts) return;
+  DB.logActivity(session.userId, session.username, 'ตัดยอดเกินอัตโนมัติ', { sourceInvNum, cuts, applied });
+  pendingOverpayData.diff = remain;
+  Utils.showAlert(`<i class="bi bi-check-circle me-1 text-success"></i>ตัดยอดเกิน ฿${Utils.formatNumber(applied)} ให้ ${cuts} ใบสำเร็จ`, 'success');
+  _commitNow();
+  _renderOverpayBody();
   render();
 }
 
 function closeOverpay(createNew) {
   overpayModal.hide();
-  if (createNew && pendingOverpayData) {
+  // If the excess was fully allocated to old invoices already, there's nothing left
+  // to make a new invoice for — just close.
+  if (createNew && pendingOverpayData && Math.abs(pendingOverpayData.diff || 0) > 0.01) {
     const { custId, invNum, diff } = pendingOverpayData;
     const label = diff > 0 ? `ชำระเกินจากใบ ${invNum}` : `ค้างจากใบ ${invNum}`;
     sessionStorage.setItem('pendingAdjust', JSON.stringify({ custId, label, amount: diff }));
