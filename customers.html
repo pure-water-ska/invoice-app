@@ -401,7 +401,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="./vendor/html2canvas.min.js"></script>
-<script src="utils.js?v=1.0.167"></script><script src="db.js?v=1.0.167"></script><script src="auth.js?v=1.0.167"></script><script src="nav.js?v=1.0.167"></script>
+<script src="utils.js?v=1.0.168"></script><script src="db.js?v=1.0.168"></script><script src="auth.js?v=1.0.168"></script><script src="nav.js?v=1.0.168"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -613,6 +613,7 @@ function render() {
 
   el.innerHTML = pageList.map(c => {
     const invoices = DB.getInvoices().filter(i => i.customerId === c.id);
+    const bal = DB.getCustomerBalance(c.id);   // { net, owed, over, owedCount, overCount }
     const uniqNums = [...new Set(invoices.map(i => i.invoiceNumber))];
     const totalBill = uniqNums.length;
     const unpaid = uniqNums.filter(num => {
@@ -719,6 +720,8 @@ function render() {
             <div class="d-flex gap-2 small flex-wrap">
               <span class="badge bg-light text-dark border">${totalBill} ใบกำกับ</span>
               ${unpaid > 0 ? `<span class="badge bg-danger">${unpaid} ค้างชำระ</span>` : '<span class="badge bg-success">ชำระครบ</span>'}
+              ${bal.owed > 0.005 ? `<span class="badge bg-danger">ค้างรวม ฿${Utils.formatNumber(bal.owed)}</span>` : ''}
+              ${bal.over > 0.005 ? `<span class="badge bg-success">ชำระเกิน ฿${Utils.formatNumber(bal.over)}</span>` : ''}
               <span class="badge bg-warning text-dark">${(c.notes||[]).length} บันทึก</span>
             </div>
             ${(() => {

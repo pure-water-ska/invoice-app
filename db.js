@@ -784,6 +784,28 @@ const DB = {
       .reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
   },
 
+  // Net over/under-paid balance for a customer — the SAME calculation the
+  // invoice-create balance bar uses (per invoice number: diff = page-1 total −
+  // recorded paid). Returns { net, owed, over, owedCount, overCount }:
+  //   owed  = Σ of positive diffs (still under-paid / customer owes)
+  //   over  = Σ of |negative diffs| (over-paid / credit)
+  //   net   = owed − over  (>0 net owed, <0 net credit)
+  // Use this everywhere a customer balance is shown so the figures never drift.
+  getCustomerBalance(custId) {
+    const invs = this.getInvoices().filter(i => i.customerId === custId);
+    const nums = [...new Set(invs.map(i => i.invoiceNumber))];
+    let owed = 0, over = 0, owedCount = 0, overCount = 0;
+    for (const num of nums) {
+      const pg1 = invs.find(i => i.invoiceNumber === num && i.page === 1)
+               || invs.find(i => i.invoiceNumber === num);
+      if (!pg1) continue;
+      const diff = (parseFloat(pg1.totalAmount) || 0) - this.getInvoicePaidAmount(num);
+      if (diff > 0.005)      { owed += diff;  owedCount++; }
+      else if (diff < -0.005){ over += -diff; overCount++; }
+    }
+    return { net: owed - over, owed, over, owedCount, overCount };
+  },
+
   // ─── CAP STOCK ───────────────────────────────────────────────────────────────
   getCapColors()           { return this._get(this.K.CAP_COLORS); },
   saveCapColors(v)         { this._set(this.K.CAP_COLORS, v); },
