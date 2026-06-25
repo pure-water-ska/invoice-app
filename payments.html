@@ -643,6 +643,19 @@
   </div>
 </div>
 
+<!-- PDF page viewer (cross-device image from Firestore pdf_pages) -->
+<div class="modal fade" id="pdfPageModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title fw-semibold" id="pdfPageTitle">PDF ใบกำกับ</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0" id="pdfPageBody"></div>
+    </div>
+  </div>
+</div>
+
 <!-- A5 Payment Summary Print Area -->
 <div id="payPrintArea"></div>
 
@@ -650,7 +663,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.169"></script><script src="db.js?v=1.0.169"></script><script src="auth.js?v=1.0.169"></script><script src="nav.js?v=1.0.169"></script><script src="idb.js?v=1.0.169"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.170"></script><script src="db.js?v=1.0.170"></script><script src="auth.js?v=1.0.170"></script><script src="nav.js?v=1.0.170"></script><script src="idb.js?v=1.0.170"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -985,6 +998,66 @@ function _initBankCombos() {
 }
 
 // ── Render invoice list ───────────────────────────────────────────────────────
+// ── PDF viewer (mirrors invoices.html) ────────────────────────────────────────
+const _pdfInvMap = {};
+let _pdfModal = null;
+
+function sanitizeFilename(s) {
+  return String(s||'').replace(/[:*?"<>|\x00-\x1f]/g,'_').replace(/_+/g,'_').trim();
+}
+
+async function viewPdfInvoice(num) {
+  const inv = _pdfInvMap[num];
+  if (!inv) return;
+
+  // ── 1. Google Drive (full PDF) ────────────────────────────────────────────
+  if (inv.driveFileId) {
+    window.open('https://drive.google.com/file/d/' + inv.driveFileId + '/view', '_blank');
+    return;
+  }
+
+  // ── 2. Firestore pdf_pages (cross-device image) ───────────────────────────
+  if (inv.hasPdfPage && window.Sync?.ready) {
+    if (!_pdfModal) _pdfModal = new bootstrap.Modal(document.getElementById('pdfPageModal'));
+    document.getElementById('pdfPageTitle').textContent = 'PDF ใบกำกับ ' + num;
+    document.getElementById('pdfPageBody').innerHTML =
+      '<div class="text-center py-4"><div class="spinner-border text-primary"></div><div class="mt-2 text-muted">กำลังโหลด...</div></div>';
+    _pdfModal.show();
+    try {
+      const doc = await Sync._orgRef().collection('pdf_pages').doc(num).get();
+      if (doc.exists && doc.data().image) {
+        document.getElementById('pdfPageBody').innerHTML =
+          `<img src="${doc.data().image}" style="width:100%;height:auto;display:block;" alt="PDF ${num}">`;
+      } else {
+        document.getElementById('pdfPageBody').innerHTML =
+          '<p class="text-muted text-center py-3">ไม่พบภาพ PDF ในระบบ</p>';
+      }
+    } catch(e) {
+      document.getElementById('pdfPageBody').innerHTML =
+        `<p class="text-danger text-center py-3">โหลดล้มเหลว: ${e.message}</p>`;
+    }
+    return;
+  }
+
+  // ── 3. Local folder (same device only) ───────────────────────────────────
+  try {
+    const handle = await IDB.get('pdf_dir');
+    if (!handle) { Utils.showAlert('ไม่พบไฟล์ PDF — อาจยังไม่ได้ sync ขึ้น Firestore', 'warning'); return; }
+    const perm = await handle.requestPermission({ mode: 'read' });
+    if (perm !== 'granted') { Utils.showAlert('ไม่ได้รับสิทธิ์เข้าถึงโฟลเดอร์ PDF', 'warning'); return; }
+    const custName = inv.customerName || (DB.getCustomers().find(c => c.id === inv.customerId)?.name) || 'unknown';
+    const fn = sanitizeFilename(custName) + '_' + sanitizeFilename(num) + '.pdf';
+    const fileHandle = await handle.getFileHandle(fn);
+    const file = await fileHandle.getFile();
+    const url = URL.createObjectURL(file);
+    const w = window.open(url, '_blank');
+    if (!w) Utils.showAlert('กรุณาอนุญาต popup เพื่อดู PDF', 'warning');
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
+  } catch(e) {
+    Utils.showAlert('ไม่พบไฟล์ PDF: ' + (e.message || e), 'danger');
+  }
+}
+
 function render() {
   populatePaymentFilters();
   const q         = document.getElementById('searchInv').value.toLowerCase();
@@ -1013,6 +1086,7 @@ function render() {
   const seen = new Map();
   for (const inv of DB.getInvoices()) {
     if (!seen.has(inv.invoiceNumber)) seen.set(inv.invoiceNumber, inv);
+    if (inv.importedFrom === 'pdf' || inv.hasPdfPage) _pdfInvMap[inv.invoiceNumber] = inv;
   }
 
   let list = [...seen.values()].filter(inv => {
@@ -1086,7 +1160,7 @@ function render() {
     const statusLbl = { pending:'ค้างชำระ', partial:'บางส่วน', paid:'ชำระแล้ว' };
     const statusCls = { pending:'badge-pending', partial:'badge-partial', paid:'badge-paid' };
     return `<tr>
-      <td class="fw-semibold">${inv.invoiceNumber}</td>
+      <td><a href="invoice-create.html?view=${inv.invoiceNumber}" class="fw-semibold text-decoration-none" title="ดูใบกำกับ">${inv.invoiceNumber}</a></td>
       <td>${Utils.formatDateTH(inv.createdAt)}</td>
       <td>${cust ? cust.name : '-'}</td>
       <td class="text-end d-none d-md-table-cell">฿${Utils.formatNumber(total)}</td>
@@ -1107,6 +1181,10 @@ function render() {
                   onclick="printPaymentSummary('${inv.invoiceNumber}')" title="พิมพ์ใบสรุปชำระเงิน">
             <i class="bi bi-printer"></i>
           </button>
+          ${(inv.importedFrom === 'pdf' || inv.hasPdfPage) ? `<button class="btn btn-sm btn-outline-danger"
+                  onclick="viewPdfInvoice('${inv.invoiceNumber}')" title="ดูไฟล์ PDF">
+            <i class="bi bi-file-earmark-pdf"></i>
+          </button>` : ''}
         </div>
       </td>
     </tr>`;
