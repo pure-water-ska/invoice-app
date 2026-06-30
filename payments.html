@@ -180,12 +180,6 @@
 
         <div class="row g-3">
           <div class="col-12 col-md-6">
-            <label class="form-label fw-semibold">วันที่ชำระเงิน <span class="text-danger">*</span></label>
-            <input type="text" id="payDate" class="form-control" placeholder="DD/MM/YYYY">
-          </div>
-          <div class="col-12 col-md-6"></div>
-
-          <div class="col-12 col-md-6">
             <label class="form-label fw-semibold">วิธีชำระเงิน <span class="text-danger">*</span></label>
             <select id="payMethod" class="form-select" onchange="onMethodChange()"></select>
           </div>
@@ -196,6 +190,12 @@
               <span class="input-group-text">฿</span>
               <input type="number" id="payAmount" class="form-control" min="0" step="0.01" placeholder="0.00">
             </div>
+          </div>
+
+          <!-- วันที่ชำระเงิน — placed under วิธีชำระเงิน; hidden for "โอน" (วันที่โอน is the payment date) -->
+          <div class="col-12 col-md-6 pay-date-field">
+            <label class="form-label fw-semibold">วันที่ชำระเงิน <span class="text-danger">*</span></label>
+            <input type="text" id="payDate" class="form-control" placeholder="DD/MM/YYYY">
           </div>
 
           <!-- ผู้รับเงิน (เงินสดเท่านั้น — ผู้ล็อกอินอยู่เท่านั้น) -->
@@ -663,7 +663,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.170"></script><script src="db.js?v=1.0.170"></script><script src="auth.js?v=1.0.170"></script><script src="nav.js?v=1.0.170"></script><script src="idb.js?v=1.0.170"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.171"></script><script src="db.js?v=1.0.171"></script><script src="auth.js?v=1.0.171"></script><script src="nav.js?v=1.0.171"></script><script src="idb.js?v=1.0.171"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -851,7 +851,7 @@ window.addEventListener('DOMContentLoaded', () => {
   _fpMultiCheque        = BEDate.byId('multiChequeDate');
   _fpPayDate      = BEDate.byId('payDate',          { onChange: checkPayDate });
   _fpCheqDate     = BEDate.byId('payChequeDate');
-  _fpTransferDate = BEDate.byId('payTransferDateBE');
+  _fpTransferDate = BEDate.byId('payTransferDateBE', { onChange: checkPayDate });
 
   // Wait for IDB-overflow data before rendering data-dependent UI
   DB.ready.then(() => {
@@ -1249,7 +1249,12 @@ function openPayModal(invNum, custId) {
 
 // ── Date check ────────────────────────────────────────────────────────────────
 function checkPayDate() {
-  const payDateISO = Utils.parseBEToISO(document.getElementById('payDate').value);
+  // For "โอน" the active date is วันที่โอน; otherwise it's วันที่ชำระเงิน.
+  const method     = document.getElementById('payMethod').value;
+  const dateStr    = method === 'โอน'
+    ? document.getElementById('payTransferDateBE').value
+    : document.getElementById('payDate').value;
+  const payDateISO = Utils.parseBEToISO(dateStr);
   const invDate    = window._currentInvDate || '';
   const alertEl    = document.getElementById('payDateAlert');
   const msgEl      = document.getElementById('payDateAlertMsg');
@@ -1412,6 +1417,9 @@ function onMethodChange() {
   document.querySelectorAll('.pay-cash').forEach(el     => el.style.display = isCash     ? '' : 'none');
   document.querySelectorAll('.pay-transfer').forEach(el => el.style.display = isTransfer ? '' : 'none');
   document.querySelectorAll('.pay-cheque').forEach(el   => el.style.display = isCheque   ? '' : 'none');
+  // "วันที่ชำระเงิน" is hidden for transfer — วันที่โอน serves as the payment date there.
+  document.querySelectorAll('.pay-date-field').forEach(el => el.style.display = isTransfer ? 'none' : '');
+  checkPayDate(); // re-evaluate the before-invoice-date warning against the now-active date field
   if (isCash) buildCashCollectorSelect();
   if (isTransfer || isCheque) buildTransferAccountSelect();
   // Reset account-linked hidden fields when switching methods
@@ -1865,7 +1873,11 @@ function collectPaymentData() {
     // signedImage intentionally omitted — stored once on the invoice record
     imageHistory,
     notes:          document.getElementById('payNote').value          || '',
-    payDate:        Utils.parseBEToISO(document.getElementById('payDate').value) || Utils.todayInputValue(),
+    payDate:        (function(){
+                      // Transfer has no separate "วันที่ชำระเงิน" field — use วันที่โอน as the payment date.
+                      if (method === 'โอน') return Utils.parseBEToISO(document.getElementById('payTransferDateBE').value) || Utils.todayInputValue();
+                      return Utils.parseBEToISO(document.getElementById('payDate').value) || Utils.todayInputValue();
+                    })(),
     createdAt:      now,
     createdBy:      session.name,
     createdByUser:  session.username,
