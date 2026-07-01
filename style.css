@@ -68,6 +68,15 @@ body {
   #invoicePreview { display: none !important; }
   #printArea      { display: block !important; }
 
+  /* Fixed notification bars / toasts must never bleed onto a printout */
+  #firestoreCacheBanner,
+  #swUpdateBanner,
+  #offlineBanner,
+  #wtUploadBar,
+  #wtBlockingProgress,
+  #_toastHost,
+  #_progressToast { display: none !important; }
+
   .invoice-preview { border: none !important; border-radius: 0 !important; padding: 6mm !important; box-shadow: none !important; background: transparent !important; }
   .inv-page { height: 210mm; width: 148mm; box-sizing: border-box; overflow: hidden; }
   /* Header table — กรอบด้านนอก + ระยะห่างจากขอบหน้ากระดาษจัดการโดย padding ของ .invoice-preview */

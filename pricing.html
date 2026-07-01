@@ -95,9 +95,13 @@
         </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">ลูกค้า</label>
-          <select id="priceCustomer" class="form-select">
-            <option value="">— ทุกลูกค้า (ราคากลาง) —</option>
-          </select>
+          <div class="cust-search-wrap">
+            <input type="text" id="priceCustomerSearch" class="form-control" autocomplete="off"
+                   placeholder="— ทุกลูกค้า (ราคากลาง) — พิมพ์เพื่อค้นหา"
+                   oninput="_pcFilter()" onfocus="_pcOpen()" onkeydown="_pcKey(event)">
+            <input type="hidden" id="priceCustomer">
+            <div id="priceCustDropdown" class="cust-dd" style="display:none"></div>
+          </div>
         </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">วิธีจัดส่ง</label>
@@ -172,7 +176,7 @@
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.171"></script><script src="db.js?v=1.0.171"></script><script src="auth.js?v=1.0.171"></script><script src="nav.js?v=1.0.171"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.172"></script><script src="db.js?v=1.0.172"></script><script src="auth.js?v=1.0.172"></script><script src="nav.js?v=1.0.172"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -196,6 +200,62 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+// ── Searchable customer combobox (price modal) ────────────────────────────────
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+let _pcList = [];   // [{id, name}]
+let _pcHi   = -1;
+function _pcRefresh(){ _pcList = DB.getCustomers().map(c => ({ id: c.id, name: c.name })); }
+function _pcRender(list){
+  const dd = document.getElementById('priceCustDropdown');
+  const rows = [{ id: '', name: '— ทุกลูกค้า (ราคากลาง) —' }].concat(list);
+  dd.innerHTML = rows.map((c, i) =>
+    `<div class="copt${i === _pcHi ? ' hi' : ''}" data-id="${esc(c.id)}" data-name="${esc(c.name)}"
+          onmousedown="_pcSelect('${esc(c.id)}', this.dataset.name)">${esc(c.name)}</div>`
+  ).join('') || '<div class="copt-empty">ไม่พบลูกค้า</div>';
+  dd.style.display = 'block';
+}
+function _pcOpen(){ _pcHi = -1; _pcRender(_pcList); }
+function _pcFilter(){
+  _pcHi = -1;
+  const q = document.getElementById('priceCustomerSearch').value.trim().toLowerCase();
+  _pcRender(q ? _pcList.filter(c => c.name.toLowerCase().includes(q)) : _pcList);
+  document.getElementById('priceCustomer').value = ''; // typing invalidates prior pick until re-selected
+}
+function _pcClose(){ const dd = document.getElementById('priceCustDropdown'); if (dd) dd.style.display = 'none'; _pcHi = -1; }
+function _pcSelect(id, name){
+  document.getElementById('priceCustomer').value       = id;
+  document.getElementById('priceCustomerSearch').value = id ? name : '';
+  _pcClose();
+}
+// Set both the hidden id and the visible text from a customer id ('' = ทุกลูกค้า)
+function _pcSetById(custId){
+  const c = custId ? _pcList.find(x => x.id === custId) : null;
+  document.getElementById('priceCustomer').value       = c ? c.id : '';
+  document.getElementById('priceCustomerSearch').value = c ? c.name : '';
+}
+// Safety net at save time: if the user typed an exact customer name but didn't click
+// a result, resolve it to that id. Unmatched text falls back to ทุกลูกค้า (id='').
+function _pcCommit(){
+  if (document.getElementById('priceCustomer').value) return; // already bound to an id
+  const txt = document.getElementById('priceCustomerSearch').value.trim().toLowerCase();
+  if (!txt) return;
+  const c = _pcList.find(x => x.name.toLowerCase() === txt);
+  if (c) document.getElementById('priceCustomer').value = c.id;
+}
+function _pcKey(e){
+  const dd = document.getElementById('priceCustDropdown');
+  const items = dd.querySelectorAll('.copt');
+  if (!items.length) return;
+  if (e.key === 'ArrowDown'){ e.preventDefault(); _pcHi = Math.min(_pcHi + 1, items.length - 1); items.forEach((el,i)=>el.classList.toggle('hi', i===_pcHi)); items[_pcHi]?.scrollIntoView({block:'nearest'}); }
+  else if (e.key === 'ArrowUp'){ e.preventDefault(); _pcHi = Math.max(_pcHi - 1, 0); items.forEach((el,i)=>el.classList.toggle('hi', i===_pcHi)); items[_pcHi]?.scrollIntoView({block:'nearest'}); }
+  else if (e.key === 'Enter'){ e.preventDefault(); const hi = dd.querySelector('.copt.hi'); if (hi) _pcSelect(hi.dataset.id, hi.dataset.name); else _pcClose(); }
+  else if (e.key === 'Escape'){ _pcClose(); }
+}
+document.addEventListener('mousedown', (e) => {
+  const wrap = document.getElementById('priceCustomerSearch')?.closest('.cust-search-wrap');
+  if (wrap && !wrap.contains(e.target)) _pcClose();
+});
+
 function populateSelects() {
   const products = DB.getProductsSorted();
   const customers = DB.getCustomers();
@@ -206,8 +266,8 @@ function populateSelects() {
     const isFilter = id.startsWith('filter');
     el.innerHTML = (isFilter ? '<option value="">— สินค้าทั้งหมด —</option>' : '<option value="">— เลือกสินค้า —</option>') + prodOpts;
   });
-  const priceCustomer = document.getElementById('priceCustomer');
-  priceCustomer.innerHTML = '<option value="">— ทุกลูกค้า (ราคากลาง) —</option>' + custOpts;
+  // Customer picker is a searchable combobox (see _pcRefresh) — not a <select>.
+  _pcRefresh();
 }
 
 function render() {
@@ -303,7 +363,7 @@ function openModal(id) {
   if (id) {
     const p = DB.getPricing().find(x => x.id === id);
     document.getElementById('priceProduct').value = p.productId || '';
-    document.getElementById('priceCustomer').value = p.customerId || '';
+    _pcSetById(p.customerId || '');
     document.getElementById('priceShipping').value = p.shippingMethod || '';
     document.getElementById('priceValue').value = p.price || '';
     document.getElementById('tierQty').value = (p.tierQty != null ? p.tierQty : '');
@@ -311,10 +371,12 @@ function openModal(id) {
     document.getElementById('tierBasis').value = p.tierBasis || 'line';
   } else {
     const fp = document.getElementById('filterProduct').value;
-    const fc = document.getElementById('filterCustomer').value;
+    const fc = document.getElementById('filterCustomer').value.trim();
     const fs = document.getElementById('filterShipping').value;
     document.getElementById('priceProduct').value = fp || '';
-    document.getElementById('priceCustomer').value = fc || '';
+    // filterCustomer is free text (a name) — resolve to a customer id if it matches exactly
+    const _fcMatch = fc ? _pcList.find(c => c.name.toLowerCase() === fc.toLowerCase()) : null;
+    _pcSetById(_fcMatch ? _fcMatch.id : '');
     document.getElementById('priceShipping').value = fs || '';
     document.getElementById('priceValue').value = '';
     document.getElementById('tierQty').value = '';
@@ -325,6 +387,7 @@ function openModal(id) {
 }
 
 function savePrice() {
+  _pcCommit(); // resolve an exact typed customer name to its id before reading
   const id = document.getElementById('priceId').value;
   const productId = document.getElementById('priceProduct').value;
   const customerId = document.getElementById('priceCustomer').value;
