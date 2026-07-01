@@ -34,9 +34,13 @@
           </select>
         </div>
         <div class="col-md-4">
-          <div class="input-group input-group-sm">
-            <span class="input-group-text"><i class="bi bi-search"></i></span>
-            <input type="text" id="filterCustomer" class="form-control" placeholder="ค้นหาชื่อลูกค้า...">
+          <div class="cust-search-wrap">
+            <div class="input-group input-group-sm">
+              <span class="input-group-text"><i class="bi bi-search"></i></span>
+              <input type="text" id="filterCustomer" class="form-control" placeholder="ค้นหาชื่อลูกค้า..."
+                     autocomplete="off" oninput="_fcFilter()" onfocus="_fcOpen()" onkeydown="_fcKey(event)">
+            </div>
+            <div id="filterCustDropdown" class="cust-dd"></div>
           </div>
         </div>
         <div class="col-md-4">
@@ -176,7 +180,7 @@
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.173"></script><script src="db.js?v=1.0.173"></script><script src="auth.js?v=1.0.173"></script><script src="nav.js?v=1.0.173"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.174"></script><script src="db.js?v=1.0.174"></script><script src="auth.js?v=1.0.174"></script><script src="nav.js?v=1.0.174"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -187,7 +191,7 @@ window.addEventListener('DOMContentLoaded', () => {
   modal     = new bootstrap.Modal(document.getElementById('pricingModal'));
   histModal = new bootstrap.Modal(document.getElementById('histModal'));
   document.getElementById('filterProduct').addEventListener('change', render);
-  document.getElementById('filterCustomer').addEventListener('input', render);
+  // filterCustomer's render() call is triggered by the inline oninput="_fcFilter()" handler instead
   document.getElementById('filterShipping').addEventListener('change', render);
   DB.ready.then(() => {
     populateSelects();
@@ -266,6 +270,46 @@ function _pcKey(e){
 document.addEventListener('mousedown', (e) => {
   const wrap = document.getElementById('priceCustomerSearch')?.closest('.cust-search-wrap');
   if (wrap && !wrap.contains(e.target)) _pcClose();
+});
+
+// ── Searchable customer combobox (main list filter bar) ───────────────────────
+// filterCustomer stays a free-text filter (render() substring-matches it) — this
+// just adds the same click-a-suggestion dropdown UX as invoice-create/payments,
+// reusing _pcList so it refreshes on the same sync:updated/sync:pulled events.
+let _fcHi = -1;
+function _fcRender(list){
+  const dd = document.getElementById('filterCustDropdown');
+  dd.innerHTML = list.map((c, i) =>
+    `<div class="copt${i === _fcHi ? ' hi' : ''}" data-name="${esc(c.name)}"
+          onmousedown="_fcSelect(this.dataset.name)">${esc(c.name)}</div>`
+  ).join('') || '<div class="copt-empty">ไม่พบลูกค้า</div>';
+  dd.style.display = 'block';
+}
+function _fcOpen(){ _fcHi = -1; _fcRender(_pcList); }
+function _fcFilter(){
+  _fcHi = -1;
+  const q = document.getElementById('filterCustomer').value.trim().toLowerCase();
+  _fcRender(q ? _pcList.filter(c => c.name.toLowerCase().includes(q)) : _pcList);
+  render();
+}
+function _fcClose(){ const dd = document.getElementById('filterCustDropdown'); if (dd) dd.style.display = 'none'; _fcHi = -1; }
+function _fcSelect(name){
+  document.getElementById('filterCustomer').value = name;
+  _fcClose();
+  render();
+}
+function _fcKey(e){
+  const dd = document.getElementById('filterCustDropdown');
+  const items = dd.querySelectorAll('.copt');
+  if (!items.length) return;
+  if (e.key === 'ArrowDown'){ e.preventDefault(); _fcHi = Math.min(_fcHi + 1, items.length - 1); items.forEach((el,i)=>el.classList.toggle('hi', i===_fcHi)); items[_fcHi]?.scrollIntoView({block:'nearest'}); }
+  else if (e.key === 'ArrowUp'){ e.preventDefault(); _fcHi = Math.max(_fcHi - 1, 0); items.forEach((el,i)=>el.classList.toggle('hi', i===_fcHi)); items[_fcHi]?.scrollIntoView({block:'nearest'}); }
+  else if (e.key === 'Enter'){ e.preventDefault(); const hi = dd.querySelector('.copt.hi'); if (hi) _fcSelect(hi.dataset.name); else _fcClose(); }
+  else if (e.key === 'Escape'){ _fcClose(); }
+}
+document.addEventListener('mousedown', (e) => {
+  const wrap = document.getElementById('filterCustomer')?.closest('.cust-search-wrap');
+  if (wrap && !wrap.contains(e.target)) _fcClose();
 });
 
 function populateSelects() {
