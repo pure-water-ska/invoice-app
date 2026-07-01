@@ -186,7 +186,7 @@
 </div>
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
-<script src="utils.js?v=1.0.172"></script><script src="db.js?v=1.0.172"></script><script src="auth.js?v=1.0.172"></script><script src="nav.js?v=1.0.172"></script>
+<script src="utils.js?v=1.0.173"></script><script src="db.js?v=1.0.173"></script><script src="auth.js?v=1.0.173"></script><script src="nav.js?v=1.0.173"></script>
 <script>
 // Tauri: unregister stale service workers (old SW could serve pre-fix JS files)
 if (window.IS_TAURI && 'serviceWorker' in navigator) {
@@ -323,7 +323,7 @@ function statusBadge(status) {
 }
 
 function load() {
-  const invoices = DB.getInvoices();
+  const invoices = DB.getInvoices().filter(i => !i.cancelled);
   const customers = DB.getCustomers();
   const today = new Date(); today.setHours(0,0,0,0);
   const thisMonth = new Date(today.getFullYear(), today.getMonth(), 1);

@@ -159,7 +159,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.172"></script><script src="db.js?v=1.0.172"></script><script src="auth.js?v=1.0.172"></script><script src="nav.js?v=1.0.172"></script><script src="idb.js?v=1.0.172"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.173"></script><script src="db.js?v=1.0.173"></script><script src="auth.js?v=1.0.173"></script><script src="nav.js?v=1.0.173"></script><script src="idb.js?v=1.0.173"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -590,14 +590,25 @@ async function loadView(invNum) {
   }
   if (pages.length === 0) { Utils.showAlert(`ไม่พบใบกำกับ ${invNum}`, 'danger'); return; }
 
+  const cancelled = !!pages[0].cancelled;
   document.getElementById('toolbarBtns').innerHTML = `
     <button class="btn btn-outline-secondary btn-sm" onclick="history.back()"><i class="bi bi-arrow-left me-1"></i>กลับ</button>
-    <a href="invoice-create.html?edit=${invNum}" class="btn btn-warning btn-sm no-mobile-hide"><i class="bi bi-pencil me-1"></i>แก้ไข</a>
-    <a href="payments.html?inv=${invNum}" class="btn btn-success btn-sm"><i class="bi bi-cash-coin me-1"></i>บันทึกชำระเงิน</a>
+    ${!cancelled ? `<a href="invoice-create.html?edit=${invNum}" class="btn btn-warning btn-sm no-mobile-hide"><i class="bi bi-pencil me-1"></i>แก้ไข</a>` : ''}
+    ${!cancelled ? `<a href="payments.html?inv=${invNum}" class="btn btn-success btn-sm"><i class="bi bi-cash-coin me-1"></i>บันทึกชำระเงิน</a>` : ''}
     <button class="btn btn-outline-info btn-sm" onclick="copyInvoiceImage()"><i class="bi bi-clipboard-image me-1"></i>คัดลอกรูป</button>
     <button class="btn btn-primary btn-sm no-mobile-hide" onclick="doPrint()"><i class="bi bi-printer me-1"></i>พิมพ์</button>
+    ${cancelled && Auth.can('invoice_void')
+      ? `<button class="btn btn-outline-success btn-sm" onclick="restoreThis()"><i class="bi bi-arrow-counterclockwise me-1"></i>กู้คืนใบกำกับ</button>`
+      : ''}
     <button class="btn btn-danger btn-sm no-mobile-hide" onclick="deleteThis()"><i class="bi bi-trash me-1"></i>ลบ</button>
   `;
+
+  if (cancelled) {
+    const who = pages[0].cancelledBy ? ` โดย ${pages[0].cancelledBy}` : '';
+    const when = pages[0].cancelledAt ? ` เมื่อ ${Utils.formatDateTimeTH(pages[0].cancelledAt)}` : '';
+    const reason = pages[0].cancelReason ? ` — เหตุผล: ${pages[0].cancelReason}` : '';
+    Utils.showAlert(`<i class="bi bi-ban me-1"></i><strong>ใบกำกับนี้ถูกยกเลิกแล้ว</strong>${who}${when}${reason}`, 'warning');
+  }
 
   await renderPreview(pages);
 
@@ -677,6 +688,15 @@ async function deleteThis() {
   DB.removeCapDeductionsByInvoice(currentInvNum);
   DB.logActivity(session.userId, session.username, 'ลบใบกำกับ', { invoiceNumber: currentInvNum });
   location.href = 'invoices.html';
+}
+
+async function restoreThis() {
+  if (!Auth.can('invoice_void')) { Utils.showAlert('คุณไม่มีสิทธิ์กู้คืนใบกำกับ', 'warning'); return; }
+  if (!await Utils.confirm(`กู้คืนใบกำกับ "${currentInvNum}" ใช่หรือไม่?`)) return;
+  DB.restoreInvoice(currentInvNum, { by: session.name, byUser: session.username });
+  DB.logActivity(session.userId, session.username, 'กู้คืนใบกำกับ', { invoiceNumber: currentInvNum });
+  Utils.showAlert(`กู้คืนใบกำกับ ${currentInvNum} แล้ว`, 'success');
+  loadView(currentInvNum);
 }
 
 // ── EDIT MODE ─────────────────────────────────────────────────────────────────
@@ -861,7 +881,7 @@ function checkCustomerBalance(custId) {
   if (!custId) { alertDiv.innerHTML = ''; _balanceDetails = []; return; }
 
   const cust = DB.getCustomerById(custId);
-  const allInvoices = DB.getInvoices().filter(i => i.customerId === custId);
+  const allInvoices = DB.getInvoices().filter(i => i.customerId === custId && !i.cancelled);
   const invNums = [...new Set(allInvoices.map(i => i.invoiceNumber))];
 
   _balanceDetails = [];

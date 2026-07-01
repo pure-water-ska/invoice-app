@@ -78,6 +78,7 @@
             <option value="pending">ค้างชำระ</option>
             <option value="partial">บางส่วน</option>
             <option value="paid">ชำระแล้ว</option>
+            <option value="cancelled">ยกเลิก</option>
           </select>
         </div>
         <div class="col-6 col-md-2">
@@ -663,7 +664,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.172"></script><script src="db.js?v=1.0.172"></script><script src="auth.js?v=1.0.172"></script><script src="nav.js?v=1.0.172"></script><script src="idb.js?v=1.0.172"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.173"></script><script src="db.js?v=1.0.173"></script><script src="auth.js?v=1.0.173"></script><script src="nav.js?v=1.0.173"></script><script src="idb.js?v=1.0.173"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -1094,7 +1095,7 @@ function render() {
     const custName = (cust ? cust.name : '').toLowerCase();
     const paid     = paidMap[inv.invoiceNumber] || 0;
     const total    = parseFloat(inv.totalAmount) || 0;
-    const status   = paid <= 0 ? 'pending' : paid >= total - 0.005 ? 'paid' : 'partial';
+    const status   = inv.cancelled ? 'cancelled' : paid <= 0 ? 'pending' : paid >= total - 0.005 ? 'paid' : 'partial';
     const d = new Date(inv.createdAt);
     if (q  && !inv.invoiceNumber.toLowerCase().includes(q) && !custName.includes(q)) return false;
     if (fc && !custName.includes(fc)) return false;
@@ -1156,11 +1157,11 @@ function render() {
     const total = parseFloat(inv.totalAmount) || 0;
     const paid  = paidMap[inv.invoiceNumber] || 0;
     const rem   = total - paid;
-    const status    = paid <= 0 ? 'pending' : paid >= total - 0.005 ? 'paid' : 'partial';
-    const statusLbl = { pending:'ค้างชำระ', partial:'บางส่วน', paid:'ชำระแล้ว' };
-    const statusCls = { pending:'badge-pending', partial:'badge-partial', paid:'badge-paid' };
-    return `<tr>
-      <td><a href="invoice-create.html?view=${inv.invoiceNumber}" class="fw-semibold text-decoration-none" title="ดูใบกำกับ">${inv.invoiceNumber}</a></td>
+    const status    = inv.cancelled ? 'cancelled' : paid <= 0 ? 'pending' : paid >= total - 0.005 ? 'paid' : 'partial';
+    const statusLbl = { pending:'ค้างชำระ', partial:'บางส่วน', paid:'ชำระแล้ว', cancelled:'ยกเลิก' };
+    const statusCls = { pending:'badge-pending', partial:'badge-partial', paid:'badge-paid', cancelled:'badge-cancelled' };
+    return `<tr${inv.cancelled ? ' style="opacity:.65"' : ''}>
+      <td><a href="invoice-create.html?view=${inv.invoiceNumber}" class="fw-semibold text-decoration-none${inv.cancelled ? ' text-decoration-line-through text-muted' : ''}" title="ดูใบกำกับ">${inv.invoiceNumber}</a></td>
       <td>${Utils.formatDateTH(inv.createdAt)}</td>
       <td>${cust ? cust.name : '-'}</td>
       <td class="text-end d-none d-md-table-cell">฿${Utils.formatNumber(total)}</td>
@@ -1169,10 +1170,10 @@ function render() {
       <td class="text-center"><span class="badge ${statusCls[status]}">${statusLbl[status]}</span></td>
       <td class="text-center">
         <div class="d-flex gap-1 justify-content-center">
-          <button class="btn btn-sm btn-success"
+          ${!inv.cancelled ? `<button class="btn btn-sm btn-success"
                   onclick="openPayModal('${inv.invoiceNumber}','${inv.customerId}')" title="บันทึกชำระเงิน">
             <i class="bi bi-cash-coin"></i>
-          </button>
+          </button>` : ''}
           <button class="btn btn-sm btn-outline-info"
                   onclick="showOutstandingPreview('${inv.customerId}')" title="รายการค้างชำระทั้งหมดของลูกค้า">
             <i class="bi bi-list-check"></i>
@@ -1193,6 +1194,8 @@ function render() {
 
 // ── Open modal ────────────────────────────────────────────────────────────────
 function openPayModal(invNum, custId) {
+  const _inv = DB.getInvoices().find(i => i.invoiceNumber === invNum);
+  if (_inv?.cancelled) { Utils.showAlert(`ใบกำกับ ${invNum} ถูกยกเลิกแล้ว — ไม่สามารถบันทึกชำระเงินได้`, 'warning'); return; }
   document.getElementById('payInvNum').textContent     = invNum;
   document.getElementById('payInvNumHidden').value     = invNum;
   document.getElementById('payCustIdHidden').value     = custId;

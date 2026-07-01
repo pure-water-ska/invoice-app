@@ -176,7 +176,7 @@
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.172"></script><script src="db.js?v=1.0.172"></script><script src="auth.js?v=1.0.172"></script><script src="nav.js?v=1.0.172"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.173"></script><script src="db.js?v=1.0.173"></script><script src="auth.js?v=1.0.173"></script><script src="nav.js?v=1.0.173"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -199,6 +199,18 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   });
 });
+
+// Customers/products/pricing are owned by dedicated CollectionSync modules whose
+// Firestore listener can still be in flight when DB.ready resolves (DB.ready only
+// waits on local IDB-overflow load, not the Firestore round-trip) — so on a device
+// with an empty/stale local cache, populateSelects() ran once against 0 records and
+// never again. Refresh once the real data lands, matching customers.html's pattern.
+window.addEventListener('sync:updated', (e) => {
+  if (['wt_customers', 'wt_products', 'wt_pricing'].includes(e.detail?.key)) {
+    populateSelects(); render();
+  }
+});
+window.addEventListener('sync:pulled', () => { populateSelects(); render(); });
 
 // ── Searchable customer combobox (price modal) ────────────────────────────────
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }

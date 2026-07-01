@@ -219,7 +219,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.172"></script><script src="db.js?v=1.0.172"></script><script src="auth.js?v=1.0.172"></script><script src="nav.js?v=1.0.172"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.173"></script><script src="db.js?v=1.0.173"></script><script src="auth.js?v=1.0.173"></script><script src="nav.js?v=1.0.173"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.requirePage('cap_stock');
 DB.init();
@@ -324,7 +324,7 @@ function renderOverviewHistory() {
       const c = colors.find(x => x.id === d.colorId);
       rows.push({ date: d.invoiceDate || d.createdAt, colorId: d.colorId, color: d.color, colorCode: c?.colorCode,
         type: 'out', qty: d.qty, ref: d.invoiceNumber, note: d.customerName || '', id: d.id,
-        invNum: d.invoiceNumber, ts: d.createdAt });
+        invNum: d.invoiceNumber, ts: d.createdAt, voided: !!d.voided });
     });
   }
   rows.sort((a, b) => new Date(b.ts) - new Date(a.ts));
@@ -333,13 +333,14 @@ function renderOverviewHistory() {
   if (!rows.length) { tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">ไม่พบรายการ</td></tr>'; return; }
 
   tbody.innerHTML = rows.map(r => `
-  <tr>
+  <tr class="${r.voided ? 'text-muted' : ''}">
     <td>${Utils.formatDateTH(r.date)}</td>
     <td>${colorDot(r.colorCode)}${r.color}</td>
     <td>${r.type === 'in'
       ? '<span class="badge bg-success">รับเข้า</span>'
-      : '<span class="badge bg-warning text-dark">ตัดออก</span>'}</td>
-    <td class="text-end fw-semibold ${r.type==='in'?'text-success':'text-danger'}">${r.type==='in'?'+':'−'}${Utils.formatNumber(r.qty)}</td>
+      : '<span class="badge bg-warning text-dark">ตัดออก</span>'}
+      ${r.voided ? '<span class="badge bg-secondary ms-1">คืนสต๊อก (ยกเลิกใบกำกับ)</span>' : ''}</td>
+    <td class="text-end fw-semibold ${r.voided ? 'text-decoration-line-through text-muted' : (r.type==='in'?'text-success':'text-danger')}">${r.type==='in'?'+':'−'}${Utils.formatNumber(r.qty)}</td>
     <td>${r.type === 'out'
       ? `<a href="invoice-create.html?view=${r.ref}" class="text-decoration-none">${r.ref}</a>`
       : (r.ref || '-')}</td>
@@ -446,11 +447,11 @@ function showDedDetail(colorId, colorName) {
   } else {
     document.getElementById('dedModalBody').innerHTML = deds
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-      .map(d => `<tr>
+      .map(d => `<tr class="${d.voided ? 'text-muted' : ''}">
         <td>${Utils.formatDateTH(d.invoiceDate || d.createdAt)}</td>
-        <td><a href="invoice-create.html?view=${d.invoiceNumber}">${d.invoiceNumber}</a></td>
+        <td><a href="invoice-create.html?view=${d.invoiceNumber}">${d.invoiceNumber}</a>${d.voided ? ' <span class="badge bg-secondary">คืนสต๊อกแล้ว</span>' : ''}</td>
         <td>${d.customerName || '-'}</td>
-        <td class="text-end text-danger fw-semibold">−${Utils.formatNumber(d.qty)}</td>
+        <td class="text-end fw-semibold ${d.voided ? 'text-decoration-line-through text-muted' : 'text-danger'}">−${Utils.formatNumber(d.qty)}</td>
       </tr>`).join('');
   }
   dedModal.show();
@@ -534,7 +535,7 @@ function renderMonthly() {
   const summaryCards = colorSet.map(cid => {
     const c     = colors.find(x => x.id === cid);
     const inQty = receipts.filter(r => r.colorId === cid).reduce((s, r) => s + (r.qty||0), 0);
-    const outQty = deductions.filter(d => d.colorId === cid).reduce((s, d) => s + (d.qty||0), 0);
+    const outQty = deductions.filter(d => d.colorId === cid && !d.voided).reduce((s, d) => s + (d.qty||0), 0);
     return `
     <div class="col-6 col-md-3">
       <div class="card text-center">

@@ -133,7 +133,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.172"></script><script src="db.js?v=1.0.172"></script><script src="auth.js?v=1.0.172"></script><script src="nav.js?v=1.0.172"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.173"></script><script src="db.js?v=1.0.173"></script><script src="auth.js?v=1.0.173"></script><script src="nav.js?v=1.0.173"></script><script src="bedate.js"></script>
 <script>
 Auth.require();
 DB.init();
@@ -188,7 +188,7 @@ function runReport() {
   const from = fromISO ? new Date(fromISO+'T00:00:00') : new Date('2000-01-01');
   const to   = toISO   ? new Date(toISO  +'T23:59:59') : new Date('2099-12-31');
 
-  const allInvoices = DB.getInvoices();
+  const allInvoices = DB.getInvoices().filter(i => !i.cancelled);
   const allPayments = DB.getPayments();
   const customers   = DB.getCustomers();
 
@@ -476,7 +476,7 @@ function renderByBrand(filtered, pagesByNum, customers, area) {
 
 // ── 7. รายงานพฤติกรรมการชำระเงิน ─────────────────────────────────────────────
 function renderByPayBehavior(customers, area) {
-  const allInvoices = DB.getInvoices();
+  const allInvoices = DB.getInvoices().filter(i => !i.cancelled);
   const allPayments = DB.getPayments();
 
   // Build invoice map: invoiceNumber -> first-page invoice record

@@ -64,6 +64,7 @@
             <option value="pending">ค้างชำระ</option>
             <option value="partial">ชำระบางส่วน</option>
             <option value="paid">ชำระแล้ว</option>
+            <option value="cancelled">ยกเลิก</option>
           </select>
         </div>
         <div class="col-6 col-md-2">
@@ -142,9 +143,33 @@
   </div>
 </div>
 
+<!-- Void Invoice Confirm Modal -->
+<div class="modal fade" id="voidModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title fw-bold"><i class="bi bi-ban me-1"></i>ยกเลิกใบกำกับ <span id="voidModalNum"></span></h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="voidPaidWarning" class="alert alert-warning py-2 mb-3" style="display:none"></div>
+        <label class="form-label fw-semibold small">เหตุผลที่ยกเลิก (ไม่บังคับ)</label>
+        <textarea id="voidReason" class="form-control form-control-sm" rows="2" placeholder="เช่น ลูกค้ายกเลิกออเดอร์, ออกใบผิด..."></textarea>
+        <div class="form-text">สต๊อกฝาขวดที่ตัดไปสำหรับบิลนี้จะถูกคืนอัตโนมัติ · สามารถกู้คืนใบกำกับนี้ได้ภายหลัง</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+        <button class="btn btn-secondary fw-semibold" style="background:#5f5e5a;border-color:#5f5e5a" onclick="executeVoidInvoice()">
+          <i class="bi bi-ban me-1"></i>ยืนยันยกเลิกใบกำกับ
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.172"></script><script src="db.js?v=1.0.172"></script><script src="auth.js?v=1.0.172"></script><script src="nav.js?v=1.0.172"></script><script src="idb.js?v=1.0.172"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.173"></script><script src="db.js?v=1.0.173"></script><script src="auth.js?v=1.0.173"></script><script src="nav.js?v=1.0.173"></script><script src="idb.js?v=1.0.173"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -386,7 +411,8 @@ async function viewPdfInvoice(num) {
   }
 }
 
-function statusInfo(paid, total) {
+function statusInfo(paid, total, cancelled) {
+  if (cancelled) return { key:'cancelled', label:'ยกเลิก', cls:'badge-cancelled' };
   // Half-satang epsilon: item totals sum to a full float (e.g. 1234.5600000000002)
   // while a full payment is parseFloat(rem.toFixed(2)) = 1234.56, so a plain
   // paid >= total comparison wrongly yields "partial" on an exact full payment.
@@ -448,7 +474,7 @@ function render() {
     const cust  = custMap[inv.customerId];
     const paid  = paidMap[inv.invoiceNumber] || 0;
     const total = parseFloat(inv.totalAmount) || 0;
-    const si    = statusInfo(paid, total);
+    const si    = statusInfo(paid, total, inv.cancelled);
     const d     = new Date(inv.createdAt);
     if (q && !inv.invoiceNumber.toLowerCase().includes(q) && !(cust && cust.name.toLowerCase().includes(q))) return false;
     if (fc && inv.customerId !== fc) return false;
@@ -478,7 +504,7 @@ function render() {
       case 'total':  cmp = ta - tb; break;
       case 'paid':   cmp = pa - pb; break;
       case 'rem':    cmp = (ta - pa) - (tb - pb); break;
-      case 'status': cmp = statusInfo(pa,ta).key.localeCompare(statusInfo(pb,tb).key); break;
+      case 'status': cmp = statusInfo(pa,ta,a.cancelled).key.localeCompare(statusInfo(pb,tb,b.cancelled).key); break;
       default:       cmp = new Date(a.createdAt) - new Date(b.createdAt);
     }
     return cmp * _sortDir;
@@ -487,9 +513,12 @@ function render() {
   // Rebuild PDF map for current filtered list
   list.forEach(inv => { if (inv.importedFrom === 'pdf' || inv.hasPdfPage) _pdfInvMap[inv.invoiceNumber] = inv; });
 
-  // Summary totals (all filtered, not just current page)
+  // Summary totals (all filtered, not just current page) — voided invoices are no
+  // longer real revenue, so they're excluded here even though the row still shows
+  // (with a ยกเลิก badge) unless the user filters status = cancelled.
   let sumTotal = 0, sumPaid = 0;
   for (const inv of list) {
+    if (inv.cancelled) continue;
     const total = parseFloat(inv.totalAmount) || 0;
     const paid  = paidMap[inv.invoiceNumber] || 0;
     sumTotal += total; sumPaid += Math.min(paid, total);
@@ -525,7 +554,7 @@ function render() {
     const total     = parseFloat(inv.totalAmount) || 0;
     const paid      = paidMap[inv.invoiceNumber] || 0;
     const remaining = Math.max(0, total - paid);
-    const si        = statusInfo(paid, total);
+    const si        = statusInfo(paid, total, inv.cancelled);
     const pages     = pageCountMap[inv.invoiceNumber] || 1;
     const allPages  = allPagesMap.get(inv.invoiceNumber) || [inv];
     const isExp     = _expandedNums.has(inv.invoiceNumber);
@@ -537,14 +566,16 @@ function render() {
          </button>`
       : '<span style="display:inline-block;width:18px"></span>';
 
-    let html = `<tr data-num="${inv.invoiceNumber}">
+    const canVoid = Auth.can('invoice_void');
+
+    let html = `<tr data-num="${inv.invoiceNumber}"${inv.cancelled ? ' style="opacity:.65"' : ''}>
       <td class="text-center sel-chk-cell ${_selMode ? '' : 'd-none'}">
         <input type="checkbox" class="inv-chk" data-num="${inv.invoiceNumber}"
                style="width:15px;height:15px;accent-color:#dc3545;cursor:pointer"
                ${_selectedNums.has(inv.invoiceNumber) ? 'checked' : ''}
                onchange="onInvChkChange()">
       </td>
-      <td>${expandBtn}<a href="invoice-create.html?view=${inv.invoiceNumber}" class="fw-semibold text-decoration-none">${inv.invoiceNumber}</a>
+      <td>${expandBtn}<a href="invoice-create.html?view=${inv.invoiceNumber}" class="fw-semibold text-decoration-none${inv.cancelled ? ' text-decoration-line-through text-muted' : ''}">${inv.invoiceNumber}</a>
         ${pages > 1 ? `<span class="badge bg-secondary ms-1">${pages} หน้า</span>` : ''}
       </td>
       <td>${Utils.formatDateTH(inv.createdAt)}</td>
@@ -558,8 +589,13 @@ function render() {
         <div class="btn-group btn-group-sm">
           <button class="btn btn-outline-primary" onclick="printInvoice('${inv.invoiceNumber}')" title="พิมพ์"><i class="bi bi-printer"></i></button>
           ${(inv.importedFrom === 'pdf' || inv.hasPdfPage) ? `<button class="btn btn-outline-danger" onclick="viewPdfInvoice('${inv.invoiceNumber}')" title="ดูไฟล์ PDF"><i class="bi bi-file-earmark-pdf"></i></button>` : ''}
-          <a class="btn btn-outline-warning" href="invoice-create.html?edit=${inv.invoiceNumber}" title="แก้ไข"><i class="bi bi-pencil"></i></a>
-          <a class="btn btn-outline-success" href="payments.html?inv=${inv.invoiceNumber}" title="ชำระเงิน"><i class="bi bi-cash-coin"></i></a>
+          ${!inv.cancelled ? `<a class="btn btn-outline-warning" href="invoice-create.html?edit=${inv.invoiceNumber}" title="แก้ไข"><i class="bi bi-pencil"></i></a>` : ''}
+          ${!inv.cancelled ? `<a class="btn btn-outline-success" href="payments.html?inv=${inv.invoiceNumber}" title="ชำระเงิน"><i class="bi bi-cash-coin"></i></a>` : ''}
+          ${canVoid
+            ? (inv.cancelled
+                ? `<button class="btn btn-outline-success" onclick="restoreInvoiceAction('${inv.invoiceNumber}')" title="กู้คืนใบกำกับ"><i class="bi bi-arrow-counterclockwise"></i></button>`
+                : `<button class="btn btn-outline-secondary" onclick="openVoidModal('${inv.invoiceNumber}')" title="ยกเลิกใบกำกับ"><i class="bi bi-ban"></i></button>`)
+            : ''}
           <button class="btn btn-outline-danger" onclick="deleteInvoice('${inv.invoiceNumber}',${pages})"
                   title="${pages > 1 ? 'ลบทุกหน้า' : 'ลบ'}">
             <i class="bi bi-trash"></i>${pages > 1 ? ' <small>ทั้งหมด</small>' : ''}
@@ -620,6 +656,62 @@ function render() {
       <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_invPage++;render()" ${_invPage===totalPages?'disabled':''}>›</button>
       <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_invPage=${totalPages};render()" ${_invPage===totalPages?'disabled':''}>»</button>
     </div>`;
+}
+
+// ── Void (soft-cancel) / Restore ──────────────────────────────────────────────
+// Unlike deleteInvoice, void keeps the record for audit — applies to every page
+// of the invoice number, restores cap-stock deductions, and can be undone later.
+let _voidTargetNum = null;
+let _voidModal = null;
+
+function openVoidModal(num) {
+  if (!Auth.can('invoice_void')) { Utils.showAlert('คุณไม่มีสิทธิ์ยกเลิกใบกำกับ', 'warning'); return; }
+  _voidTargetNum = num;
+  document.getElementById('voidModalNum').textContent = num;
+  document.getElementById('voidReason').value = '';
+
+  const paid = DB.getInvoicePaidAmount(num);
+  const warnEl = document.getElementById('voidPaidWarning');
+  if (paid > 0.005) {
+    warnEl.style.display = '';
+    warnEl.innerHTML = `<i class="bi bi-exclamation-triangle-fill me-1"></i>มีการชำระเงินแล้ว <strong>฿${Utils.formatNumber(paid)}</strong> — ` +
+      'การยกเลิกจะไม่ลบประวัติการชำระ กรุณาดำเนินการคืนเงินแยกต่างหาก';
+  } else {
+    warnEl.style.display = 'none';
+    warnEl.innerHTML = '';
+  }
+
+  if (!_voidModal) _voidModal = new bootstrap.Modal(document.getElementById('voidModal'));
+  _voidModal.show();
+}
+
+function executeVoidInvoice() {
+  if (!_voidTargetNum) return;
+  if (!Auth.can('invoice_void')) { Utils.showAlert('คุณไม่มีสิทธิ์ยกเลิกใบกำกับ', 'warning'); return; }
+  const num    = _voidTargetNum;
+  const reason = document.getElementById('voidReason').value.trim();
+  const paid   = DB.getInvoicePaidAmount(num);
+
+  DB.cancelInvoice(num, { by: session.name, byUser: session.username, reason });
+
+  const details = { invoiceNumber: num };
+  if (reason) details.reason = reason;
+  if (paid > 0.005) details.unpaidAmount = paid; // amount already paid that still needs a refund
+  DB.logActivity(session.userId, session.username, 'ยกเลิกใบกำกับ', details);
+
+  _voidModal?.hide();
+  Utils.showAlert(`ยกเลิกใบกำกับ ${num} แล้ว`, 'warning');
+  _voidTargetNum = null;
+  render();
+}
+
+async function restoreInvoiceAction(num) {
+  if (!Auth.can('invoice_void')) { Utils.showAlert('คุณไม่มีสิทธิ์กู้คืนใบกำกับ', 'warning'); return; }
+  if (!await Utils.confirm(`กู้คืนใบกำกับ "${num}" ใช่หรือไม่?`)) return;
+  DB.restoreInvoice(num, { by: session.name, byUser: session.username });
+  DB.logActivity(session.userId, session.username, 'กู้คืนใบกำกับ', { invoiceNumber: num });
+  Utils.showAlert(`กู้คืนใบกำกับ ${num} แล้ว`, 'success');
+  render();
 }
 
 async function deleteInvoice(num, pageCount) {

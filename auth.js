@@ -20,6 +20,7 @@ const Auth = {
     { key: 'invoice_create',  label: 'สร้างใบกำกับสินค้า',           group: 'ใบกำกับสินค้า' },
     { key: 'invoice_edit',    label: 'แก้ไขใบกำกับสินค้า',           group: 'ใบกำกับสินค้า' },
     { key: 'invoice_delete',  label: 'ลบใบกำกับสินค้า',              group: 'ใบกำกับสินค้า' },
+    { key: 'invoice_void',    label: 'ยกเลิก / กู้คืนใบกำกับสินค้า', group: 'ใบกำกับสินค้า' },
     { key: 'invoice_print',   label: 'พิมพ์ / PDF ใบกำกับสินค้า',   group: 'ใบกำกับสินค้า' },
     // ─ การชำระเงิน ─────────────────────────────────────────────
     { key: 'payment_add',     label: 'บันทึกการชำระเงิน',            group: 'การชำระเงิน' },
@@ -206,7 +207,7 @@ const Auth = {
   // (Page-access/view keys like dashboard/invoices/customers are NOT here, so
   //  viewing still works.)
   MUTATION_PERMS: new Set([
-    'invoice_create','invoice_edit','invoice_delete','invoice_print',
+    'invoice_create','invoice_edit','invoice_delete','invoice_void','invoice_print',
     'payment_add','payment_edit','payment_delete',
     'customer_add','customer_edit','customer_delete',
     'product_add','product_edit','product_delete','pricing_edit',

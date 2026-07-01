@@ -35,6 +35,7 @@ body {
 .badge-pending  { background: #ffc107; color: #000; }
 .badge-partial  { background: #17a2b8; color: #fff; }
 .badge-paid     { background: #28a745; color: #fff; }
+.badge-cancelled{ background: #6c757d; color: #fff; }
 .badge-overdue  { background: #dc3545; color: #fff; }
 
 /* ── Login page ── */

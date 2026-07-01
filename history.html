@@ -115,7 +115,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.172"></script><script src="db.js?v=1.0.172"></script><script src="auth.js?v=1.0.172"></script><script src="nav.js?v=1.0.172"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.173"></script><script src="db.js?v=1.0.173"></script><script src="auth.js?v=1.0.173"></script><script src="nav.js?v=1.0.173"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -127,6 +127,8 @@ const ACTION_ICONS = {
   'ออกจากระบบ': 'bi-box-arrow-right text-secondary',
   'สร้างใบกำกับ': 'bi-receipt text-primary',
   'ลบใบกำกับ': 'bi-receipt text-danger',
+  'ยกเลิกใบกำกับ': 'bi-ban text-secondary',
+  'กู้คืนใบกำกับ': 'bi-arrow-counterclockwise text-success',
   'บันทึกชำระเงิน': 'bi-cash-coin text-success',
   'ลบรายการชำระ': 'bi-cash-coin text-danger',
   'เพิ่มลูกค้า': 'bi-person-plus text-success',
@@ -245,7 +247,7 @@ function renderActivity() {
       tier:'ขั้นบันได', tierQty:'จำนวนขั้นบันได', tierPrice:'ราคาขั้นบันได', tierBasis:'นับจาก',
       files:'จำนวนไฟล์', pages:'จำนวนหน้า', cards:'จำนวนการ์ด',
       invoiceNumber:'เลขที่ใบกำกับ', sourceInvoice:'ใบต้นทาง', items:'รายการ',
-      returns:'จำนวนใบคืน', amount:'ยอด' })[k] || k;
+      returns:'จำนวนใบคืน', amount:'ยอด', reason:'เหตุผล', unpaidAmount:'ยอดที่ยังไม่ได้คืน' })[k] || k;
   };
   window._detailVal = window._detailVal || function(k, v) {
     try {

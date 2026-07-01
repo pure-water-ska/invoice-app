@@ -670,6 +670,44 @@ const DB = {
   },
   deleteInvoice(id) { this.saveInvoices(this.getInvoices().filter(v => v.id !== id)); },
 
+  // ─── VOID / RESTORE (soft-cancel — keeps the record for audit, unlike deleteInvoice) ──
+  // Applies to every page of the invoice number (mirrors deleteInvoice's whole-number scope).
+  // Reverses cap-stock deductions by SOFT-voiding the deduction records (not deleting them),
+  // so restoreInvoice() can put back the exact original quantities instead of recomputing
+  // from current product↔cap-color mappings, which may have changed since.
+  cancelInvoice(invNum, { by, byUser, reason } = {}) {
+    const all = this.getInvoices();
+    const now = new Date().toISOString();
+    let changed = false;
+    for (const inv of all) {
+      if (inv.invoiceNumber !== invNum || inv.cancelled) continue;
+      inv.cancelled       = true;
+      inv.cancelledAt     = now;
+      inv.cancelledBy     = by || '';
+      inv.cancelledByUser = byUser || '';
+      inv.cancelReason    = reason || '';
+      changed = true;
+    }
+    if (changed) this.saveInvoices(all);
+    this.voidCapDeductionsByInvoice(invNum);
+    return changed;
+  },
+  restoreInvoice(invNum, { by, byUser } = {}) {
+    const all = this.getInvoices();
+    let changed = false;
+    for (const inv of all) {
+      if (inv.invoiceNumber !== invNum || !inv.cancelled) continue;
+      inv.cancelled       = false;
+      inv.restoredAt      = new Date().toISOString();
+      inv.restoredBy      = by || '';
+      inv.restoredByUser  = byUser || '';
+      changed = true;
+    }
+    if (changed) this.saveInvoices(all);
+    this.restoreCapDeductionsByInvoice(invNum);
+    return changed;
+  },
+
   generateInvoiceNumber() {
     const now = new Date();
     const dd = String(now.getDate()).padStart(2, '0');
@@ -792,7 +830,7 @@ const DB = {
   //   net   = owed − over  (>0 net owed, <0 net credit)
   // Use this everywhere a customer balance is shown so the figures never drift.
   getCustomerBalance(custId) {
-    const invs = this.getInvoices().filter(i => i.customerId === custId);
+    const invs = this.getInvoices().filter(i => i.customerId === custId && !i.cancelled);
     const nums = [...new Set(invs.map(i => i.invoiceNumber))];
     let owed = 0, over = 0, owedCount = 0, overCount = 0;
     for (const num of nums) {
@@ -824,9 +862,28 @@ const DB = {
   removeCapDeductionsByInvoice(invNum) {
     this.saveCapDeductions(this.getCapDeductions().filter(d => d.invoiceNumber !== invNum));
   },
+  // Soft-void: keeps the deduction records (so restoreCapDeductionsByInvoice can put back
+  // the EXACT original quantities) but excludes them from getCapCurrentStock — the caps
+  // go back into available stock while the invoice is cancelled.
+  voidCapDeductionsByInvoice(invNum) {
+    const all = this.getCapDeductions();
+    let changed = false;
+    for (const d of all) {
+      if (d.invoiceNumber === invNum && !d.voided) { d.voided = true; d.voidedAt = new Date().toISOString(); changed = true; }
+    }
+    if (changed) this.saveCapDeductions(all);
+  },
+  restoreCapDeductionsByInvoice(invNum) {
+    const all = this.getCapDeductions();
+    let changed = false;
+    for (const d of all) {
+      if (d.invoiceNumber === invNum && d.voided) { d.voided = false; d.voidedAt = null; changed = true; }
+    }
+    if (changed) this.saveCapDeductions(all);
+  },
   getCapCurrentStock(colorId) {
     const receipts   = this.getCapReceipts().filter(r => r.colorId === colorId);
-    const deductions = this.getCapDeductions().filter(d => d.colorId === colorId);
+    const deductions = this.getCapDeductions().filter(d => d.colorId === colorId && !d.voided);
     const inQty  = receipts.reduce((s, r) => s + (r.qty || 0), 0);
     const outQty = deductions.reduce((s, d) => s + (d.qty || 0), 0);
     return inQty - outQty;
