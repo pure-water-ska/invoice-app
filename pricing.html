@@ -72,6 +72,7 @@
         <tbody id="pricingTable"><tr><td colspan="7" class="text-center text-muted py-4">ยังไม่มีข้อมูลราคา</td></tr></tbody>
       </table>
     </div>
+    <div id="pricePagination" class="d-flex justify-content-between align-items-center px-3 py-2 border-top small text-muted" style="display:none!important"></div>
   </div>
 
   <div class="mt-3 p-3 bg-light rounded small text-muted">
@@ -180,19 +181,21 @@
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.174"></script><script src="db.js?v=1.0.174"></script><script src="auth.js?v=1.0.174"></script><script src="nav.js?v=1.0.174"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.175"></script><script src="db.js?v=1.0.175"></script><script src="auth.js?v=1.0.175"></script><script src="nav.js?v=1.0.175"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
 Nav.render('pricing');
 let modal, histModal, priceChartInstance = null;
+let _pricePage = 1;
+const PRICE_PAGE_SIZE = 50;
 
 window.addEventListener('DOMContentLoaded', () => {
   modal     = new bootstrap.Modal(document.getElementById('pricingModal'));
   histModal = new bootstrap.Modal(document.getElementById('histModal'));
-  document.getElementById('filterProduct').addEventListener('change', render);
+  document.getElementById('filterProduct').addEventListener('change', () => { _pricePage = 1; render(); });
   // filterCustomer's render() call is triggered by the inline oninput="_fcFilter()" handler instead
-  document.getElementById('filterShipping').addEventListener('change', render);
+  document.getElementById('filterShipping').addEventListener('change', () => { _pricePage = 1; render(); });
   DB.ready.then(() => {
     populateSelects();
     render();
@@ -290,13 +293,13 @@ function _fcFilter(){
   _fcHi = -1;
   const q = document.getElementById('filterCustomer').value.trim().toLowerCase();
   _fcRender(q ? _pcList.filter(c => c.name.toLowerCase().includes(q)) : _pcList);
-  render();
+  _pricePage = 1; render();
 }
 function _fcClose(){ const dd = document.getElementById('filterCustDropdown'); if (dd) dd.style.display = 'none'; _fcHi = -1; }
 function _fcSelect(name){
   document.getElementById('filterCustomer').value = name;
   _fcClose();
-  render();
+  _pricePage = 1; render();
 }
 function _fcKey(e){
   const dd = document.getElementById('filterCustDropdown');
@@ -342,24 +345,40 @@ function render() {
     return true;
   });
   const tbody = document.getElementById('pricingTable');
+  const pg    = document.getElementById('pricePagination');
   if (list.length === 0) {
     tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">ไม่พบข้อมูลราคา</td></tr>';
+    pg.style.display = 'none';
     return;
   }
-  const allInvoices = DB.getInvoices(); // cache for order-count
-  tbody.innerHTML = list.map(p => {
+
+  // Pagination — the full list can be 3,000+ rules; rendering (and lazily-binding
+  // date pickers for) all of them on every keystroke was the other half of the
+  // "customer search slow" bug, on top of the orderMap fix below. 50/page matches
+  // the pattern already used on invoices.html/customers.html.
+  const totalPages = Math.ceil(list.length / PRICE_PAGE_SIZE);
+  if (_pricePage > totalPages) _pricePage = totalPages;
+  const pageList = list.slice((_pricePage - 1) * PRICE_PAGE_SIZE, _pricePage * PRICE_PAGE_SIZE);
+
+  // Precompute distinct-customer order counts per (productId, price) ONCE — the old
+  // code rescanned every invoice/item for EVERY visible pricing row (O(rows × invoices
+  // × items), ~3,329 rules × 1,048 invoices worst case). Since render() re-runs on every
+  // keystroke in the customer search box, that per-row rescan was the actual cause of
+  // "customer search really slow". This is O(invoices × items + rows) instead.
+  const orderMap = new Map(); // key: `${productId}|${price.toFixed(2)}` → Set<customerId>
+  DB.getInvoices().forEach(inv => {
+    (inv.items || []).forEach(item => {
+      if (!item.productId) return;
+      const key = item.productId + '|' + (parseFloat(item.price) || 0).toFixed(2);
+      if (!orderMap.has(key)) orderMap.set(key, new Set());
+      orderMap.get(key).add(inv.customerId);
+    });
+  });
+  tbody.innerHTML = pageList.map(p => {
     const prod = products.find(x => x.id === p.productId);
     const cust = customers.find(x => x.id === p.customerId);
     // Count distinct customers who have ordered this product at this price
-    const orderCustIds = new Set();
-    allInvoices.forEach(inv => {
-      (inv.items || []).forEach(item => {
-        if (item.productId === p.productId &&
-            Math.abs(parseFloat(item.price) - parseFloat(p.price)) < 0.001) {
-          orderCustIds.add(inv.customerId);
-        }
-      });
-    });
+    const orderCustIds = orderMap.get(p.productId + '|' + (parseFloat(p.price) || 0).toFixed(2)) || new Set();
     const orderCount = orderCustIds.size;
     const notified = p.notifiedAt ? p.notifiedAt : '';
     return `<tr>
@@ -388,18 +407,43 @@ function render() {
       </td>
     </tr>`;
   }).join('');
-  _initNotifDatePickers();
+  _bindNotifDateDelegation();
+
+  if (totalPages <= 1) { pg.style.display = 'none'; return; }
+  pg.style.display = '';
+  pg.innerHTML = `
+    <span>แสดง ${(_pricePage-1)*PRICE_PAGE_SIZE+1}–${Math.min(_pricePage*PRICE_PAGE_SIZE, list.length)} จาก ${list.length} รายการ</span>
+    <div class="d-flex gap-1 align-items-center">
+      <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_pricePage=1;render()" ${_pricePage===1?'disabled':''}>«</button>
+      <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_pricePage--;render()" ${_pricePage===1?'disabled':''}>‹</button>
+      <span class="px-2">หน้า ${_pricePage} / ${totalPages}</span>
+      <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_pricePage++;render()" ${_pricePage===totalPages?'disabled':''}>›</button>
+      <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_pricePage=${totalPages};render()" ${_pricePage===totalPages?'disabled':''}>»</button>
+    </div>`;
 }
 
-function _initNotifDatePickers() {
-  document.querySelectorAll('.price-notif-date').forEach(el => {
+// Lazily attach flatpickr to a "วันที่แจ้งลูกค้า" field only when the user actually
+// focuses it, instead of eagerly creating an instance for every visible row on every
+// render() call. With up to 3,329 pricing rows, eager init cost ~3.8s per render —
+// the actual cause of "customer search slow" (render() re-runs on every keystroke in
+// the customer filter). Rows are also replaced wholesale via tbody.innerHTML on every
+// render, so any per-row init flag wouldn't survive anyway — delegation on the
+// (stable) table body is the correct fix, not just a lazier per-row loop.
+let _notifDelegationBound = false;
+function _bindNotifDateDelegation() {
+  if (_notifDelegationBound) return;
+  _notifDelegationBound = true;
+  document.getElementById('pricingTable').addEventListener('focusin', (e) => {
+    const el = e.target.closest('.price-notif-date');
+    if (!el || el._flatpickr) return; // not a date field, or already initialized
+    const priceId = el.dataset.pid;
     BEDate.init(el, {
       onChange(selDates, dateStr) {
-        const priceId = el.dataset.pid;
         const isoDate = Utils.parseBEToISO(dateStr);
         setNotifiedDate(priceId, isoDate);
       }
     });
+    el._flatpickr.open(); // flatpickr's own focus listener missed this focus event since it didn't exist yet
   });
 }
 

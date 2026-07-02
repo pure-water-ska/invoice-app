@@ -401,7 +401,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="./vendor/html2canvas.min.js"></script>
-<script src="utils.js?v=1.0.174"></script><script src="db.js?v=1.0.174"></script><script src="auth.js?v=1.0.174"></script><script src="nav.js?v=1.0.174"></script>
+<script src="utils.js?v=1.0.175"></script><script src="db.js?v=1.0.175"></script><script src="auth.js?v=1.0.175"></script><script src="nav.js?v=1.0.175"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -492,16 +492,20 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-// Re-render when a remote device pushes customer/invoice/payment changes
+// Re-render when a remote device pushes customer/invoice/payment changes.
+// Does NOT force _custPage back to 1 — render() already clamps _custPage to the
+// valid range if the list shrank, so forcing it here just meant editing/adding a
+// customer (which pushes to Firestore and echoes straight back through this same
+// listener) yanked you back to page 1 / scrolled to top a moment after every save.
 window.addEventListener('sync:updated', (e) => {
   if (['wt_customers', 'wt_invoices', 'wt_payments'].includes(e.detail?.key)) {
-    _custPage = 1; render();
+    render();
   }
 });
 // Re-render after the initial Firestore pull / when sync becomes ready, so the
 // page shows server data once it lands (it previously only listened to
 // sync:updated and missed the _pullAll() population → "renders local only").
-window.addEventListener('sync:pulled', () => { _custPage = 1; render(); });
+window.addEventListener('sync:pulled', () => { render(); });
 window.addEventListener('sync:ready',  () => { _ensureCustomersFromFirestore(); render(); });
 
 // Reconcile the local customer list with the Firestore collection on every
