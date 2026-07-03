@@ -163,11 +163,6 @@
               </div>
               <div class="form-text">ระบบจะเตือนเมื่อสต๊อกต่ำกว่าจำนวนนี้หลังบันทึกใบกำกับ</div>
             </div>
-            <div class="mb-3">
-              <label class="form-label fw-semibold">สินค้าที่ใช้ฝาสีนี้</label>
-              <div class="text-muted small mb-1">เลือกสินค้าที่เป็นฝาขวด PET สีนี้ (เพื่อตัดสต๊อกอัตโนมัติ)</div>
-              <div id="colorProductList" style="max-height:200px;overflow-y:auto;border:1px solid #dee2e6;border-radius:6px;padding:8px"></div>
-            </div>
             <div class="d-flex gap-2">
               <button class="btn btn-primary" onclick="saveColor()"><i class="bi bi-save me-1"></i>บันทึก</button>
               <button class="btn btn-outline-secondary" onclick="clearColorForm()">ล้าง</button>
@@ -219,7 +214,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.175"></script><script src="db.js?v=1.0.175"></script><script src="auth.js?v=1.0.175"></script><script src="nav.js?v=1.0.175"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.176"></script><script src="db.js?v=1.0.176"></script><script src="auth.js?v=1.0.176"></script><script src="nav.js?v=1.0.176"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.requirePage('cap_stock');
 DB.init();
@@ -585,20 +580,7 @@ function renderMonthly() {
 
 // ── TAB: Colors ───────────────────────────────────────────────────────────────
 function renderColorTab() {
-  renderColorProductList();
   renderColorList();
-}
-
-function renderColorProductList() {
-  const colorId = document.getElementById('colorId').value;
-  const color   = colorId ? DB.getCapColors().find(c => c.id === colorId) : null;
-  const linked  = color?.productIds || [];
-  document.getElementById('colorProductList').innerHTML = DB.getProductsSorted().map(p => `
-    <div class="form-check">
-      <input class="form-check-input" type="checkbox" id="cprod-${p.id}" value="${p.id}"
-             ${linked.includes(p.id) ? 'checked' : ''}>
-      <label class="form-check-label small" for="cprod-${p.id}">${p.name}</label>
-    </div>`).join('') || '<span class="text-muted small">ยังไม่มีสินค้าในระบบ</span>';
 }
 
 function renderColorList() {
@@ -639,7 +621,6 @@ function editColor(id) {
   document.getElementById('colorCode').value     = c.colorCode || '#6c757d';
   document.getElementById('colorCodeText').value = c.colorCode || '#6c757d';
   document.getElementById('colorMinQty').value   = c.minQty != null ? c.minQty : '';
-  renderColorProductList();
   document.getElementById('colorName').focus();
 }
 
@@ -649,7 +630,6 @@ function clearColorForm() {
   document.getElementById('colorCode').value     = '#6c757d';
   document.getElementById('colorCodeText').value = '#6c757d';
   document.getElementById('colorMinQty').value   = '';
-  renderColorProductList();
 }
 
 function saveColor() {
@@ -658,14 +638,18 @@ function saveColor() {
   const colorCode = document.getElementById('colorCodeText').value.trim() || document.getElementById('colorCode').value;
   if (!name) { Utils.showAlert('กรุณากรอกชื่อสี', 'warning', 'colorFormAlert'); return; }
 
-  const productIds = [...document.querySelectorAll('#colorProductList input:checked')].map(el => el.value);
-  const minQtyVal  = document.getElementById('colorMinQty').value;
-  const minQty     = minQtyVal !== '' ? parseFloat(minQtyVal) : 0;
+  const minQtyVal = document.getElementById('colorMinQty').value;
+  const minQty    = minQtyVal !== '' ? parseFloat(minQtyVal) : 0;
 
   if (id) {
-    DB.updateCapColor(id, { color: name, colorCode, productIds, minQty });
+    // No productIds here on purpose — the product-tie checklist was removed from
+    // this form, so DB.updateCapColor's {...prev, ...patch} merge leaves whatever
+    // product mapping the color already had untouched (auto-deduction keeps
+    // working for colors that had it set up before this change).
+    DB.updateCapColor(id, { color: name, colorCode, minQty });
   } else {
-    DB.addCapColor({ id: Utils.uuid(), color: name, colorCode, productIds, minQty, createdAt: new Date().toISOString() });
+    // New colors have no product mapping — there's no UI to set one anymore.
+    DB.addCapColor({ id: Utils.uuid(), color: name, colorCode, productIds: [], minQty, createdAt: new Date().toISOString() });
   }
   DB.logActivity(session.userId, session.username, id ? 'แก้ไขสีฝาขวด' : 'เพิ่มสีฝาขวด', { color: name });
   Utils.showAlert(`บันทึกสี "${name}" สำเร็จ`, 'success', 'colorFormAlert');
