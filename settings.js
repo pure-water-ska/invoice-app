@@ -1002,6 +1002,9 @@ async function initZipSections() {
         ? `<i class="bi bi-folder2-open me-1 text-warning"></i>PDF Folder: <strong>${h.name}</strong>`
         : '<i class="bi bi-exclamation-triangle me-1 text-danger"></i>ยังไม่ได้ตั้ง PDF Folder — จะ Export เฉพาะข้อมูล ไม่รวม PDF';
     }
+    if (isAdmin) {
+      document.getElementById('firestoreExportSection').style.display = '';
+    }
   }
 
   // ── Unified Import card ──────────────────────────────────────────────────
@@ -1593,6 +1596,119 @@ async function exportZip() {
   DB.logActivity(session.userId, session.username, 'Export ZIP', { pdfs: pdfCount });
   Utils.showAlert(`<i class="bi bi-check-circle me-1"></i>Export ZIP สำเร็จ — ข้อมูล + PDF ${pdfCount} ไฟล์ → <strong>${fn}</strong>`);
   renderStorageBar();
+}
+
+/* ─── Full Firestore Pull (bypasses the local 6-month invoice/payment archive
+   window and the images/pdf_pages collections, which never live in local cache
+   at all) ────────────────────────────────────────────────────────────────── */
+
+// Recursively convert Firestore Timestamp fields to ISO strings so JSON.stringify
+// produces readable dates instead of opaque {seconds, nanoseconds} objects.
+function _fsPlain(val) {
+  if (val == null) return val;
+  if (typeof val?.toDate === 'function') { try { return val.toDate().toISOString(); } catch { return val; } }
+  if (Array.isArray(val)) return val.map(_fsPlain);
+  if (typeof val === 'object') {
+    const out = {};
+    for (const k in val) out[k] = _fsPlain(val[k]);
+    return out;
+  }
+  return val;
+}
+
+async function exportFullFirestore() {
+  if (!Auth.isAdmin()) { Utils.showAlert('เฉพาะแอดมินเท่านั้นที่ใช้เครื่องมือนี้ได้', 'danger'); return; }
+  if (typeof JSZip === 'undefined') { Utils.showAlert('โหลด JSZip ไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต', 'danger'); return; }
+  if (!window.Sync || !Sync.ready) { Utils.showAlert('ยังไม่ได้เชื่อมต่อ Firestore — ไม่สามารถดึงข้อมูลได้', 'warning'); return; }
+
+  if (!await Utils.confirm(
+    'การดำเนินการนี้จะอ่านข้อมูลจริงจาก Firestore ทุกคอลเลกชัน (ใบกำกับ/การชำระเงินทั้งหมด ไม่จำกัด 6 เดือน ' +
+    'รวมถึงรูปภาพสลิป/ใบเซ็นชื่อ/หน้า PDF ทุกไฟล์) ซึ่งอาจเป็นหลักพันรายการและนับรวมโควตา Firestore รายวัน ' +
+    'อาจใช้เวลาหลายนาทีถ้ามีรูปภาพจำนวนมาก\n\nดำเนินการต่อหรือไม่?',
+    'ยืนยัน Export ทุกอย่างจาก Firestore'
+  )) return;
+
+  const base = Sync._orgRef();
+  const zip  = new JSZip();
+  const counts = {};
+
+  try {
+    // ── Per-record COLLECTIONS ──────────────────────────────────────────────
+    const collectionSources = [
+      { name: 'invoices',  col: 'invoices',    file: 'invoices.json' },
+      { name: 'payments',  col: 'payments',     file: 'payments.json' },
+      { name: 'customers', col: 'customers_v2', file: 'customers.json' },
+      { name: 'products',  col: 'products_v2',  file: 'products.json' },
+      { name: 'users',     col: 'users_v2',     file: 'users.json' },
+      { name: 'images',    col: 'images',       file: 'images.json' },
+      { name: 'pdf_pages', col: 'pdf_pages',    file: 'pdf_pages.json' },
+    ];
+    for (let i = 0; i < collectionSources.length; i++) {
+      const { name, col, file } = collectionSources[i];
+      Utils.showProgress(`กำลังดึง ${name}…`, (i / (collectionSources.length + 2)) * 100);
+      const snap = await base.collection(col).get();
+      let records = snap.docs.map(d => ({ id: d.id, ..._fsPlain(d.data()) }));
+      if (name === 'users') records = records.map(u => ({ ...u, password: u.password ? '[HASHED]' : u.password }));
+      zip.file(file, JSON.stringify(records, null, 2));
+      counts[name] = records.length;
+    }
+
+    // ── Grouped pricing (pricing_byproduct/{productId} → flatten .rules map) ─
+    Utils.showProgress('กำลังดึง pricing…', (collectionSources.length / (collectionSources.length + 2)) * 100);
+    const pricingSnap = await base.collection('pricing_byproduct').get();
+    const pricingRules = [];
+    pricingSnap.forEach(d => {
+      const rules = _fsPlain(d.data()).rules || {};
+      for (const ruleId in rules) pricingRules.push(rules[ruleId]);
+    });
+    zip.file('pricing.json', JSON.stringify(pricingRules, null, 2));
+    counts.pricing = pricingRules.length;
+
+    // ── Single-document DOCUMENTS (settings, returns, versions, cap_*, etc.) ─
+    // Read straight from Firestore (not local cache) for a true server snapshot —
+    // cheap (one read per doc) since these are whole-array/object documents, not
+    // per-record collections. Excludes NO_SYNC keys (activity/login/error logs),
+    // which never leave the device and don't exist on Firestore at all.
+    Utils.showProgress('กำลังดึงข้อมูลตั้งค่า…', ((collectionSources.length + 1) / (collectionSources.length + 2)) * 100);
+    const documents = {};
+    for (const [lsKey, docName] of Object.entries(Sync.DOCUMENTS)) {
+      if (Sync.NO_SYNC.has(lsKey)) continue;
+      const doc = await base.collection('data').doc(docName).get();
+      documents[docName] = doc.exists ? _fsPlain(doc.data().d) : null;
+    }
+    zip.file('documents.json', JSON.stringify(documents, null, 2));
+
+    // ── Manifest ─────────────────────────────────────────────────────────────
+    zip.file('manifest.json', JSON.stringify({
+      exportDate: new Date().toISOString(),
+      exportType: 'full-firestore-pull',
+      counts,
+      documentKeys: Object.keys(documents),
+      note: 'users[].password is redacted. Records referencing "img:<id>" resolve against images.json by id.',
+    }, null, 2));
+
+    Utils.showProgress('กำลังบีบอัดไฟล์ ZIP…', 90);
+    const blob = await zip.generateAsync(
+      { type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } },
+      (meta) => Utils.showProgress('กำลังบีบอัดไฟล์ ZIP…', 90 + meta.percent * 0.1)
+    );
+    Utils.hideProgress();
+
+    const fn = `firestore_full_${dateStamp()}.zip`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = fn;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+
+    DB.logActivity(session.userId, session.username, 'Export ทุกอย่างจาก Firestore', counts);
+    const summary = Object.entries(counts).map(([k, v]) => `${k}: ${v}`).join(' · ');
+    Utils.showAlert(`<i class="bi bi-check-circle me-1"></i>Export จาก Firestore สำเร็จ (${summary}) → <strong>${fn}</strong>`);
+  } catch (e) {
+    Utils.hideProgress();
+    console.error('exportFullFirestore:', e);
+    Utils.showAlert('Export ล้มเหลว: ' + (e.message || e), 'danger');
+  }
 }
 
 async function importZip(input, mode) {

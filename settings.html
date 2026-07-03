@@ -348,6 +348,24 @@
         </div>
       </div>
 
+      <!-- Full Firestore Pull (admin only) -->
+      <div id="firestoreExportSection" style="display:none">
+        <hr class="my-3">
+        <div class="d-flex align-items-start gap-3">
+          <i class="bi bi-cloud-download fs-2 flex-shrink-0 mt-1" style="color:#6f42c1"></i>
+          <div class="flex-grow-1">
+            <div class="fw-semibold mb-1">Export ทุกอย่างจาก Firestore โดยตรง <span class="text-muted fw-normal small">(admin เท่านั้น)</span></div>
+            <div class="text-muted small mb-2">
+              ดึงข้อมูลตรงจาก Firestore ทุกคอลเลกชัน — ใบกำกับ/การชำระเงินทั้งหมด (ไม่จำกัด 6 เดือนเหมือนข้อมูลในเครื่อง)
+              ลูกค้า สินค้า ราคา ผู้ใช้ รูปภาพสลิป/ใบเซ็นชื่อ และหน้า PDF ที่นำเข้า — บันทึกเป็นไฟล์ .zip เดียว
+            </div>
+            <button class="btn btn-sm text-white" style="background:#6f42c1" onclick="exportFullFirestore()">
+              <i class="bi bi-cloud-download me-1"></i>Export ทั้งหมดจาก Firestore
+            </button>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 
@@ -931,10 +949,10 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-<script src="utils.js?v=1.0.176"></script><script src="db.js?v=1.0.176"></script><script src="auth.js?v=1.0.176"></script><script src="nav.js?v=1.0.176"></script><script src="idb.js?v=1.0.176"></script><script src="image-store.js?v=1.0.163"></script>
+<script src="utils.js?v=1.0.177"></script><script src="db.js?v=1.0.177"></script><script src="auth.js?v=1.0.177"></script><script src="nav.js?v=1.0.177"></script><script src="idb.js?v=1.0.177"></script><script src="image-store.js?v=1.0.163"></script>
 <script src="drive-config.js" onerror="window.GOOGLE_CLIENT_ID=''"></script>
 <script src="drive-store.js"></script>
-<script src="settings.js?v=1.0.176"></script>
+<script src="settings.js?v=1.0.177"></script>
 <script>Nav.render('settings');</script>
 </body>
 </html>
