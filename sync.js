@@ -1598,7 +1598,7 @@ var Sync = {
       // Both invoices and payments are filtered to the last ARCHIVE_MONTHS to stay
       // within Firestore read quotas and page-load budgets.
       const cutoffISO = (colName === 'invoices' || colName === 'payments')
-        ? new Date(Date.now() - this.ARCHIVE_MONTHS * 30.44 * 24 * 3600 * 1000).toISOString()
+        ? this._archiveCutoffISO()
         : null;
       const colQuery = cutoffISO
         ? base.collection(colName).where('createdAt', '>=', cutoffISO)
@@ -2021,7 +2021,7 @@ var Sync = {
       // overwrites localStorage — completely bypassing the date-filtered _pullAll().
       // Both the pull query and the listener must use the same cutoff so they stay in sync.
       const listenerCutoffISO = (colName === 'invoices' || colName === 'payments')
-        ? new Date(Date.now() - this.ARCHIVE_MONTHS * 30.44 * 24 * 3600 * 1000).toISOString()
+        ? this._archiveCutoffISO()
         : null;
       const colRef = listenerCutoffISO
         ? base.collection(colName).where('createdAt', '>=', listenerCutoffISO)
@@ -2311,6 +2311,20 @@ var Sync = {
     return this._db.collection('orgs').doc(this._orgId);
   },
 
+  // Stable archive cutoff for the invoices/payments date-filtered query — rounded
+  // down to the start of the current UTC day so the where() bound stays IDENTICAL
+  // across every page load within the same day. Date.now() shifts by milliseconds
+  // on every navigation; a moving bound makes Firestore treat _setupListeners()'s
+  // onSnapshot as a brand-new query target every single page load (no resume-token
+  // reuse), forcing a full re-read of the entire ~6-month window from the server
+  // EVERY navigation — not just once per session. A handful of page loads while
+  // recording a few payments could exhaust the whole daily read quota this way.
+  _archiveCutoffISO() {
+    const d = new Date(Date.now() - this.ARCHIVE_MONTHS * 30.44 * 24 * 3600 * 1000);
+    d.setUTCHours(0, 0, 0, 0);
+    return d.toISOString();
+  },
+
   _badge(status) {
     const el = document.getElementById('syncStatusBadge');
     if (!el) return;
@@ -2451,7 +2465,7 @@ var Sync = {
   async loadArchive(fromISO, toISO) {
     if (!this.ready || !this._db) throw new Error('Sync not ready');
     const base = this._orgRef();
-    const cutoffISO = new Date(Date.now() - this.ARCHIVE_MONTHS * 30.44 * 24 * 3600 * 1000).toISOString();
+    const cutoffISO = this._archiveCutoffISO();
     const from = fromISO || '2000-01-01T00:00:00.000Z';
     const to   = toISO   || cutoffISO;
 
