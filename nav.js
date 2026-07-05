@@ -997,8 +997,14 @@ function _checkOverdueAlert() {
 
   function _logout() {
     if (_warnEl) { _warnEl.remove(); _warnEl = null; }
+    // Auth.logout() already navigates to index.html itself, but only AFTER it
+    // flushes pending uploads and clears sessionStorage[AUTH_KEY] (async — awaits
+    // Sync.flushNow() first). Calling window.location.href here too used to fire
+    // immediately, aborting the page before that async finish() ever ran — so the
+    // session was never actually cleared. Landing on index.html with wt_session
+    // still present made its own `if (Auth.session()) location.href='dashboard.html'`
+    // bounce the user right back in, looking exactly like "timeout doesn't work".
     if (window.Auth) Auth.logout('หมดเวลาการใช้งาน (idle timeout)');
-    window.location.href = 'index.html';
   }
 
   function _warn(minsLeft) {
