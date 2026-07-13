@@ -83,7 +83,7 @@ body {
   /* Header table — กรอบด้านนอก + ระยะห่างจากขอบหน้ากระดาษจัดการโดย padding ของ .invoice-preview */
   .inv-header-table { border: 1.5px solid #444 !important; margin-bottom: 3mm !important; }
   /* Items table — กรอบด้านนอก + ระยะห่างจาก header table */
-  .inv-table { width: 100%; border-collapse: collapse; font-size: 9pt; border: 1.5px solid #444 !important; margin-top: 0 !important; }
+  .inv-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 9pt; border: 1.5px solid #444 !important; margin-top: 0 !important; }
   .inv-table th, .inv-table td { border: 1px solid #333; padding: 2px 4px; }
   .inv-table th { background: #ddd !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .inv-table tfoot tr { background: #fffde7 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -99,7 +99,7 @@ body {
   padding: 1.5rem;
   font-size: 13px;
 }
-.inv-table { width: 100%; border-collapse: collapse; }
+.inv-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .inv-table th, .inv-table td { border: 1px solid #aaa; padding: 3px 6px; }
 .inv-table th { background: #e9ecef; font-weight: 600; text-align: center; }
 .inv-table .text-right { text-align: right; }
