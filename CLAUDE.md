@@ -237,7 +237,9 @@ these files — **not** `sync.js`:
 
 ### Auth & Permissions (`auth.js`)
 
-Session stored in sessionStorage (clears on tab close). SHA-256 hashed passwords. 47 granular permissions in `Auth.PERMS`; Admin role bypasses all checks. First login forces a password change.
+Session stored in sessionStorage (clears on tab close), 12 h absolute expiry regardless of activity. SHA-256 hashed passwords. 48 granular permissions in `Auth.PERMS`; Admin role bypasses all checks. First login forces a password change.
+
+**Idle timeout:** `nav.js` auto-logs-out after `DB.getSettings().sessionTimeoutMin` minutes of inactivity (default 30, 0 = disabled), warning 2 minutes before expiry. **`Auth.logout()` already navigates to `index.html` itself** — internally, but only *after* an async `Sync.flushNow()` completes and clears `sessionStorage[AUTH_KEY]`. Never add a second `window.location.href = 'index.html'` after calling `Auth.logout()` — it races the async cleanup and can win, aborting the page before the session is actually cleared. Landing on `index.html` with a still-valid session then bounces straight back in via `if (Auth.session()) location.href='dashboard.html'`, which looks exactly like "the timeout doesn't work" (fixed in nav.js's idle-timeout path, v1.0.179 — this bug is specific to any *other* caller that duplicates the redirect).
 
 ```javascript
 if (!Auth.can('invoice_delete')) { /* deny */ }
@@ -356,6 +358,29 @@ Delta sync pulls **only records changed since the last pull**.
   next delta query picks them up; the real-time `onSnapshot` listener still
   delivers live changes within a session.
 
+### Stable archive cutoff — `Sync._archiveCutoffISO()` (v1.0.178)
+
+**Never build a `.where('createdAt', '>=', ...)` bound from a fresh `Date.now()` inside
+`_setupListeners()` (or anywhere a listener/query re-runs on every page load).** Firestore
+can only reuse its resume-token caching when a listener's query is byte-identical to one
+it has seen before. `_setupListeners()` re-attaches the invoices/payments listener on
+**every single page navigation** (unavoidable — a fresh page has no memory of the prior
+listener) — a `Date.now()`-derived bound shifts by milliseconds each time, so every
+navigation was billed as a brand-new query, forcing a full re-read of the entire
+`ARCHIVE_MONTHS` window from the server on every page, not just once per session (unlike
+`_pullAll()`, which *is* session-guarded). Recording a handful of payments while
+navigating between a few pages could burn the whole daily free-tier read quota this way.
+
+Fix: `Sync._archiveCutoffISO()` rounds the cutoff down to midnight UTC, so the bound
+stays **identical for the whole day** regardless of navigation count. All three call
+sites (`_pullAll`, `_setupListeners`, `loadArchive`) share this one helper — don't
+reintroduce a local `new Date(Date.now() - ARCHIVE_MONTHS * 30.44 * ...)` computation
+anywhere else. The other four real-time listeners (customers_v2/products_v2/
+pricing_byproduct/users_v2) have no `.where()` clause at all, so they can't have this
+specific bug — but they still re-attach every navigation; whether that's fully free via
+Firestore's cache/resume behavior for a small stable collection is unverified. Check the
+Firebase console's per-collection Usage tab if read cost is ever a concern again.
+
 ### Customer balance & overpayment allocation (v1.0.167–169)
 
 - **`DB.getCustomerBalance(custId)`** → `{ net, owed, over, owedCount, overCount }`.
@@ -373,6 +398,56 @@ Delta sync pulls **only records changed since the last pull**.
   = auto all-oldest-first until excess = 0. `closeOverpay(createNew)` only redirects
   to invoice-create if `Math.abs(diff) > 0.01` remains.
 
+### Invoice Void / Restore (v1.0.173)
+
+Soft-cancel, distinct from `DB.deleteInvoice()` (hard delete) — keeps the record for
+audit and is reversible.
+
+- **`DB.cancelInvoice(invNum, {by, byUser, reason})`** / **`DB.restoreInvoice(invNum, {by, byUser})`**
+  — set/clear `cancelled`, `cancelledAt/By/ByUser/Reason` (and `restoredAt/By/ByUser`)
+  on **every page** of the invoice number (same whole-number scope as delete).
+- **Cap stock is soft-voided, not deleted:** `DB.voidCapDeductionsByInvoice(invNum)`
+  flags matching `wt_cap_deductions` records `voided:true` (kept, not removed) so
+  `DB.getCapCurrentStock()` excludes them — stock is restored immediately. Restoring
+  the invoice calls `DB.restoreCapDeductionsByInvoice(invNum)`, which un-flags the
+  *exact original* records rather than recomputing from the current product↔color
+  mapping (which may have drifted since). **`cap-stock.html`'s "Sync จากใบกำกับ" tool
+  does NOT currently filter out cancelled invoices** — running it while any invoice is
+  voided will resurrect that invoice's deduction and undo the stock restoration. Not
+  yet fixed; filter `DB.getInvoices()` by `!inv.cancelled` there if you touch it.
+- **Revenue/balance exclusion:** cancelled invoices are excluded from
+  `DB.getCustomerBalance()`, dashboard stats, and reports revenue sums (`!inv.cancelled`
+  filter) but **stay visible** in list views with a ยกเลิก badge — this is a pattern to
+  repeat anywhere else invoices are summed for money totals.
+- **Permission:** `invoice_void` (separate from `invoice_delete`) gates the void/restore
+  buttons on `invoices.html` and the restore button on `invoice-create.html`'s view page.
+- `payments.html` and `invoice-create.html`'s view page both block new payments/edits on
+  a cancelled invoice (row-level hide + a defense-in-depth guard inside `openPayModal`).
+- Both actions log to `wt_activity` as `'ยกเลิกใบกำกับ'` / `'กู้คืนใบกำกับ'`.
+
+### Cap Stock (`cap-stock.html`)
+
+Tracks bottle-cap inventory by color, auto-deducted from invoices — not a directly
+invoiced line item.
+
+- **Data:** `wt_cap_colors` (name, hex, `productIds[]`, `minQty` threshold),
+  `wt_cap_receipts` (manual stock-in), `wt_cap_deductions` (auto stock-out, one record
+  per color per invoice). **`DB.getCapCurrentStock(colorId)` = Σ receipts − Σ
+  non-voided deductions.**
+- **Auto-deduction:** on invoice save, `deductCapStock()` (`invoice-create.html`) sums
+  invoiced quantity per color via each color's `productIds[]` mapping and writes one
+  `wt_cap_deductions` record per color. This is *inferred* from invoiced products, not
+  a cap line item — a color with no products mapped never deducts.
+- **Manage Colors form (v1.0.176):** the product-tie checklist was removed from the
+  add/edit form (name/code/min-qty only now). Editing a color no longer includes
+  `productIds` in the `DB.updateCapColor()` patch, so the existing mapping survives
+  (object-merge semantics) — only brand-new colors have no mapping, since there's no
+  UI to set one. The read-only "สินค้าที่ผูก" column on the color list table is
+  unaffected.
+- **Admin recovery tools:** "ล้างประวัติตัดออก" wipes all deductions (receipts kept);
+  "Sync จากใบกำกับ" wipes and fully recomputes deductions from every invoice using the
+  *current* color↔product mapping — see the void-interaction caveat above.
+
 ## Key Conventions
 
 - **No reactivity:** The DOM is not auto-synced to data. After writing to DB, call render functions explicitly.
@@ -388,6 +463,8 @@ Delta sync pulls **only records changed since the last pull**.
 - **`window.DB` AND `window.IDB` are `undefined` — use the bare name.** `db.js` declares `const DB = {…}` and `idb.js` declares `const IDB = (…)()` — both lexical globals NOT attached to `window` (a top-level `const` in a classic script does not become a `window` property). `window.Sync` and `window.CustomerSync` etc. ARE on `window` (assigned explicitly), but **`DB` and `IDB` are not**. Never guard with `window.DB ? …` / `window.IDB ? …` — it always takes the false branch. Use the bare name or `typeof DB !== 'undefined'` / `typeof IDB !== 'undefined'`. The `window.DB` form silently disabled the customer backstop for several releases; the `window.IDB` form (v1.0.85 and earlier) silently disabled `sync.js` `_lsWrite()` cache+HDD writes (Firestore-pulled invoices vanished after navigation/logout) and `local-folder-sync.js` handle persistence (the folder path showed as "gone" on every reload). Fixed in v1.0.86. The PDF-folder card never had the bug because it used bare `IDB`.
 - **`DB.getX()` returns the cache array by reference — never diff against db's "prev".** `DB.addCustomer/addProduct/upsertPrice/addUser` do `const a = DB.getX(); a.push(...); DB.saveX(a)`, which mutates the cached array **in place**. So in `DB._set` the captured previous value and the new value are the *same* mutated array (`prev === next`). Any per-record diff must compare against an independent baseline (the sync modules use `_serverFp`), not against db's prev — otherwise new adds are silently never pushed.
 - **Destructive confirms must use `await Utils.confirm(...)`, never `confirm(...)`.** In the Tauri desktop app `window.confirm()` returns a Promise (truthy), so `if (!confirm(msg)) return;` never aborts and the action runs *without* waiting for Yes/No. `Utils.confirm(message, title)` returns a Promise resolving to a boolean (native blocking dialog in Tauri, `window.confirm` on web). Always `await` it and make the enclosing function `async`. For inline action strings, use `Utils.confirm(msg).then(ok => { if (ok) {…} })`.
+- **Pages that read customer/product/pricing/user data must listen for `sync:updated` and `sync:pulled`, not just gate on `DB.ready`.** `DB.ready` only waits for local IDB-overflow load — it resolves **before** the CollectionSync modules' Firestore listener has delivered anything. On a device with an empty/stale local cache, a page that builds its filter/search list only inside `DB.ready.then(...)` populates it against 0 records and never refreshes (this was the "pricing customer search returns nothing" bug, v1.0.173). Every list-building/render function on such a page should also run from `window.addEventListener('sync:updated', ...)` (filtered to the relevant keys) and `sync:pulled` — see `pricing.html` or `customers.html` for the pattern.
+- **Large lists need pagination + precomputed aggregates, not a per-row scan.** `pricing.html`'s render() used to rescan every invoice for **each** visible pricing row to compute an "ordered by N customers" badge — O(rows × invoices × items), ~4s per render on real data (3,329 rules × ~1,000 invoices) — and eagerly created a flatpickr instance for every row on every render. Both re-ran on every keystroke in a search box. Fixed by precomputing the aggregate once per render (not once per row) and paginating at 50/page (matching the pattern already used on `invoices.html`/`customers.html`), plus lazy-initializing flatpickr only on focus via event delegation on the table body (rows are replaced wholesale by `innerHTML` on every render, so a per-row "already initialized" flag can't survive anyway). Any future page rendering a list larger than a couple hundred rows should paginate and precompute from the start.
 
 ## Sync safety rails & heavy-operation UX (June 2026, v1.0.130–146)
 
@@ -427,6 +504,16 @@ added these guards. **Understand them before touching sync.**
   (a FULL read of the collection — expensive; don't spam it). Reads are the
   dominant Firestore cost; a full pull on every login re-reads all ~950 invoices.
   Long-term recommendation to the user: upgrade Firebase to **Blaze**.
+- **Full Firestore Pull export (`settings.js exportFullFirestore`, v1.0.177):**
+  admin-only card in Settings → Backup. Unlike the regular Export Backup/ZIP (which
+  export the local cache), this reads **directly from Firestore** — full
+  invoices/payments collections (bypassing the local `ARCHIVE_MONTHS` window),
+  `customers_v2`/`products_v2`/`users_v2`, `pricing_byproduct` (flattened back to
+  individual rules), the `images/` and `pdf_pages/` collections (never cached
+  locally at all), and every DOCUMENT-type key read straight from Firestore for a
+  true server snapshot. Gated behind a cost/time confirm dialog — this is a genuine
+  full-collection read against the free-tier quota. Outputs one zip with one JSON
+  file per collection.
 
 ### ⚠️ OPEN BUG (unresolved as of v1.0.146)
 After a **PDF import on the WEB build (non-Tauri)**, local `wt_invoices` dropped
