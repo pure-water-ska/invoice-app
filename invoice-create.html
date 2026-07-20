@@ -159,7 +159,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.181"></script><script src="db.js?v=1.0.181"></script><script src="auth.js?v=1.0.181"></script><script src="nav.js?v=1.0.181"></script><script src="idb.js?v=1.0.181"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.182"></script><script src="db.js?v=1.0.182"></script><script src="auth.js?v=1.0.182"></script><script src="nav.js?v=1.0.182"></script><script src="idb.js?v=1.0.182"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -706,7 +706,7 @@ function initRows() {
 }
 
 function emptyItem() {
-  return { productId: '', name: '', brand: '', qty: '', unitSize: '', remainder: 0, price: '', total: 0 };
+  return { productId: '', name: '', brand: '', qty: '', unitSize: '', remainder: '', price: '', total: 0 };
 }
 
 function getCustBrands(c) {
@@ -1061,7 +1061,7 @@ function renderRows() {
         <input type="number" value="${item.unitSize||''}" placeholder="0" min="0" oninput="items[${i}].unitSize=this.value;updateTotal(${i})" class="text-center">
         ${(() => { const p = item.productId ? DB.getProductById(item.productId) : null; const u = (p && p.unit) || Utils.productUnit(item.name); return u ? `<div style="font-size:10px;color:#6c757d;text-align:center;margin-top:1px">${u}</div>` : ''; })()}
       </td>
-      <td><input type="number" value="${item.remainder||0}" placeholder="0" min="0" oninput="items[${i}].remainder=this.value;updateTotal(${i})" class="text-center"></td>
+      <td><input type="number" value="${item.remainder === 0 ? '0' : (item.remainder || '')}" placeholder="0" min="0" oninput="items[${i}].remainder=this.value;updateTotal(${i})" class="text-center"></td>
       <td><input type="number" id="priceInp${i}" value="${item.price||''}" placeholder="0.00" min="0" step="0.01" oninput="items[${i}].price=this.value;items[${i}]._manual=true;updateTotal(${i})" class="text-end"></td>
       <td class="text-end fw-semibold pe-2" id="rowTotal${i}">${total>0?'฿'+Utils.formatNumber(total):'-'}</td>
       <td class="text-center"><button class="btn btn-sm text-danger p-0" onclick="removeRow(${i})" title="ลบแถว"><i class="bi bi-x-circle"></i></button></td>
