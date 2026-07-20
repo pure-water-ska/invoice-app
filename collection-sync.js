@@ -40,6 +40,42 @@ window.CollectionSync = window.CollectionSync || {
       _col() { return Sync._orgRef().collection(this.cfg.col); },
       _local() { try { return (this.cfg.getLocal() || []); } catch { return []; } },
 
+      // ── Time-boxed trust window ───────────────────────────────────────────
+      // A fresh onSnapshot() attach re-reads (and re-bills) every document in the
+      // collection. Since nav.js loads this module on EVERY page, re-attaching on
+      // every navigation was billing a full re-read of the whole collection per
+      // page load — confirmed via the Firebase Usage tab (~300 reads/page load
+      // across the 4 master-data collections; ~9,000 reads for 10 nav cycles
+      // between customers/products/pricing). If a listener attached earlier THIS
+      // session is still within _TRUST_MS, reuse its cached server fingerprint
+      // instead of attaching again — onLocalChange() diffs against that fingerprint
+      // either way, so local edits still push correctly. Real-time cross-device
+      // updates on a page that skipped attaching are stale by up to _TRUST_MS.
+      _TRUST_MS: 60000,
+      _trustKey() { return 'wt_cs_trust_' + this.cfg.col; },
+      _fpCacheKey() { return 'wt_cs_fp_' + this.cfg.col; },
+      _markAttachTime() { try { sessionStorage.setItem(this._trustKey(), String(Date.now())); } catch {} },
+      _withinTrustWindow() {
+        try {
+          const t = parseInt(sessionStorage.getItem(this._trustKey()) || '0', 10);
+          return !!t && (Date.now() - t) < this._TRUST_MS;
+        } catch { return false; }
+      },
+      _saveCachedFp() {
+        try {
+          const obj = {};
+          for (const [id, fp] of this._serverFp) obj[id] = fp;
+          sessionStorage.setItem(this._fpCacheKey(), JSON.stringify(obj));
+        } catch {}
+      },
+      _loadCachedFp() {
+        try {
+          const raw = sessionStorage.getItem(this._fpCacheKey());
+          if (raw == null) return null;
+          return new Map(Object.entries(JSON.parse(raw)));
+        } catch { return null; }
+      },
+
       _logLine(msg) {
         const line = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '  ' + msg;
         this._log.push(line);
@@ -76,6 +112,7 @@ window.CollectionSync = window.CollectionSync || {
         L.push('migrated            : ' + this._isMigrated());
         L.push('un-acked ids        : ' + [...this._loadUnacked()].length);
         L.push('local count         : ' + this._local().length);
+        L.push('listener attached   : ' + !!this._unsub + (this._unsub ? '' : (this._withinTrustWindow() ? ' (trust window active — reusing cached fingerprint)' : '')));
         try {
           const snap = await this._col().get();
           L.push('SERVER count        : ' + snap.size + '  (live get from ' + this.cfg.col + ')');
@@ -96,7 +133,13 @@ window.CollectionSync = window.CollectionSync || {
         this._isMigrated();
         this._ready = true;
         this._logLine('init: ready (orgId=' + Sync._orgId + ')');
-        this._attach();
+        const cachedFp = this._withinTrustWindow() ? this._loadCachedFp() : null;
+        if (cachedFp) {
+          this._serverFp = cachedFp;
+          this._logLine('init: within trust window — skip re-attach, reuse cached fingerprint (' + cachedFp.size + ' ids)');
+        } else {
+          this._attach();
+        }
         const q = this._pending.splice(0);
         q.forEach(n => { this._pushLocal(n).catch(e => console.warn('[' + this.cfg.name + '] queued push', e)); });
         if (this._unacked.size) {
@@ -109,6 +152,7 @@ window.CollectionSync = window.CollectionSync || {
       },
 
       _attach() {
+        this._markAttachTime();
         this._unsub = this._col().onSnapshot(
           { includeMetadataChanges: true },
           (snap) => {
@@ -139,6 +183,7 @@ window.CollectionSync = window.CollectionSync || {
                   this.cfg.setLocal(extra);
                   this._emit();
                 }
+                this._saveCachedFp();   // (empty) — lets a trust-window page reuse this state too
               }
               this._seeded = true;
               return;
@@ -182,6 +227,7 @@ window.CollectionSync = window.CollectionSync || {
               for (const r of list) { if (r && r.id) fp.set(r.id, this._fp(r)); }
               this._serverFp = fp;
               this._markMigrated();   // server has data → bootstrap no longer needed
+              this._saveCachedFp();
             }
 
             const finalList = this._retain(serverIds, unacked, list);

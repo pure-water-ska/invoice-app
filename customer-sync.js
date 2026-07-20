@@ -41,6 +41,38 @@ if (!window.CustomerSync) window.CustomerSync = {
   _fp(r) { return JSON.stringify(this._stripMeta(r)); },
   _col() { return Sync._orgRef().collection(this.COL); },
 
+  // ── Time-boxed trust window ─────────────────────────────────────────────
+  // See the identical block in collection-sync.js for the full rationale: a
+  // fresh onSnapshot() attach re-reads (and re-bills) every document, and
+  // nav.js loads this module on every page, so re-attaching on every
+  // navigation was billing a full customers_v2 re-read per page load. If a
+  // listener attached earlier this session is still within _TRUST_MS, reuse
+  // its cached server fingerprint instead of attaching again.
+  _TRUST_MS: 60000,
+  _trustKey() { return 'wt_cs_trust_' + this.COL; },
+  _fpCacheKey() { return 'wt_cs_fp_' + this.COL; },
+  _markAttachTime() { try { sessionStorage.setItem(this._trustKey(), String(Date.now())); } catch {} },
+  _withinTrustWindow() {
+    try {
+      const t = parseInt(sessionStorage.getItem(this._trustKey()) || '0', 10);
+      return !!t && (Date.now() - t) < this._TRUST_MS;
+    } catch { return false; }
+  },
+  _saveCachedFp() {
+    try {
+      const obj = {};
+      for (const [id, fp] of this._serverFp) obj[id] = fp;
+      sessionStorage.setItem(this._fpCacheKey(), JSON.stringify(obj));
+    } catch {}
+  },
+  _loadCachedFp() {
+    try {
+      const raw = sessionStorage.getItem(this._fpCacheKey());
+      if (raw == null) return null;
+      return new Map(Object.entries(JSON.parse(raw)));
+    } catch { return null; }
+  },
+
   _logLine(msg) {
     const line = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '  ' + msg;
     this._log.push(line);
@@ -60,6 +92,7 @@ if (!window.CustomerSync) window.CustomerSync = {
     L.push('deviceId            : ' + this._deviceId);
     L.push('un-acked ids        : ' + [...this._loadUnacked()].length);
     L.push('local customers     : ' + ((((typeof DB !== "undefined") ? DB.getCustomers() : []) || []).length));
+    L.push('listener attached   : ' + !!this._unsub + (this._unsub ? '' : (this._withinTrustWindow() ? ' (trust window active — reusing cached fingerprint)' : '')));
     // Read-path probe: compare raw cache vs what _get / getCustomers return.
     try {
       const ck = DB.K.CUSTOMERS;
@@ -107,7 +140,13 @@ if (!window.CustomerSync) window.CustomerSync = {
     this._loadUnacked();
     this._ready = true;
     this._logLine('init: ready (orgId=' + Sync._orgId + ')');
-    this._attach();
+    const cachedFp = this._withinTrustWindow() ? this._loadCachedFp() : null;
+    if (cachedFp) {
+      this._serverFp = cachedFp;
+      this._logLine('init: within trust window — skip re-attach, reuse cached fingerprint (' + cachedFp.size + ' ids)');
+    } else {
+      this._attach();
+    }
     // Flush any local changes that happened before we were ready (in order).
     const q = this._pending.splice(0);
     q.forEach(n => { this._pushLocal(n).catch(e => console.warn('[CustomerSync] queued push', e)); });
@@ -127,6 +166,7 @@ if (!window.CustomerSync) window.CustomerSync = {
 
   // ── Live listener: snapshot → local copy (server is truth) ──────────────────
   _attach() {
+    this._markAttachTime();
     this._unsub = this._col().onSnapshot(
       { includeMetadataChanges: true },
       (snap) => {
@@ -149,6 +189,7 @@ if (!window.CustomerSync) window.CustomerSync = {
             this._logLine(`SERVER EMPTY (!fromCache) → applying ${extra.length} (retained only)`);
             DB.setLocalOnly(DB.K.CUSTOMERS, extra);
             this._emit();
+            this._saveCachedFp();   // (empty) — lets a trust-window page reuse this state too
           } else {
             this._logLine('empty fromCache → ignored (no wipe)');
           }
@@ -203,6 +244,7 @@ if (!window.CustomerSync) window.CustomerSync = {
           const fp = new Map();
           for (const c of list) { if (c && c.id) fp.set(c.id, this._fp(c)); }
           this._serverFp = fp;
+          this._saveCachedFp();
         }
 
         // Apply server truth + still-un-acked local adds, WITHOUT pushing back.

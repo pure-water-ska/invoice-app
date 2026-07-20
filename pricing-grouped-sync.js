@@ -78,6 +78,33 @@
     _local() { try { return (DB.getPricing() || []); } catch { return []; } },
     _setLocal(arr) { DB.setLocalOnly(DB.K.PRICING, arr); },
 
+    // ── Time-boxed trust window ─────────────────────────────────────────────
+    // See the identical block in collection-sync.js for the full rationale.
+    _TRUST_MS: 60000,
+    _trustKey() { return 'wt_cs_trust_' + this.cfg.col; },
+    _fpCacheKey() { return 'wt_cs_fp_' + this.cfg.col; },
+    _markAttachTime() { try { sessionStorage.setItem(this._trustKey(), String(Date.now())); } catch {} },
+    _withinTrustWindow() {
+      try {
+        const t = parseInt(sessionStorage.getItem(this._trustKey()) || '0', 10);
+        return !!t && (Date.now() - t) < this._TRUST_MS;
+      } catch { return false; }
+    },
+    _saveCachedFp() {
+      try {
+        const obj = {};
+        for (const [pid, fp] of this._serverFp) obj[pid] = fp;
+        sessionStorage.setItem(this._fpCacheKey(), JSON.stringify(obj));
+      } catch {}
+    },
+    _loadCachedFp() {
+      try {
+        const raw = sessionStorage.getItem(this._fpCacheKey());
+        if (raw == null) return null;
+        return new Map(Object.entries(JSON.parse(raw)));
+      } catch { return null; }
+    },
+
     _logLine(msg) {
       const t = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       this._log.push(t + '  ' + msg);
@@ -112,6 +139,7 @@
       L.push('migrated            : ' + this._isMigrated());
       L.push('un-acked products   : ' + [...this._loadUnacked()].length);
       L.push('local rules         : ' + this._local().length);
+      L.push('listener attached   : ' + !!this._unsub + (this._unsub ? '' : (this._withinTrustWindow() ? ' (trust window active — reusing cached fingerprint)' : '')));
       try {
         const snap = await this._col().get();
         let ruleCount = 0; snap.forEach(d => { ruleCount += Object.keys((d.data() || {}).rules || {}).length; });
@@ -129,12 +157,19 @@
       this._loadUnacked(); this._isMigrated();
       this._ready = true;
       this._logLine('init: ready (orgId=' + Sync._orgId + ')');
-      this._attach();
+      const cachedFp = this._withinTrustWindow() ? this._loadCachedFp() : null;
+      if (cachedFp) {
+        this._serverFp = cachedFp;
+        this._logLine('init: within trust window — skip re-attach, reuse cached fingerprint (' + cachedFp.size + ' products)');
+      } else {
+        this._attach();
+      }
       const q = this._pending.splice(0);
       q.forEach(n => this._pushLocal(n).catch(e => console.warn('[PricingSync] queued push', e)));
     },
 
     _attach() {
+      this._markAttachTime();
       this._unsub = this._col().onSnapshot({ includeMetadataChanges: true }, (snap) => {
         const unacked = this._loadUnacked();
         const fromCache = snap.metadata.fromCache;
@@ -155,6 +190,7 @@
               }
             }
             // else: server empty + migrated → keep local-only rules already present (no wipe)
+            this._saveCachedFp();   // (empty) — lets a trust-window page reuse this state too
           }
           this._seeded = true; return;
         }
@@ -180,6 +216,7 @@
           for (const d of docs) fp.set(d.id, fpRules((d.data || {}).rules || {}));
           this._serverFp = fp;
           this._markMigrated();
+          this._saveCachedFp();
         }
 
         // Retain rules for products written locally but not yet on the server.
