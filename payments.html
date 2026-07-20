@@ -68,6 +68,7 @@
               <span class="input-group-text"><i class="bi bi-person"></i></span>
               <input type="text" id="filterCustomer" class="form-control" placeholder="ค้นหาชื่อลูกค้า..."
                      autocomplete="off" oninput="_fcFilter()" onfocus="_fcOpen()" onkeydown="_fcKey(event)">
+              <input type="hidden" id="filterCustomerId" value="">
             </div>
             <div id="filterCustDropdown" class="cust-dd"></div>
           </div>
@@ -664,7 +665,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.180"></script><script src="db.js?v=1.0.180"></script><script src="auth.js?v=1.0.180"></script><script src="nav.js?v=1.0.180"></script><script src="idb.js?v=1.0.180"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.181"></script><script src="db.js?v=1.0.181"></script><script src="auth.js?v=1.0.181"></script><script src="nav.js?v=1.0.181"></script><script src="idb.js?v=1.0.181"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -680,7 +681,7 @@ let payModal, overpayModal, transferAccountModal, cancelPayModal, dateConfirmMod
 let _sortCol = 'date', _sortDir = -1;
 
 function clearFilters() {
-  ['searchInv','filterCustomer','filterStatus','filterDestAcct','filterDestBank','filterSourceBank']
+  ['searchInv','filterCustomer','filterCustomerId','filterStatus','filterDestAcct','filterDestBank','filterSourceBank']
     .forEach(id => document.getElementById(id).value = '');
   ['filterFrom','filterTo'].forEach(id => {
     const el = document.getElementById(id);
@@ -859,18 +860,18 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('bankDatalist').innerHTML = Utils.bankDatalistOptions();
     _initBankCombos();
 
-    // Build the searchable customer-name list for the custom filter dropdown
+    // Build the searchable customer list for the custom filter dropdown
     _fcList = DB.getCustomers()
-      .map(c => (c && c.name != null) ? String(c.name) : '')
-      .filter(Boolean)
-      .sort((a, b) => a.localeCompare(b, 'th'));
+      .filter(c => c && c.name != null)
+      .map(c => ({ id: c.id, name: String(c.name) }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'th'));
 
     const params = new URLSearchParams(location.search);
     if (params.get('inv'))  document.getElementById('searchInv').value = params.get('inv');
     if (params.get('cust')) {
       const custId = params.get('cust');
       const cust = DB.getCustomerById(custId);
-      if (cust) document.getElementById('filterCustomer').value = cust.name;
+      if (cust) { document.getElementById('filterCustomer').value = cust.name; document.getElementById('filterCustomerId').value = cust.id; }
     }
 
     document.getElementById('filterStatus').addEventListener('input', render);
@@ -886,17 +887,21 @@ window.addEventListener('DOMContentLoaded', () => {
 let _fpPayDate, _fpCheqDate, _fpTransferDate;
 
 // ── Customer-name filter searchable dropdown (custom, styled like invoice-create) ──
-let _fcList = [];   // [name] of all customers
+// Selecting a suggestion filters the list by the exact customer id — not by
+// whether the typed text is a substring of the name — so one customer's name
+// being contained inside another's (e.g. "วัน" vs "วันเดอร์วัน") can't cross-match.
+// The list is only re-filtered on selection or when the box is cleared; raw
+// typing only updates the suggestion dropdown (avoids "one" matching "done").
+let _fcList = [];   // [{id, name}] of all customers
 let _fcHi   = -1;
-const _fcRenderDebounced = (typeof Utils !== 'undefined' && Utils.debounce) ? Utils.debounce(render, 200) : render;
 function _fcRender(list) {
   const dd = document.getElementById('filterCustDropdown');
   if (!list.length) {
     dd.innerHTML = '<div class="copt-empty">ไม่พบลูกค้า</div>';
   } else {
-    dd.innerHTML = list.map((name, i) =>
-      `<div class="copt${i === _fcHi ? ' hi' : ''}" data-name="${esc(name)}"
-            onmousedown="_fcSelect('${name.replace(/'/g, "\\'")}')">${esc(name)}</div>`
+    dd.innerHTML = list.map((c, i) =>
+      `<div class="copt${i === _fcHi ? ' hi' : ''}" data-id="${esc(c.id)}" data-name="${esc(c.name)}"
+            onmousedown="_fcSelect(this.dataset.id, this.dataset.name)">${esc(c.name)}</div>`
     ).join('');
   }
   dd.style.display = 'block';
@@ -905,12 +910,14 @@ function _fcOpen() { _fcHi = -1; _fcRender(_fcList); }
 function _fcFilter() {
   _fcHi = -1;
   const q = document.getElementById('filterCustomer').value.trim().toLowerCase();
-  _fcRender(q ? _fcList.filter(n => n.toLowerCase().includes(q)) : _fcList);
-  _fcRenderDebounced(); // free-text filter still updates the list as you type
+  _fcRender(q ? _fcList.filter(c => c.name.toLowerCase().includes(q)) : _fcList);
+  document.getElementById('filterCustomerId').value = ''; // typing invalidates the prior pick
+  if (!q) render(); // cleared → show all again
 }
 function _fcClose() { const dd = document.getElementById('filterCustDropdown'); if (dd) dd.style.display = 'none'; _fcHi = -1; }
-function _fcSelect(name) {
-  document.getElementById('filterCustomer').value = name;
+function _fcSelect(id, name) {
+  document.getElementById('filterCustomer').value   = name;
+  document.getElementById('filterCustomerId').value = id;
   _fcClose();
   render();
 }
@@ -929,7 +936,7 @@ function _fcKey(e) {
   } else if (e.key === 'Enter') {
     e.preventDefault();
     const hi = dd.querySelector('.copt.hi');
-    if (hi) _fcSelect(hi.dataset.name); else _fcClose();
+    if (hi) _fcSelect(hi.dataset.id, hi.dataset.name); else _fcClose();
   } else if (e.key === 'Escape') { _fcClose(); }
 }
 document.addEventListener('mousedown', (e) => {
@@ -1062,7 +1069,7 @@ async function viewPdfInvoice(num) {
 function render() {
   populatePaymentFilters();
   const q         = document.getElementById('searchInv').value.toLowerCase();
-  const fc        = document.getElementById('filterCustomer').value.toLowerCase().trim();
+  const fcId      = document.getElementById('filterCustomerId').value;
   const fs        = document.getElementById('filterStatus').value;
   const from      = Utils.parseBEToISO(document.getElementById('filterFrom').value);
   const to        = Utils.parseBEToISO(document.getElementById('filterTo').value);
@@ -1097,8 +1104,8 @@ function render() {
     const total    = parseFloat(inv.totalAmount) || 0;
     const status   = inv.cancelled ? 'cancelled' : paid <= 0 ? 'pending' : paid >= total - 0.005 ? 'paid' : 'partial';
     const d = new Date(inv.createdAt);
-    if (q  && !inv.invoiceNumber.toLowerCase().includes(q) && !custName.includes(q)) return false;
-    if (fc && !custName.includes(fc)) return false;
+    if (q    && !inv.invoiceNumber.toLowerCase().includes(q) && !custName.includes(q)) return false;
+    if (fcId && inv.customerId !== fcId) return false;
     if (fs && status !== fs) return false;
     if (from && d < new Date(from)) return false;
     if (to   && d > new Date(to+'T23:59:59')) return false;
@@ -2056,7 +2063,10 @@ async function doSaveAllPayments(payments) {
     const lastMethod = payments[payments.length - 1]?.method || 'โอน';
     // diff = unallocated excess (decremented as we cut old invoices). initialDiff +
     // total + newPaid are kept for the header. _renderOverpayBody() (re)draws the body.
-    pendingOverpayData = { custId, invNum, diff, initialDiff: diff, method: lastMethod, total, newPaid };
+    // sourcePaymentId marks which payment record on THIS invoice gets the
+    // "ตัดยอดเกินไปใบ X" remark as the excess gets cut into other invoices.
+    const sourcePaymentId = payments[payments.length - 1].id;
+    pendingOverpayData = { custId, invNum, diff, initialDiff: diff, method: lastMethod, total, newPaid, sourcePaymentId };
     _renderOverpayBody();
     overpayModal.show();
   } else {
@@ -2125,6 +2135,21 @@ function _renderOverpayBody() {
   document.getElementById('overpayBody').innerHTML = html;
 }
 
+// Mark the ORIGINAL (overpaid) invoice's payment record with which invoice(s) its
+// excess was cut to — mirrors the "ตัดยอดเกินจากใบ X" note already written on the
+// destination side, so the source invoice's payment list also shows where the
+// money went. Appended (not overwritten) so repeated cuts each get their own tag,
+// and any note the user typed on the original payment is preserved.
+function _appendSourceOverpayNote(targetInvNum) {
+  if (!pendingOverpayData || !pendingOverpayData.sourcePaymentId) return;
+  const p = DB.getPayments().find(x => x.id === pendingOverpayData.sourcePaymentId);
+  if (!p) return;
+  const tag = `ตัดยอดเกินไปใบ ${targetInvNum}`;
+  if (p.notes && p.notes.includes(tag)) return;
+  const notes = p.notes ? `${p.notes} | ${tag}` : tag;
+  DB.updatePayment(p.id, { notes });
+}
+
 // Cut the overpaid excess into ONE old invoice (manual, repeatable). Modal stays open;
 // the remaining excess + list are re-rendered so the user can keep cutting.
 function applyOverpayToOutstanding(targetInvNum, targetRem) {
@@ -2140,6 +2165,7 @@ function applyOverpayToOutstanding(targetInvNum, targetRem) {
     imageHistory: [],
   });
   DB.logActivity(session.userId, session.username, 'ตัดยอดเกินชำระ', { sourceInvNum, targetInvNum, amount: applyAmount });
+  _appendSourceOverpayNote(targetInvNum);
   pendingOverpayData.diff = diff - applyAmount;   // shrink remaining excess
   Utils.showAlert(`<i class="bi bi-check-circle me-1 text-success"></i>นำยอดเกิน ฿${Utils.formatNumber(applyAmount)} ตัดใบ ${targetInvNum} สำเร็จ`, 'success');
   _commitNow();
@@ -2163,6 +2189,7 @@ function autoApplyOverpay() {
       createdAt: new Date().toISOString(), createdBy: session.name, createdByUser: session.username,
       imageHistory: [],
     });
+    _appendSourceOverpayNote(o.num);
     remain -= amt; applied += amt; cuts++;
   }
   if (!cuts) return;

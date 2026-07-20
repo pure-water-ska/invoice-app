@@ -60,8 +60,8 @@
       <table class="table table-hover mb-0">
         <thead>
           <tr>
-            <th>สินค้า</th>
             <th>ลูกค้า</th>
+            <th>สินค้า</th>
             <th>วิธีจัดส่ง</th>
             <th class="text-end">ราคาต่อหน่วย (บาท)</th>
             <th class="text-center" title="วันที่แจ้งลูกค้าเรื่องราคา">แจ้งลูกค้า</th>
@@ -181,7 +181,7 @@
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.180"></script><script src="db.js?v=1.0.180"></script><script src="auth.js?v=1.0.180"></script><script src="nav.js?v=1.0.180"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.181"></script><script src="db.js?v=1.0.181"></script><script src="auth.js?v=1.0.181"></script><script src="nav.js?v=1.0.181"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -344,6 +344,18 @@ function render() {
     }
     return true;
   });
+
+  // Group by customer (ทุกลูกค้า / no-customer rows first, then Thai alphabetical),
+  // then within each customer sort products in the same order as products.html.
+  const custNameMap = new Map(customers.map(c => [c.id, c.name || '']));
+  const prodOrderMap = new Map(products.map(p => [p.id, p.order ?? 1e9]));
+  list = list.slice().sort((a, b) => {
+    if (!a.customerId !== !b.customerId) return a.customerId ? 1 : -1;
+    const nameCmp = (custNameMap.get(a.customerId) || '').localeCompare(custNameMap.get(b.customerId) || '', 'th');
+    if (nameCmp) return nameCmp;
+    return (prodOrderMap.get(a.productId) ?? 1e9) - (prodOrderMap.get(b.productId) ?? 1e9);
+  });
+
   const tbody = document.getElementById('pricingTable');
   const pg    = document.getElementById('pricePagination');
   if (list.length === 0) {
@@ -382,8 +394,8 @@ function render() {
     const orderCount = orderCustIds.size;
     const notified = p.notifiedAt ? p.notifiedAt : '';
     return `<tr>
-      <td>${prod ? prod.name : '<span class="text-danger">ไม่พบสินค้า</span>'}</td>
       <td>${cust ? cust.name : '<span class="text-muted">ทุกลูกค้า</span>'}</td>
+      <td>${prod ? prod.name : '<span class="text-danger">ไม่พบสินค้า</span>'}</td>
       <td>${p.shippingMethod || '<span class="text-muted">ทุกวิธีจัดส่ง</span>'}</td>
       <td class="text-end fw-semibold">฿${Utils.formatNumber(p.price)}
         ${(p.tierQty > 0 && p.tierPrice != null) ? `<div class="small text-success fw-normal"><i class="bi bi-graph-down-arrow"></i> ≥${Utils.formatNumberInt ? Utils.formatNumberInt(p.tierQty) : p.tierQty} → ฿${Utils.formatNumber(p.tierPrice)}${p.tierBasis === 'invoice' ? ' (รวมใบ)' : p.tierBasis === 'bottle' ? ' (รวมขวดทั้งใบ)' : ''}</div>` : ''}

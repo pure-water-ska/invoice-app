@@ -29,6 +29,14 @@ This file provides guidance to Claude when working with code in this repository.
 - Applies to new UI, layout/format/wording changes (e.g. dropdown label order, badges, status bars), and any behavior the user will see or interact with.
 - Exception: pure non-visible fixes (sync logic, internal refactors, diagnostics) may be pushed without a visual example — but still state what changed and why first.
 
+## Present Options When There's More Than One Way
+
+**When a task has multiple reasonable approaches, list them with pros/cons before implementing — let the user decide.**
+
+- Applies to bug fixes and features alike, not just architecture-level decisions.
+- Skip this when there's really only one sane approach — don't manufacture false choices.
+- Once the user picks (or approves a recommended default), proceed normally — this doesn't replace the mockup/example approval rules above, it comes before them when the "what to build" question itself is open.
+
 ## Running Locally
 
 No install step. Serve the directory with any HTTP server:
