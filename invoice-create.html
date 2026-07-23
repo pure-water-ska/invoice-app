@@ -159,7 +159,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.183"></script><script src="db.js?v=1.0.183"></script><script src="auth.js?v=1.0.183"></script><script src="nav.js?v=1.0.183"></script><script src="idb.js?v=1.0.183"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.184"></script><script src="db.js?v=1.0.184"></script><script src="auth.js?v=1.0.184"></script><script src="nav.js?v=1.0.184"></script><script src="idb.js?v=1.0.184"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -1281,6 +1281,10 @@ function previewInvoice() {
   const previewInvNum = editMode ? currentInvNum : DB.peekNextInvoiceNumberForDate(dateValISO);
   const existingMeta  = editMode ? (DB.getInvoices().find(i => i.invoiceNumber === currentInvNum) || {}) : {};
   const editCount     = editMode ? ((existingMeta.editCount || 0) + 1) : 0;
+  // issuedAt = the real wall-clock moment the invoice was saved (footer "issued :"),
+  // as opposed to createdAt which is the user-picked business DATE only (midnight,
+  // no time-of-day) and stays the source of truth for numbering/archiving/backdating.
+  const issuedAt = editMode ? (existingMeta.issuedAt || existingMeta.createdAt) : new Date().toISOString();
 
   // Split into pages
   const chunks = [];
@@ -1298,6 +1302,7 @@ function previewInvoice() {
       items: chunk,
       totalAmount,
       createdAt,
+      issuedAt,
       createdBy: session.name,
       createdByUser: session.username
     };
@@ -1371,6 +1376,10 @@ async function saveInvoice(shouldPrint = false) {
   // Number prefix/run follows the chosen invoice DATE (continues that day's sequence)
   const invNumber = DB.generateInvoiceNumberForDate(_dateISO);
   const createdAt = new Date(_dateISO).toISOString();
+  // issuedAt = actual wall-clock save time, shown as the footer "issued :" stamp —
+  // createdAt stays date-only (midnight) so numbering/archiving keep using the
+  // user-picked business date, not the moment of data entry.
+  const issuedAt = new Date().toISOString();
 
   // Split into pages of 14 rows
   const chunks = [];
@@ -1398,6 +1407,7 @@ async function saveInvoice(shouldPrint = false) {
       })),
       totalAmount,
       createdAt,
+      issuedAt,
       createdBy: session.name,
       createdByUser: session.username,
       printCount: 0
@@ -1639,6 +1649,11 @@ async function saveInvoiceEdit(shouldPrint = false) {
   const totalAmount = activeItems.reduce((s, item) => s + calcTotal(item), 0);
   const _editDateISO = Utils.parseBEToISO(dateVal) || Utils.todayInputValue();
   const createdAt    = new Date(_editDateISO).toISOString() || (meta.createdAt || new Date().toISOString());
+  // issuedAt is preserved from the ORIGINAL creation — an edit changes the invoice's
+  // content, not the moment it was first issued. Falls back for invoices saved
+  // before this field existed (createdAt was midnight-only for those too, so this
+  // is the best available approximation, not a regression).
+  const issuedAt     = meta.issuedAt || meta.createdAt || new Date().toISOString();
   const chunks = [];
   for (let i = 0; i < activeItems.length; i += ROWS_PER_PAGE) chunks.push(activeItems.slice(i, i + ROWS_PER_PAGE));
 
@@ -1664,6 +1679,7 @@ async function saveInvoiceEdit(shouldPrint = false) {
     })),
     totalAmount,
     createdAt,
+    issuedAt,
     createdBy:      meta.createdBy      || session.name,
     createdByUser:  meta.createdByUser  || session.username,
     printCount:     meta.printCount     || 0,
@@ -1964,7 +1980,7 @@ function buildInvoicePage(page, cust, cfg, pageNum, totalPages, copyType = '', r
     </div>
     <!-- Footer: issued left, page number right -->
     <div style="display:flex;justify-content:space-between;align-items:flex-end;font-size:9px;color:#999;margin-top:2px">
-      <span>issued : ${Utils.formatDateTimeTH(page.createdAt)}</span>
+      <span>issued : ${Utils.formatDateTimeTH(page.issuedAt || page.createdAt)}</span>
       <span>หน้าที่ ${pageNum}/${totalPages}</span>
     </div>
     </div><!-- /.inv-fit -->
