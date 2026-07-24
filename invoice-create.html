@@ -159,7 +159,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.184"></script><script src="db.js?v=1.0.184"></script><script src="auth.js?v=1.0.184"></script><script src="nav.js?v=1.0.184"></script><script src="idb.js?v=1.0.184"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.185"></script><script src="db.js?v=1.0.185"></script><script src="auth.js?v=1.0.185"></script><script src="nav.js?v=1.0.185"></script><script src="idb.js?v=1.0.185"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -1640,10 +1640,21 @@ async function saveInvoiceEdit(shouldPrint = false) {
   const existingPages = DB.getInvoices().filter(i => i.invoiceNumber === currentInvNum);
   const meta          = existingPages[0] || {};
   const newEditCount  = (meta.editCount || 0) + 1;
+  // Snapshot the full pre-edit invoice (all pages) into the history entry — the
+  // old data is preserved here, not by leaving the old page record behind, which
+  // is what caused amounts to sometimes stay stuck at the old value everywhere
+  // ("amount shown must be the latest") when the old record's Firestore delete
+  // silently missed (see the explicit cleanup below).
   const editHistory   = [...(meta.editHistory || []), {
     at:     new Date().toISOString(),
     by:     session.name,
-    byUser: session.username
+    byUser: session.username,
+    previous: {
+      totalAmount:    parseFloat(meta.totalAmount) || 0,
+      customerId:     meta.customerId,
+      shippingMethod: meta.shippingMethod,
+      items: existingPages.flatMap(p => p.items || []),
+    },
   }];
 
   const totalAmount = activeItems.reduce((s, item) => s + calcTotal(item), 0);
@@ -1693,6 +1704,25 @@ async function saveInvoiceEdit(shouldPrint = false) {
   // Replace old pages with new pages in one atomic DB write
   DB.saveInvoices([...newPages, ...DB.getInvoices().filter(i => i.invoiceNumber !== currentInvNum)]);
 
+  // Explicitly delete the superseded page docs from Firestore by their EXACT known
+  // ids, instead of relying on Sync's generic diff-based deletion (which infers a
+  // delete by comparing against Sync._serverIds — a set that can miss a very
+  // recently-created id if a page navigation happened between create and edit,
+  // silently leaving the old page's stale total in Firestore forever, since the
+  // real-time listener is deliberately union-only and never removes a record it
+  // wasn't explicitly told was deleted). We already know precisely which ids are
+  // being replaced here, so this is 100% safe regardless of that race — and the
+  // old data isn't lost: it's preserved above in editHistory[].previous.
+  if (window.Sync && Sync.ready) {
+    const oldIds = existingPages.map(p => p.id).filter(Boolean);
+    if (oldIds.length) {
+      const col = Sync._orgRef().collection('invoices');
+      const batch = Sync._db.batch();
+      oldIds.forEach(id => batch.delete(col.doc(id)));
+      batch.commit().catch(e => console.warn('[EditInvoice] old-page cleanup failed', e));
+    }
+  }
+
   DB.removeCapDeductionsByInvoice(currentInvNum);
   deductCapStock(currentInvNum, activeItems, createdAt, customerId);
   _deductReturnIds.forEach(id => {
@@ -1737,11 +1767,38 @@ function buildHistorySection(page) {
   const pc = page.printCount   || 0;
   if (!ph.length && !eh.length) return '';
 
-  const editRows = eh.map((e, i) => `
+  // "New" total for entry i = the total it changed INTO = the next entry's
+  // "previous" total, or (for the latest edit) the invoice's current total.
+  const editRows = eh.map((e, i) => {
+    const newTotal = (i + 1 < eh.length) ? eh[i + 1].previous?.totalAmount : parseFloat(page.totalAmount) || 0;
+    const collapseId = `editHist-${page.id}-${i}`;
+    const amountHtml = e.previous ? `
+      <span class="text-muted text-decoration-line-through">฿${Utils.formatNumber(e.previous.totalAmount)}</span>
+      <i class="bi bi-arrow-right mx-1"></i>
+      <span class="fw-semibold text-dark">฿${Utils.formatNumber(newTotal)}</span>
+      <button type="button" class="btn btn-link btn-sm p-0 ms-2 no-print" data-bs-toggle="collapse" data-bs-target="#${collapseId}">
+        ดูรายการเดิม <i class="bi bi-chevron-down"></i>
+      </button>` : '';
+    const itemsHtml = (e.previous && e.previous.items && e.previous.items.length) ? `
+      <div class="collapse mt-1" id="${collapseId}">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>รายการเดิม</th><th class="text-center">จำนวน</th><th class="text-end">รวม</th></tr></thead>
+          <tbody>${e.previous.items.map(it => `
+            <tr><td>${it.name || ''}</td><td class="text-center">${it.qty || 0}</td><td class="text-end">฿${Utils.formatNumber(it.total || 0)}</td></tr>
+          `).join('')}</tbody>
+        </table>
+      </div>` : '';
+    return `
     <li class="small text-muted py-1 border-bottom">
-      <i class="bi bi-pencil text-warning me-1"></i>
-      <strong>ครั้งที่ ${i + 1}</strong> &nbsp;${Utils.formatDateTimeTH(e.at)} — ${e.by} (${e.byUser})
-    </li>`).join('');
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-1">
+        <div><i class="bi bi-pencil text-warning me-1"></i>
+          <strong>ครั้งที่ ${i + 1}</strong> &nbsp;${Utils.formatDateTimeTH(e.at)} — ${e.by} (${e.byUser})
+        </div>
+        <div>${amountHtml}</div>
+      </div>
+      ${itemsHtml}
+    </li>`;
+  }).join('');
 
   const printRows = ph.map((p, i) => `
     <li class="small text-muted py-1 border-bottom">
