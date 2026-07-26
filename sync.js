@@ -618,7 +618,10 @@ var Sync = {
       // sync.js reads the app session (sessionStorage) → user record → firebaseEmail /
       // firebasePassword.  Users not yet provisioned fall back to the shared teamEmail.
       // On the login page itself Auth.session() returns null → teamEmail is used.
-      const _appSession = (window.Auth && Auth.session) ? Auth.session() : null;
+      // bare Auth — auth.js declares `const Auth`, not a window property (same
+      // gotcha as bare DB/IDB). window.Auth is always undefined, so this used to
+      // always fall through to the shared teamEmail even for provisioned users.
+      const _appSession = (typeof Auth !== 'undefined' && Auth.session) ? Auth.session() : null;
       const _appUser    = (_appSession && (typeof DB !== 'undefined')) ? DB.getUserById(_appSession.userId) : null;
       const _fbEmail    = _appUser?.firebaseEmail    || FIREBASE_CONFIG.teamEmail;
       const _fbPass     = _appUser?.firebasePassword || FIREBASE_CONFIG.teamPassword;

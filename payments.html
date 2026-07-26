@@ -665,7 +665,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.185"></script><script src="db.js?v=1.0.185"></script><script src="auth.js?v=1.0.185"></script><script src="nav.js?v=1.0.185"></script><script src="idb.js?v=1.0.185"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.186"></script><script src="db.js?v=1.0.186"></script><script src="auth.js?v=1.0.186"></script><script src="nav.js?v=1.0.186"></script><script src="idb.js?v=1.0.186"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -1163,7 +1163,8 @@ function render() {
     const cust  = custMap[inv.customerId];
     const total = parseFloat(inv.totalAmount) || 0;
     const paid  = paidMap[inv.invoiceNumber] || 0;
-    const rem   = total - paid;
+    let rem     = total - paid;
+    if (Math.abs(rem) < 0.005) rem = 0;
     const status    = inv.cancelled ? 'cancelled' : paid <= 0 ? 'pending' : paid >= total - 0.005 ? 'paid' : 'partial';
     const statusLbl = { pending:'ค้างชำระ', partial:'บางส่วน', paid:'ชำระแล้ว', cancelled:'ยกเลิก' };
     const statusCls = { pending:'badge-pending', partial:'badge-partial', paid:'badge-paid', cancelled:'badge-cancelled' };
@@ -1240,7 +1241,8 @@ function openPayModal(invNum, custId) {
   const inv   = DB.getInvoices().find(i => i.invoiceNumber === invNum);
   const total = parseFloat(inv?.totalAmount) || 0;
   const paid  = DB.getInvoicePaidAmount(invNum);
-  const rem   = total - paid;
+  let rem     = total - paid;
+  if (Math.abs(rem) < 0.005) rem = 0;
   document.getElementById('invSummary').innerHTML =
     `ยอดรวม: <strong>฿${Utils.formatNumber(total)}</strong> &nbsp;|&nbsp;
      ชำระแล้ว: <strong class="text-success">฿${Utils.formatNumber(paid)}</strong> &nbsp;|&nbsp;
@@ -1837,10 +1839,12 @@ function refreshSummary(invNum) {
   const inv   = DB.getInvoices().find(i => i.invoiceNumber === invNum);
   const total = parseFloat(inv?.totalAmount) || 0;
   const paid  = DB.getInvoicePaidAmount(invNum);
+  let rem     = total - paid;
+  if (Math.abs(rem) < 0.005) rem = 0;
   document.getElementById('invSummary').innerHTML =
     `ยอดรวม: <strong>฿${Utils.formatNumber(total)}</strong> &nbsp;|&nbsp;
      ชำระแล้ว: <strong class="text-success">฿${Utils.formatNumber(paid)}</strong> &nbsp;|&nbsp;
-     ค้างชำระ: <strong class="text-danger">฿${Utils.formatNumber(total-paid)}</strong>`;
+     ค้างชำระ: <strong class="text-danger">฿${Utils.formatNumber(rem)}</strong>`;
 }
 
 // ── Save payment (with date confirmation) ─────────────────────────────────────
@@ -1949,7 +1953,8 @@ function removePendingPayment(index) {
     const inv    = DB.getInvoices().find(i => i.invoiceNumber === invNum);
     const total  = parseFloat(inv?.totalAmount) || 0;
     const paid   = DB.getInvoicePaidAmount(invNum);
-    const rem    = total - paid;
+    let rem      = total - paid;
+    if (Math.abs(rem) < 0.005) rem = 0;
     document.getElementById('invSummary').innerHTML =
       'ยอดรวม: <strong>฿' + Utils.formatNumber(total) + '</strong> &nbsp;|&nbsp;' +
       'ชำระแล้ว: <strong class="text-success">฿' + Utils.formatNumber(paid) + '</strong> &nbsp;|&nbsp;' +

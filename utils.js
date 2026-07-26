@@ -134,7 +134,13 @@ const LZString = (function () {
           dict[dictSize++] = String.fromCharCode(bits); c = dictSize - 1; if (--enlargeIn === 0) { enlargeIn = Math.pow(2, numBits); numBits++; } break;
         case 2: return result.join('');
       }
-      if (--enlargeIn === 0) { enlargeIn = Math.pow(2, numBits); numBits++; }
+      // NOT a decrement — case 0/1 already decremented enlargeIn above; this only
+      // checks whether that decrement hit zero. A stray `--` here (matching the
+      // pattern below) double-decrements every iteration a new dictionary entry is
+      // created, desyncing numBits from the encoder and corrupting the bitstream
+      // for anything past a couple of characters — this was the actual cause of
+      // decompressFromUTF16 returning null on real (non-trivial) data.
+      if (enlargeIn === 0) { enlargeIn = Math.pow(2, numBits); numBits++; }
       entry = dict[c] !== undefined ? dict[c] : (c === dictSize ? w + w.charAt(0) : null);
       if (entry === null) return null;
       result.push(entry);
@@ -159,9 +165,9 @@ const LZString = (function () {
 // ── End LZString ────────────────────────────────────────────────────────────
 
 const APP_VERSION = {
-  version: '1.0.185',
-  date: '2026-07-24T10:47:20.650Z',
-  label: 'v1.0.185 (24 ก.ค. 2569)',
+  version: '1.0.186',
+  date: '2026-07-26T07:31:40.289Z',
+  label: 'v1.0.186 (26 ก.ค. 2569)',
 };
 
 // Changelog — add new entry here when releasing a new version.
@@ -659,7 +665,11 @@ Utils.compressImage = function(file, maxPx, quality) {
   aw.onCloseRequested(async function (event) {
     if (_closing) return;                 // already flushed → let Tauri close for real
     var s = null;
-    try { s = window.Auth && Auth.session && Auth.session(); } catch (e) {}
+    // bare Auth — auth.js declares `const Auth`, not a window property (same
+    // gotcha as bare DB/IDB). window.Auth is always undefined, so this close
+    // guard used to always see "no session" and let the window close immediately
+    // without flushing pending uploads/HDD writes.
+    try { s = typeof Auth !== 'undefined' && Auth.session && Auth.session(); } catch (e) {}
     if (!s) return;                       // logged out / login page → close normally
 
     event.preventDefault();               // hold the close until data is safe

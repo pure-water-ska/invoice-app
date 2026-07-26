@@ -85,7 +85,7 @@ Open `index.html` (login page). The app works fully offline without Firebase or 
 
 > **Important:** `wt_transfer_accounts` is its own top-level key. It was separated from `wt_settings` specifically because object-type DOCUMENTS in Firestore get replaced wholesale on sync — storing it inside settings would cause it to be wiped when another device synced settings without having the accounts locally. A one-time migration in `DB.getTransferAccounts()` auto-promotes data from the old location.
 
-**LZString compression:** `DB._set()` compresses values with `LZString.compressToUTF16()` before writing to localStorage. `DB._get()` / `DB._lzRead()` detect and decompress automatically. `sync.js` must always use `this._localRead(lsKey)` (not `localStorage.getItem()` directly) for the same reason.
+**LZString compression:** `DB._set()` compresses values with `LZString.compressToUTF16()` before writing to localStorage. `DB._get()` / `DB._lzRead()` detect and decompress automatically. `sync.js` must always use `this._localRead(lsKey)` (not `localStorage.getItem()` directly) for the same reason. `LZString` in `utils.js` is a **hand-ported subset** (only `compressToUTF16`/`decompressFromUTF16`), not the upstream library — it had a real decompress-corrupting bug until v1.0.186; see "LZString decompress bug" under Sync safety rails for what broke and why it was invisible for months.
 
 **In-memory cache:** `DB._cache` holds the last parsed value per key. Invalidated by `DB._set()` and by `DB.invalidate(key)` (called from `sync.js` after Firestore writes localStorage directly).
 
@@ -176,6 +176,33 @@ Multiple invoice records can share the same `invoiceNumber` — each is a separa
 - `invoices.html` shows a "X หน้า" badge and an expand chevron for multi-page invoices. Expanded sub-rows let the user view, edit, or delete individual pages. The main row's delete button removes all pages.
 - `invoice-create.html?view=NUM` / `?edit=NUM` always operates on all pages for that invoice number.
 
+### Invoice Edit — explicit old-page delete + edit history snapshots (v1.0.184–185)
+
+- **`issuedAt` (v1.0.184):** `createdAt` is the user-picked business DATE only
+  (`new Date('YYYY-MM-DD')` = midnight UTC = always 07:00 Thai time) and drives
+  numbering/archiving/backdating — do not change its meaning. The footer
+  "issued :" stamp instead reads `issuedAt` (real wall-clock save moment, set once
+  at creation, PRESERVED across edits), falling back to `createdAt` for old
+  records.
+- **Edits replace pages with new UUIDs — and must delete the old docs
+  explicitly.** `saveInvoiceEdit()` builds new page records (new `id`s) and
+  removes the old ones locally. The generic sync engine used to *infer* the
+  Firestore delete by diffing against `Sync._serverIds` — that inference can miss
+  an id created very recently in the same session (page navigation between create
+  and edit), leaving the OLD page's stale total in Firestore forever. And it never
+  self-heals: the invoices/payments listener is deliberately union-only (never
+  removes by inference), so the phantom old amount kept showing everywhere.
+  Confirmed in production on 2 of 9 ever-edited invoices. Fix (v1.0.185):
+  `saveInvoiceEdit()` batch-deletes the exact `existingPages[].id` docs from
+  Firestore right after `DB.saveInvoices()`. Repeat this pattern for any future
+  flow that replaces records with new ids — never rely on `_serverIds` inference
+  for a record that might have been created this session.
+- **`editHistory[].previous` (v1.0.185):** each edit entry now snapshots the full
+  pre-edit state (`totalAmount`, `customerId`, `shippingMethod`, flattened
+  `items`) so no data is lost when the old page docs are deleted.
+  `buildHistorySection()` on the view page renders old-total (struck through) →
+  new-total per edit with an expandable "ดูรายการเดิม" old-items table.
+
 ### Single-Source-of-Truth Sync Modules (customers, products, pricing, users)
 
 **These four data types do NOT use the general `sync.js` engine.** They were moved
@@ -242,12 +269,26 @@ these files — **not** `sync.js`:
   on-screen report with a copy button showing ready state, org id, local-vs-live-
   server counts, and a recent activity log. DevTools is disabled in release Tauri
   builds, so this on-screen report is the primary way to see what the sync is doing.
+- **Time-boxed trust window (v1.0.183) — read-quota fix.** A fresh `onSnapshot()`
+  attach re-reads (and re-bills) every doc in the collection, and nav.js loads all
+  these modules on EVERY page — measured live at ~300 reads/page-load across the 4
+  master-data collections (~9,000 reads for 10 nav cycles; the project was blowing
+  through the 50K/day Spark read quota at ~157K/day). Fix: each attach stamps
+  `sessionStorage['wt_cs_trust_<col>']` + caches `_serverFp` to
+  `wt_cs_fp_<col>`; an `init()` within 60 s (`_TRUST_MS`) of the last attach
+  SKIPS re-attaching and reuses the cached fingerprint (local edits still diff/push
+  correctly against it). Implemented in THREE files — `collection-sync.js`,
+  `customer-sync.js`, AND `pricing-grouped-sync.js` (the last is hand-written, NOT
+  a CollectionSync instance; it's easy to forget and was missed on the first pass).
+  Tradeoff: cross-device updates for these collections can be up to 60 s stale on
+  a page that skipped attaching. `diagnose()` prints "listener attached: false
+  (trust window active)" so this state is visible on-screen.
 
 ### Auth & Permissions (`auth.js`)
 
 Session stored in sessionStorage (clears on tab close), 12 h absolute expiry regardless of activity. SHA-256 hashed passwords. 48 granular permissions in `Auth.PERMS`; Admin role bypasses all checks. First login forces a password change.
 
-**Idle timeout:** `nav.js` auto-logs-out after `DB.getSettings().sessionTimeoutMin` minutes of inactivity (default 30, 0 = disabled), warning 2 minutes before expiry. **`Auth.logout()` already navigates to `index.html` itself** — internally, but only *after* an async `Sync.flushNow()` completes and clears `sessionStorage[AUTH_KEY]`. Never add a second `window.location.href = 'index.html'` after calling `Auth.logout()` — it races the async cleanup and can win, aborting the page before the session is actually cleared. Landing on `index.html` with a still-valid session then bounces straight back in via `if (Auth.session()) location.href='dashboard.html'`, which looks exactly like "the timeout doesn't work" (fixed in nav.js's idle-timeout path, v1.0.179 — this bug is specific to any *other* caller that duplicates the redirect).
+**Idle timeout:** `nav.js` auto-logs-out after `DB.getSettings().sessionTimeoutMin` minutes of inactivity (default 30, 0 = disabled), warning 2 minutes before expiry. **`Auth.logout()` already navigates to `index.html` itself** — internally, but only *after* an async `Sync.flushNow()` completes and clears `sessionStorage[AUTH_KEY]`. Never add a second `window.location.href = 'index.html'` after calling `Auth.logout()` — it races the async cleanup and can win, aborting the page before the session is actually cleared. Landing on `index.html` with a still-valid session then bounces straight back in via `if (Auth.session()) location.href='dashboard.html'`, which looks exactly like "the timeout doesn't work" (fixed in nav.js's idle-timeout path, v1.0.179 — this bug is specific to any *other* caller that duplicates the redirect). The idle timer only reads `sessionTimeoutMin` **once**, the first time a page loads (`_active` guard) — saving a new value in Settings has no effect until `window._restartIdleTimer()` is called (v1.0.186, wired into `settings.js`'s `saveCompanySettings()`), which resets `_active` and re-runs `start()` against the current setting immediately, no reload needed. Also see the `window.Auth` gotcha in Key Conventions — the idle timer literally never fired at all (any setting) until that was fixed in the same release.
 
 ```javascript
 if (!Auth.can('invoice_delete')) { /* deny */ }
@@ -469,6 +510,7 @@ invoiced line item.
 - **Print layout:** A5 invoice format defined with `@media print` rules in `style.css`.
 - **Date filtering:** Invoice list and sync pull use Buddhist Era dates (BE = CE + 543) via `bedate.js`. Use `Utils.parseBEToISO()` / `Utils.formatDateTH()`.
 - **`window.DB` AND `window.IDB` are `undefined` — use the bare name.** `db.js` declares `const DB = {…}` and `idb.js` declares `const IDB = (…)()` — both lexical globals NOT attached to `window` (a top-level `const` in a classic script does not become a `window` property). `window.Sync` and `window.CustomerSync` etc. ARE on `window` (assigned explicitly), but **`DB` and `IDB` are not**. Never guard with `window.DB ? …` / `window.IDB ? …` — it always takes the false branch. Use the bare name or `typeof DB !== 'undefined'` / `typeof IDB !== 'undefined'`. The `window.DB` form silently disabled the customer backstop for several releases; the `window.IDB` form (v1.0.85 and earlier) silently disabled `sync.js` `_lsWrite()` cache+HDD writes (Firestore-pulled invoices vanished after navigation/logout) and `local-folder-sync.js` handle persistence (the folder path showed as "gone" on every reload). Fixed in v1.0.86. The PDF-folder card never had the bug because it used bare `IDB`.
+- **`window.Auth` is also `undefined` — same gotcha, one more name to add to the list.** `auth.js` declares `const Auth = {…}`, a lexical top-level `const`, not a `window` property — identical to the `DB`/`IDB` gotcha above, just not caught for `Auth` until v1.0.186. Every `window.Auth` reference silently evaluates to `undefined`. This had shipped three live bugs simultaneously: (1) `nav.js`'s idle-timeout `_tick()` guarded on `if (!window.Auth || !Auth.session()) return;` — always true, so the idle logout **never fired at any setting, ever**; (2) the adjacent `beforeunload` restore-point marker had the same guard and never set its marker on unclean close; (3) `utils.js`'s Tauri desktop close guard (`aw.onCloseRequested`) checked `window.Auth && Auth.session()` to decide whether to hold the close for a flush — always falsy, so **the X button never actually blocked and pending uploads/HDD writes were never guaranteed to flush before close**, matching the class of past data-loss incidents in this file. Also broke `sync.js`'s per-user Firebase Auth credential lookup (silently always fell back to the shared team account). Fixed by using the bare name (`typeof Auth !== 'undefined'`) in all four spots. **Grep for `window.Auth` (or `window.DB`/`window.IDB`) before adding new code that reads any of these three globals — they must always be referenced bare.**
 - **`DB.getX()` returns the cache array by reference — never diff against db's "prev".** `DB.addCustomer/addProduct/upsertPrice/addUser` do `const a = DB.getX(); a.push(...); DB.saveX(a)`, which mutates the cached array **in place**. So in `DB._set` the captured previous value and the new value are the *same* mutated array (`prev === next`). Any per-record diff must compare against an independent baseline (the sync modules use `_serverFp`), not against db's prev — otherwise new adds are silently never pushed.
 - **Destructive confirms must use `await Utils.confirm(...)`, never `confirm(...)`.** In the Tauri desktop app `window.confirm()` returns a Promise (truthy), so `if (!confirm(msg)) return;` never aborts and the action runs *without* waiting for Yes/No. `Utils.confirm(message, title)` returns a Promise resolving to a boolean (native blocking dialog in Tauri, `window.confirm` on web). Always `await` it and make the enclosing function `async`. For inline action strings, use `Utils.confirm(msg).then(ok => { if (ok) {…} })`.
 - **Pages that read customer/product/pricing/user data must listen for `sync:updated` and `sync:pulled`, not just gate on `DB.ready`.** `DB.ready` only waits for local IDB-overflow load — it resolves **before** the CollectionSync modules' Firestore listener has delivered anything. On a device with an empty/stale local cache, a page that builds its filter/search list only inside `DB.ready.then(...)` populates it against 0 records and never refreshes (this was the "pricing customer search returns nothing" bug, v1.0.173). Every list-building/render function on such a page should also run from `window.addEventListener('sync:updated', ...)` (filtered to the relevant keys) and `sync:pulled` — see `pricing.html` or `customers.html` for the pattern.
@@ -523,19 +565,76 @@ added these guards. **Understand them before touching sync.**
   full-collection read against the free-tier quota. Outputs one zip with one JSON
   file per collection.
 
-### ⚠️ OPEN BUG (unresolved as of v1.0.146)
+### ✅ CLOSED (high confidence, v1.0.186) — was "OPEN BUG (unresolved as of v1.0.146)"
 After a **PDF import on the WEB build (non-Tauri)**, local `wt_invoices` dropped
 to **0** while the server kept all ~954 (the mass-delete guard logged
 `SYNC-DEL-BLOCKED`, so the server was protected) — and a **logout/login full pull
-did NOT restore local**. Note this is the WEB path: local lives in localStorage /
+did NOT restore local**. This is the WEB path: local lives in localStorage /
 IDB-overflow (not HDD), so `_lsWrite`/`DB._set` go through the localStorage/IDB
-branches, and the `SYNC-DEL-BLOCKED` came from `pdf-import.html`. v1.0.146 added a
-diagnostic probe `SYNC-LOCAL-DROP` (in both `Sync._lsWrite` and `DB._set`) that
-logs to the Error Log, with a call stack, any write shrinking
-`wt_invoices`/`wt_payments` by >half from a >50-record array. **Next step: get the
-`SYNC-LOCAL-DROP` line from the user's Error Log to identify the culprit path,
-then fix.** (Was blocked on Firestore read-quota exhaustion from heavy
-debugging — wait for daily reset / Blaze.)
+branches. The `SYNC-LOCAL-DROP` probe added in v1.0.146 never actually caught a
+live occurrence, so the exact trigger for that specific June 2026 incident was
+never confirmed from logs — but see the **LZString decompress bug** below: a
+same-session compress→decompress round trip on the *current pre-v1.0.186* code
+returned `null` for any non-trivial input, and a realistic 954-record
+`wt_invoices` repro reproduced the exact symptom (`DB._get()`'s catch clause
+silently falls back to `[]` on `JSON.parse` failure of the garbled undecompressed
+string — see line ~226). This is a real, currently-reproducing, web-build-only
+mechanism that matches the report exactly at the reported data scale. Treating as
+closed; **retest and reopen if it recurs post-v1.0.186** (no contemporary logs
+survive to retroactively prove it was *the* trigger, only that it's *a* trigger
+capable of producing this exact symptom).
+
+**LZString decompress bug (`utils.js` custom port, fixed v1.0.186):** the hand-
+ported `_d()` (decompress) had a spurious extra `enlargeIn--` right after the
+`switch` block (previously `if (--enlargeIn === 0)`, should be a check-only
+`if (enlargeIn === 0)` — case 0/1 already decremented it once, inside the case).
+The real lz-string algorithm decrements `enlargeIn` exactly twice per new-
+dictionary-entry iteration (once in-case, once at loop-end) with two separate
+zero-checks; this port decremented **three** times, desyncing `numBits` from what
+the encoder used and corrupting the bitstream read position for anything past a
+couple of characters. `LZString.compressToUTF16` (compression) was unaffected —
+only `decompressFromUTF16` was broken. Confirmed with an isolated Node
+reproduction: 5 payloads (short strings, real settings JSON with Thai text, a
+500-char string, a 954-record invoice-array JSON matching production scale) all
+failed pre-fix, all round-tripped correctly post-fix.
+
+**Why this was invisible in normal use (masked-primary pattern, see
+Troubleshooting Methodology #8):** `DB._cache` is usually populated directly by
+Firestore's real-time listeners (`_lsWrite`/`DB.setLocalOnly`), which never go
+through `_lzRead`/decompress — they write already-parsed data straight into
+cache. The broken decompress path only gets exercised on a **fresh page load**,
+for a key not yet in cache, before any listener has delivered a snapshot. Under
+normal conditions the listener usually wins the race fast enough that nobody
+notices the local decompress failed. `wt_settings` reads are a DOCUMENT with a
+much smaller/less frequently-listened window, which is how this was actually
+caught (see the sessionTimeoutMin investigation this session) rather than via
+invoices.
+
+### Firestore read-quota status (July 2026, v1.0.183)
+
+Measured via the Firebase Console Usage tab (user signs into the console in the
+in-app Browser pane; Query Insights shows nothing — it doesn't attribute
+`onSnapshot` traffic, which is nearly all of this app's reads):
+
+- Pre-fix the project averaged **~157K reads/day vs the 50K/day Spark cap**
+  (1.1M/week) and hit "exceeded no-cost limits" mid-day — one full daily
+  exhaustion was observed live (console Data tab unusable, app sync degraded
+  until the daily reset).
+- The v1.0.183 trust window eliminated the dominant cost (the 4 master-data
+  listeners re-reading whole collections on every navigation, ~300 reads/page).
+- **Open item:** a clean post-fix navigation test still showed ~3K reads for an
+  8-page cycle — most plausibly the **invoices/payments listener in sync.js**,
+  which also re-attaches per navigation (stable-cutoff query since v1.0.178, but
+  whether Firestore's resume-token cache makes the re-attach free was never
+  verified; a diagnostic probe added to the snapshot callback never fired in a
+  worn-out test tab, so evidence is inconclusive). Investigate in a FRESH browser
+  session: baseline the Usage-tab read count, navigate 10×, re-check, and log
+  `snap.size`/`fromCache`/`docChanges` from the invoices listener callback.
+- Standing recommendation to the user: upgrade to **Blaze** (~$0.036/100K reads
+  beyond free tier — cents/day at this volume) to remove the outage risk.
+- Dashboard caveat: the Usage counter lags several minutes and keeps climbing
+  after activity stops — never judge a before/after by a single reading; prefer
+  code-level evidence (console logs / sessionStorage probes).
 
 ## Troubleshooting Methodology (read before debugging a reported bug)
 
@@ -607,6 +706,7 @@ not yet understand the bug — gather more evidence instead of shipping.
 | `wt_sync_session_pulled` | Session guard — set after first `_pullAll()`; cleared by `Auth.logout()` |
 | `wt_sync_pull_ids` | JSON map of `colName → [id, …]`; persisted `_pullIds` for listener guard |
 | `wt_cust_unacked` / `wt_prod_unacked` / `wt_price_unacked` / `wt_user_unacked` | Per-module set of record ids written locally but not yet server-acknowledged (see Single-Source-of-Truth Sync Modules) |
+| `wt_cs_trust_<col>` / `wt_cs_fp_<col>` | Per-collection trust-window attach timestamp + cached server fingerprint map (v1.0.183 — see "Time-boxed trust window") for `customers_v2` / `products_v2` / `pricing_byproduct` / `users_v2` |
 
 > Per-module bootstrap flags `wt_*_v2_migrated` are stored via `DB` (HDD-backed in Tauri), not sessionStorage.
 
@@ -675,6 +775,11 @@ git tag v1.0.6 && git push origin main --tags
 ## Deployment
 
 **Web app:** Push to `main` → `.github/workflows/pages.yml` injects `FIREBASE_TEAM_PASSWORD` into `firebase-config.js` and `GOOGLE_CLIENT_ID` into `drive-config.js` from GitHub Secrets, bumps the SW cache version, and deploys to GitHub Pages.
+
+**Live URL:** `https://pure-water-ska.github.io/invoice-app/` — the `/invoice-app/`
+path is required; the bare `pure-water-ska.github.io` root 404s (no user site,
+project site only). Firebase project: `invoice-app-3033a`, Firestore data lives
+under `orgs/main/…` (region asia-southeast3).
 
 Required GitHub Secrets (Repo → Settings → Secrets and variables → Actions): `FIREBASE_TEAM_PASSWORD`, `GOOGLE_CLIENT_ID`.
 

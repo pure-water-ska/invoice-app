@@ -986,6 +986,7 @@ function _checkOverdueAlert() {
 // Shows a yellow warning banner 2 minutes before expiry; any user activity resets the timer.
 ;(function() {
   var _active  = false;
+  var _listenersAttached = false;
   var _warnEl  = null;
   var _lastAct = Date.now();
   var _timeoutMs = 0;
@@ -1004,7 +1005,10 @@ function _checkOverdueAlert() {
     // session was never actually cleared. Landing on index.html with wt_session
     // still present made its own `if (Auth.session()) location.href='dashboard.html'`
     // bounce the user right back in, looking exactly like "timeout doesn't work".
-    if (window.Auth) Auth.logout('หมดเวลาการใช้งาน (idle timeout)');
+    // bare Auth — auth.js declares `const Auth`, not a window property (same
+    // gotcha as bare DB/IDB). `window.Auth` is always undefined, so this guard
+    // used to silently no-op every tick and _logout() never actually logged out.
+    if (typeof Auth !== 'undefined') Auth.logout('หมดเวลาการใช้งาน (idle timeout)');
   }
 
   function _warn(minsLeft) {
@@ -1028,7 +1032,7 @@ function _checkOverdueAlert() {
   }
 
   function _tick() {
-    if (!window.Auth || !Auth.session()) return;  // logged out elsewhere
+    if (typeof Auth === 'undefined' || !Auth.session()) return;  // logged out elsewhere
     var elapsed   = Date.now() - _lastAct;
     var remaining = _timeoutMs - elapsed;
     if (remaining <= 0)              { _logout(); return; }
@@ -1050,8 +1054,11 @@ function _checkOverdueAlert() {
       _timeoutMs = mins * 60 * 1000;
       _active    = true;
       _lastAct   = Date.now();
-      ['mousemove','keydown','mousedown','touchstart','scroll','click']
-        .forEach(function(e) { document.addEventListener(e, _reset, { passive: true }); });
+      if (!_listenersAttached) {
+        _listenersAttached = true;
+        ['mousemove','keydown','mousedown','touchstart','scroll','click']
+          .forEach(function(e) { document.addEventListener(e, _reset, { passive: true }); });
+      }
       setTimeout(_tick, 15000);
     };
     // bare DB — window.DB is always undefined (db.js declares `const DB`), so this
@@ -1059,6 +1066,14 @@ function _checkOverdueAlert() {
     // user's saved session-timeout. Use typeof DB so it actually waits for the cache.
     if (typeof DB !== 'undefined' && DB.ready && typeof DB.ready.then === 'function') DB.ready.then(start);
     else start();
+  };
+
+  // Called by settings.js right after sessionTimeoutMin is saved, so the new
+  // value takes effect immediately instead of only on the next page load.
+  window._restartIdleTimer = function() {
+    _active = false;
+    if (_warnEl) { _warnEl.remove(); _warnEl = null; }
+    window._startIdleTimer();
   };
 })();
 
@@ -1071,7 +1086,8 @@ function _startIdleTimer() { if (typeof window._startIdleTimer === 'function') w
 // The marker is removed by Auth.logout() so it only appears after an unclean close.
 (function() {
   window.addEventListener('beforeunload', function() {
-    if (!window.Auth || !Auth.session()) return;
+    // bare Auth — see the idle-timeout fix above; window.Auth is always undefined.
+    if (typeof Auth === 'undefined' || !Auth.session()) return;
     try {
       const cfg = (typeof DB !== 'undefined') ? (DB.getSettings() || {}) : {};
       if (cfg.autoRestorePoint?.onClose === false) return;

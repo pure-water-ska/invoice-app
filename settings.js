@@ -294,6 +294,7 @@ function saveCompanySettings() {
   const _st = isNaN(_stRaw) ? 30 : Math.max(0, Math.min(1440, _stRaw));
   upd.sessionTimeoutMin = _st;
   DB.saveSettings(upd);
+  if (typeof window._restartIdleTimer === 'function') window._restartIdleTimer();
   DB.logActivity(session.userId, session.username, 'แก้ไขตั้งค่าระบบ', { sessionTimeoutMin: _st });
   Utils.showAlert('บันทึกการตั้งค่าสำเร็จ');
   updatePreview();
