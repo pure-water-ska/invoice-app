@@ -665,7 +665,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.187"></script><script src="db.js?v=1.0.187"></script><script src="auth.js?v=1.0.187"></script><script src="nav.js?v=1.0.187"></script><script src="idb.js?v=1.0.187"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.188"></script><script src="db.js?v=1.0.188"></script><script src="auth.js?v=1.0.188"></script><script src="nav.js?v=1.0.188"></script><script src="idb.js?v=1.0.188"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -1826,9 +1826,18 @@ function confirmCancelPayment() {
 
 async function deletePayment(payId, invNum) {
   if (!_needPerm('payment_delete')) return;
-  if (!await Utils.confirm('ลบรายการชำระนี้ใช่หรือไม่?')) return;
+  if (!await Utils.confirm('ลบรายการชำระนี้ใช่หรือไม่? (รูปภาพที่แนบเฉพาะรายการนี้จะถูกลบด้วย)')) return;
+  const pay = DB.getPayments().find(p => p.id === payId);
+  const candidateRefs = [];
+  if (pay) {
+    if (pay.transferImage) candidateRefs.push(pay.transferImage);
+    if (pay.chequeImage)   candidateRefs.push(pay.chequeImage);
+    if (pay.signedImage)   candidateRefs.push(pay.signedImage);
+    (pay.imageHistory || []).forEach(h => { if (h.image) candidateRefs.push(h.image); });
+  }
   DB.deletePayment(payId);
-  DB.logActivity(session.userId, session.username, 'ลบรายการชำระ', { invoiceNumber: invNum });
+  const imgCount = await DB.deleteOrphanedImages(candidateRefs);
+  DB.logActivity(session.userId, session.username, 'ลบรายการชำระ', { invoiceNumber: invNum, imagesDeleted: imgCount });
   refreshSummary(invNum);
   render();
   _commitNow();

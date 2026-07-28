@@ -816,6 +816,29 @@ const DB = {
   },
   deletePayment(id) { this.savePayments(this.getPayments().filter(p => p.id !== id)); },
 
+  // Delete image refs that are no longer referenced by ANY current invoice or
+  // payment. Call this AFTER saveInvoices()/savePayments() have already removed
+  // the doomed records, passing the candidate refs gathered from those records
+  // BEFORE deletion — multi-invoice payments can share the exact same "img:<id>"
+  // ref (one upload, reused across every payment in the batch, see payments.html
+  // multiPaySave's sharedTransferImg/sharedChequeImg), so a ref is only actually
+  // deleted once nothing still-current points at it. Requires image-store.js
+  // (window.Images) to be loaded on the page; no-ops otherwise.
+  async deleteOrphanedImages(candidateRefs) {
+    if (typeof Images === 'undefined' || !candidateRefs || !candidateRefs.length) return 0;
+    const stillUsed = new Set();
+    this.getInvoices().forEach(i => { if (i.signedImage) stillUsed.add(i.signedImage); });
+    this.getPayments().forEach(p => {
+      if (p.transferImage) stillUsed.add(p.transferImage);
+      if (p.chequeImage)   stillUsed.add(p.chequeImage);
+      if (p.signedImage)   stillUsed.add(p.signedImage);
+      (p.imageHistory || []).forEach(h => { if (h.image) stillUsed.add(h.image); });
+    });
+    const toDelete = [...new Set(candidateRefs)].filter(r => Images.isRef(r) && !stillUsed.has(r));
+    await Promise.all(toDelete.map(r => Images.del(r).catch(() => {})));
+    return toDelete.length;
+  },
+
   getInvoicePaidAmount(invoiceNumber) {
     return this.getPaymentsByInvoice(invoiceNumber)
       .filter(p => !p.cancelled)
