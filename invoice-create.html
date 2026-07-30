@@ -159,7 +159,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.188"></script><script src="db.js?v=1.0.188"></script><script src="auth.js?v=1.0.188"></script><script src="nav.js?v=1.0.188"></script><script src="idb.js?v=1.0.188"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.189"></script><script src="db.js?v=1.0.189"></script><script src="auth.js?v=1.0.189"></script><script src="nav.js?v=1.0.189"></script><script src="idb.js?v=1.0.189"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -1716,6 +1716,17 @@ async function saveInvoiceEdit(shouldPrint = false) {
   if (window.Sync && Sync.ready) {
     const oldIds = existingPages.map(p => p.id).filter(Boolean);
     if (oldIds.length) {
+      // Tombstone BEFORE the batch delete (synchronous, survives navigating away
+      // immediately after) — this raw batch.delete() bypasses Sync.push()/_writeKey()
+      // entirely, so without this, any OTHER device that still has these old page
+      // ids cached locally (e.g. was offline at edit time) gets no delete signal at
+      // all. On its next session it reseeds _serverIds from a fresh pull (which no
+      // longer has these ids), then any unrelated invoice save re-diffs its full
+      // local array against that fresh _serverIds and treats these stale cached
+      // records as "new" — silently resurrecting the old pre-edit amount back into
+      // Firestore. Confirmed live on invoice 180769-001 (recurred twice from a real
+      // device, PC name UX3402Z, after being manually deleted from the console).
+      Sync._addTombstones('invoices', oldIds);
       const col = Sync._orgRef().collection('invoices');
       const batch = Sync._db.batch();
       oldIds.forEach(id => batch.delete(col.doc(id)));

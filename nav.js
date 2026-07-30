@@ -227,8 +227,20 @@
     // Firebase IS configured — show badge immediately
     setSyncBadge('⏳ Connecting…', 'bg-warning text-dark');
 
-    function onSDKError() {
+    // stage identifies which script in the chain failed to LOAD (network-level:
+    // 404, blocked request, offline CDN) — not a sign-in/permission/runtime
+    // error, those show as amber/gray, not red. Logged so a red badge reported
+    // from a release build (no DevTools) is diagnosable from Settings →
+    // Troubleshoot instead of only from a live DevTools Network tab.
+    function onSDKError(stage) {
       setSyncBadge('⚠ Sync ✗', 'bg-danger');
+      try {
+        if (typeof DB !== 'undefined' && DB.logError) {
+          DB.logError('FIREBASE-SDK-LOAD-FAIL', `Failed to load: ${stage}`, {
+            stage, online: navigator.onLine, ua: navigator.userAgent
+          });
+        }
+      } catch (e) {}
     }
 
     // Inner function: load Firestore SDK then the rest of the sync stack.
@@ -253,9 +265,9 @@
               }, function(){});
             }
             loadScript('./connection-status.js', function() {
-              loadScript('./sync.js', afterSync, onSDKError);
+              loadScript('./sync.js', afterSync, function() { onSDKError('sync.js'); });
             }, function() {
-              loadScript('./sync.js', afterSync, onSDKError);
+              loadScript('./sync.js', afterSync, function() { onSDKError('sync.js'); });
             });
           }
           if (!window.LocalFolderSync) {
@@ -269,7 +281,7 @@
         } else {
           loadSyncStack();
         }
-      }, onSDKError);
+      }, function() { onSDKError('firebase-firestore-compat.js'); });
     }
 
     // firebase-auth-compat.js is loaded on ALL platforms (including Tauri).
@@ -277,8 +289,8 @@
     // prevents the SDK from creating the hidden __/auth/iframe session manager
     // (that iframe is rejected by Google's OAuth policy for tauri:// origins).
     loadScript(`${FB_BASE}/firebase-app-compat.js`, function() {
-      loadScript(`${FB_BASE}/firebase-auth-compat.js`, loadFirestoreAndSync, onSDKError);
-    }, onSDKError);
+      loadScript(`${FB_BASE}/firebase-auth-compat.js`, loadFirestoreAndSync, function() { onSDKError('firebase-auth-compat.js'); });
+    }, function() { onSDKError('firebase-app-compat.js'); });
     } // end startFirebaseSDK
   }, function() {
     hideSyncBadge(); // firebase-config.js not found — local-only mode, hide badge

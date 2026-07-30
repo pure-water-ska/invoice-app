@@ -622,16 +622,31 @@ in-app Browser pane; Query Insights shows nothing — it doesn't attribute
   until the daily reset).
 - The v1.0.183 trust window eliminated the dominant cost (the 4 master-data
   listeners re-reading whole collections on every navigation, ~300 reads/page).
-- **Open item:** a clean post-fix navigation test still showed ~3K reads for an
-  8-page cycle — most plausibly the **invoices/payments listener in sync.js**,
-  which also re-attaches per navigation (stable-cutoff query since v1.0.178, but
-  whether Firestore's resume-token cache makes the re-attach free was never
-  verified; a diagnostic probe added to the snapshot callback never fired in a
-  worn-out test tab, so evidence is inconclusive). Investigate in a FRESH browser
-  session: baseline the Usage-tab read count, navigate 10×, re-check, and log
-  `snap.size`/`fromCache`/`docChanges` from the invoices listener callback.
+- **✅ RESOLVED (v1.0.186 investigation):** the suspected invoices/payments
+  listener re-attach cost was measured in a fresh browser session with a
+  temporary `snap.size`/`fromCache`/`docChanges` probe in the listener callback
+  (gated on `localStorage.__syncDebug`, removed after the test). Result: 1 login
+  (full session pull: ~4,600 docs — invoices+payments+customers+products+
+  pricing+users) + 9 page navigations cost a total of only **~5K reads**, almost
+  entirely from the one-time login pull (~40 reads/page for the 9 navigations
+  combined). The master-data listeners logged `"within trust window — skip
+  re-attach"` on every subsequent nav as expected. The invoices/payments
+  listener never delivered an observable snapshot at all across 65+ seconds of
+  navigation — consistent with Firestore's resume-token cache recognizing no
+  changes and not re-delivering, so its re-attach is NOT a meaningful cost.
+  The dominant, largely irreducible cost is the once-per-session full login
+  pull at this data volume (~1,050 invoices + ~1,175 payments, etc.) — reducing
+  it further would need server-side paginated queries, a much bigger change.
+  **Note:** client-side UI pagination (e.g. `invoices.html`'s `INV_PAGE_SIZE`
+  slicing an already-fully-loaded local array) does NOT reduce Firestore reads
+  — the read cost is paid once when the listener pulls the collection, entirely
+  independent of how many rows are sliced out for display afterward. Don't
+  reach for "show fewer rows per page" as a read-quota fix — it only affects
+  DOM rendering cost, not network cost.
 - Standing recommendation to the user: upgrade to **Blaze** (~$0.036/100K reads
-  beyond free tier — cents/day at this volume) to remove the outage risk.
+  beyond free tier — cents/day at this volume) to remove the outage risk. Still
+  the right call even after the above finding — the once-per-session full pull
+  alone is enough to exhaust the 50K/day free cap with a handful of logins.
 - Dashboard caveat: the Usage counter lags several minutes and keeps climbing
   after activity stops — never judge a before/after by a single reading; prefer
   code-level evidence (console logs / sessionStorage probes).
