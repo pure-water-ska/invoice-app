@@ -443,6 +443,31 @@
   </div>
 </div>
 
+<!-- Clear Cheque Modal -->
+<div class="modal fade" id="clearChequeModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog">
+    <div class="modal-content border-success">
+      <div class="modal-header bg-success text-white py-2">
+        <h6 class="modal-title fw-bold"><i class="bi bi-check-circle me-1"></i>ทำเครื่องหมายเช็คขึ้นเงินแล้ว</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="clearChequeSummary" class="alert alert-light border py-2 mb-3"></div>
+        <label class="form-label fw-semibold">วันที่ขึ้นเงิน <span class="text-danger">*</span></label>
+        <input type="text" id="clearChequeDate" class="form-control" placeholder="DD/MM/YYYY">
+        <input type="hidden" id="clearChequePayId">
+        <input type="hidden" id="clearChequeInvNum">
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">ปิด</button>
+        <button class="btn btn-success" onclick="confirmClearCheque()">
+          <i class="bi bi-check-circle me-1"></i>ยืนยัน
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Overpay modal -->
 <div class="modal fade" id="overpayModal" tabindex="-1" data-bs-backdrop="static">
   <div class="modal-dialog">
@@ -665,7 +690,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.189"></script><script src="db.js?v=1.0.189"></script><script src="auth.js?v=1.0.189"></script><script src="nav.js?v=1.0.189"></script><script src="idb.js?v=1.0.189"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.190"></script><script src="db.js?v=1.0.190"></script><script src="auth.js?v=1.0.190"></script><script src="nav.js?v=1.0.190"></script><script src="idb.js?v=1.0.190"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -677,7 +702,7 @@ function _needPerm(perm) {
   return false;
 }
 
-let payModal, overpayModal, transferAccountModal, cancelPayModal, dateConfirmModal, imgUpdateModal;
+let payModal, overpayModal, transferAccountModal, cancelPayModal, dateConfirmModal, imgUpdateModal, clearChequeModal;
 let _sortCol = 'date', _sortDir = -1;
 
 function clearFilters() {
@@ -849,11 +874,13 @@ window.addEventListener('DOMContentLoaded', () => {
   dateConfirmModal      = new bootstrap.Modal(document.getElementById('dateConfirmModal'));
   imgUpdateModal        = new bootstrap.Modal(document.getElementById('imgUpdateModal'));
   multiPayModal         = new bootstrap.Modal(document.getElementById('multiPayModal'));
+  clearChequeModal      = new bootstrap.Modal(document.getElementById('clearChequeModal'));
   _fpMultiTransfer      = BEDate.byId('multiTransferDate');
   _fpMultiCheque        = BEDate.byId('multiChequeDate');
   _fpPayDate      = BEDate.byId('payDate',          { onChange: checkPayDate });
   _fpCheqDate     = BEDate.byId('payChequeDate');
   _fpTransferDate = BEDate.byId('payTransferDateBE', { onChange: checkPayDate });
+  _fpClearChequeDate = BEDate.byId('clearChequeDate');
 
   // Wait for IDB-overflow data before rendering data-dependent UI
   DB.ready.then(() => {
@@ -884,7 +911,7 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-let _fpPayDate, _fpCheqDate, _fpTransferDate;
+let _fpPayDate, _fpCheqDate, _fpTransferDate, _fpClearChequeDate;
 
 // ── Customer-name filter searchable dropdown (custom, styled like invoice-create) ──
 // Selecting a suggestion filters the list by the exact customer id — not by
@@ -1085,7 +1112,9 @@ function render() {
   const paysByInv = {};
   for (const p of allPayments) {
     if (!p.cancelled) {
-      paidMap[p.invoiceNumber] = (paidMap[p.invoiceNumber] || 0) + (parseFloat(p.amount) || 0);
+      if (!DB.isChequePending(p)) {
+        paidMap[p.invoiceNumber] = (paidMap[p.invoiceNumber] || 0) + (parseFloat(p.amount) || 0);
+      }
       if (!paysByInv[p.invoiceNumber]) paysByInv[p.invoiceNumber] = [];
       paysByInv[p.invoiceNumber].push(p);
     }
@@ -1599,6 +1628,10 @@ function renderExistingPayments(invNum) {
       const isTransfer = !!p.sourceBank;
       const isCheque   = !!p.chequeNo;
       const isCashPay  = !isTransfer && !isCheque;
+      const chequePending = isCheque && DB.isChequePending(p);
+      const chequeStatusBadge = !isCheque ? '' : chequePending
+        ? `<span class="badge bg-warning text-dark me-1"><i class="bi bi-hourglass-split me-1"></i>รอขึ้นเงิน</span>`
+        : `<span class="badge bg-success me-1"><i class="bi bi-check-circle me-1"></i>ขึ้นเงินแล้ว${p.clearedDate ? ' ' + Utils.formatDateTH(p.clearedDate) : ''}</span>`;
 
       let payTimeHtml = '';
       if (isCashPay) {
@@ -1625,6 +1658,7 @@ function renderExistingPayments(invNum) {
           <div>
             ${isCancelled ? `<span class="badge bg-danger me-1"><i class="bi bi-x-circle me-1"></i>ยกเลิกแล้ว</span>` : ''}
             <span class="badge bg-primary me-1">${p.method}</span>
+            ${!isCancelled ? chequeStatusBadge : ''}
             ${p.batchId ? `<span class="badge bg-info text-dark me-1" title="ชำระพร้อมกัน ${p.batchCount || (p.batchInvoices||[]).length} บิล"><i class="bi bi-collection me-1"></i>กลุ่ม ${p.batchCount || (p.batchInvoices||[]).length} บิล</span>` : ''}
             <strong class="${isCancelled ? 'text-decoration-line-through text-muted' : ''}">
               ฿${Utils.formatNumber(p.amount)}
@@ -1632,6 +1666,7 @@ function renderExistingPayments(invNum) {
             ${p.cashCollector ? `<span class="text-muted small ms-1">(${p.cashCollector})</span>` : ''}
             ${payTimeHtml}
             ${bankAccountLine ? `<div class="text-muted small mt-1">${bankAccountLine}</div>` : ''}
+            ${chequePending && !isCancelled ? `<div class="text-warning small mt-1"><i class="bi bi-info-circle me-1"></i>ยังไม่นับเป็นยอดชำระจนกว่าจะขึ้นเงิน</div>` : ''}
             ${p.notes ? `<div class="text-muted small mt-1">${p.notes}</div>` : ''}
             ${isCancelled && p.cancelNote
               ? `<div class="text-danger small mt-1"><i class="bi bi-chat-left-text me-1"></i>เหตุผลยกเลิก: ${p.cancelNote}</div>` : ''}
@@ -1647,6 +1682,11 @@ function renderExistingPayments(invNum) {
               <button class="btn btn-sm btn-outline-primary"
                       onclick="openImageUpdateModal('${p.id}','${invNum}')" title="เพิ่ม/เปลี่ยนรูป">
                 <i class="bi bi-image me-1"></i>เพิ่มรูป
+              </button>` : ''}
+            ${chequePending && !isCancelled ? `
+              <button class="btn btn-sm btn-success"
+                      onclick="openClearChequeModal('${p.id}','${invNum}')" title="ทำเครื่องหมายขึ้นเงินแล้ว">
+                <i class="bi bi-check-circle me-1"></i>ขึ้นเงินแล้ว
               </button>` : ''}
             ${isAdmin && history.length ? `
               <button class="btn btn-sm btn-outline-info" data-bs-toggle="collapse"
@@ -1824,6 +1864,40 @@ function confirmCancelPayment() {
   _commitNow();
 }
 
+function openClearChequeModal(payId, invNum) {
+  if (!_needPerm('payment_edit')) return;
+  const p = DB.getPayments().find(x => x.id === payId);
+  if (!p) return;
+  document.getElementById('clearChequePayId').value  = payId;
+  document.getElementById('clearChequeInvNum').value = invNum;
+  if (_fpClearChequeDate) _fpClearChequeDate.setDate(new Date());
+  else document.getElementById('clearChequeDate').value = Utils.todayBE();
+  document.getElementById('clearChequeSummary').innerHTML =
+    `<strong>ใบกำกับ:</strong> ${invNum}<br>
+     <strong>เช็ค:</strong> #${p.chequeNo || '-'} ${p.chequeBank ? Utils.getBankName(p.chequeBank) : ''}<br>
+     <strong>จำนวน:</strong> ฿${Utils.formatNumber(p.amount)}`;
+  clearChequeModal.show();
+}
+
+function confirmClearCheque() {
+  if (!_needPerm('payment_edit')) return;
+  const payId  = document.getElementById('clearChequePayId').value;
+  const invNum = document.getElementById('clearChequeInvNum').value;
+  const iso = Utils.parseBEToISO(document.getElementById('clearChequeDate').value);
+  if (!iso) {
+    document.getElementById('clearChequeDate').classList.add('is-invalid');
+    Utils.showAlert('กรุณาเลือกวันที่ขึ้นเงินให้ถูกต้อง', 'warning');
+    return;
+  }
+  document.getElementById('clearChequeDate').classList.remove('is-invalid');
+  DB.markChequeCleared(payId, iso);
+  DB.logActivity(session.userId, session.username, 'ทำเครื่องหมายเช็คขึ้นเงินแล้ว', { invoiceNumber: invNum, payId, clearedDate: iso });
+  clearChequeModal.hide();
+  refreshSummary(invNum);
+  render();
+  _commitNow();
+}
+
 async function deletePayment(payId, invNum) {
   if (!_needPerm('payment_delete')) return;
   if (!await Utils.confirm('ลบรายการชำระนี้ใช่หรือไม่? (รูปภาพที่แนบเฉพาะรายการนี้จะถูกลบด้วย)')) return;
@@ -1891,6 +1965,10 @@ function collectPaymentData() {
     chequeNo:       document.getElementById('payChequeNo').value      || '',
     chequeBank:     document.getElementById('payChequeBank').value    || '',
     chequeDate:     Utils.parseBEToISO(document.getElementById('payChequeDate').value) || '',
+    // A cheque doesn't count toward the invoice's paid amount until it's
+    // marked cleared (DB.markChequeCleared) — see DB.isChequePending().
+    chequeCleared:  method === 'เช็ค' ? false : true,
+    clearedDate:    '',
     transferImage:  payImages.transfer,
     chequeImage:    payImages.cheque,
     // signedImage intentionally omitted — stored once on the invoice record
@@ -2393,7 +2471,7 @@ function printPaymentSummary(invNum) {
   const cust      = DB.getCustomerById(inv.customerId);
   const payments  = DB.getPaymentsByInvoice(invNum).filter(p => !p.cancelled);
   const total     = parseFloat(inv.totalAmount) || 0;
-  const paid      = payments.reduce((s, p) => s + p.amount, 0);
+  const paid      = DB.getInvoicePaidAmount(invNum);
   const remaining = total - paid;
   const printedBy = session ? session.name : '';
 
@@ -2406,7 +2484,8 @@ function printPaymentSummary(invNum) {
     if (p.method === 'เช็ค') {
       const bank = _bankCode(p.chequeBank);
       const num  = p.chequeNo ? '#' + p.chequeNo : '';
-      return [bank, num].filter(Boolean).join(' · ');
+      const pending = DB.isChequePending(p) ? '(รอขึ้นเงิน)' : '';
+      return [bank, num, pending].filter(Boolean).join(' · ');
     }
     if (p.method === 'เงินสด') return p.cashCollector || '';
     return p.notes || '';
@@ -2872,6 +2951,8 @@ async function saveMultiPay() {
       chequeNo:      document.getElementById('multiChequeNo').value   || '',
       chequeBank:    document.getElementById('multiChequeBank').value  || '',
       chequeDate:    Utils.parseBEToISO(document.getElementById('multiChequeDate').value) || '',
+      chequeCleared: method === 'เช็ค' ? false : true,
+      clearedDate:   '',
       transferImage: sharedTransferImg,
       chequeImage:   sharedChequeImg,
       imageHistory,

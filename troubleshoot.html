@@ -40,7 +40,7 @@
 </div>
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
-<script src="utils.js?v=1.0.189"></script><script src="db.js?v=1.0.189"></script><script src="auth.js?v=1.0.189"></script><script src="nav.js?v=1.0.189"></script><script src="idb.js?v=1.0.189"></script><script src="image-store.js?v=1.0.162"></script>
+<script src="utils.js?v=1.0.190"></script><script src="db.js?v=1.0.190"></script><script src="auth.js?v=1.0.190"></script><script src="nav.js?v=1.0.190"></script><script src="idb.js?v=1.0.190"></script><script src="image-store.js?v=1.0.162"></script>
 <script>
 const session = Auth.require();
 if (!Auth.isAdmin()) { location.href = 'dashboard.html'; }
@@ -83,14 +83,14 @@ function runDiagnostics() {
   document.getElementById('runBtn').innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลังตรวจสอบ...';
 
   // Defer to let UI update first
-  setTimeout(() => {
-    try { _doRun(); } catch(e) { Utils.showAlert('เกิดข้อผิดพลาดขณะวินิจฉัย: ' + e.message, 'danger'); }
+  setTimeout(async () => {
+    try { await _doRun(); } catch(e) { Utils.showAlert('เกิดข้อผิดพลาดขณะวินิจฉัย: ' + e.message, 'danger'); }
     document.getElementById('runBtn').disabled = false;
     document.getElementById('runBtn').innerHTML = '<i class="bi bi-play-circle me-1"></i>ตรวจสอบระบบ';
   }, 50);
 }
 
-function _doRun() {
+async function _doRun() {
   const sections = [];
 
   // ══════════════════════════════════════════════════════════════
@@ -181,8 +181,20 @@ function _doRun() {
     `สรุปข้อมูล: ลูกค้า <strong>${customers.length}</strong> | สินค้า <strong>${products.length}</strong> | ใบกำกับ <strong>${uniqInvs}</strong> | ชำระ <strong>${payments.length}</strong> | คืนสินค้า <strong>${returns.length}</strong> | ผู้ใช้ <strong>${users.length}</strong>`
   ));
 
-  // Payments without invoices
-  const orphanPay = payments.filter(p => !invNums.has(p.invoiceNumber));
+  // Payments without invoices — a payment whose invoiceNumber isn't in
+  // DB.getInvoices() (the LOCAL, ARCHIVE_MONTHS-windowed cache) is not
+  // necessarily orphaned: its invoice may simply be older than the local
+  // window and never pulled in. Verify candidates directly against Firestore
+  // (unfiltered) before reporting/offering to delete them — confirmed live
+  // that 175 payments (~฿1.8M) referencing perfectly intact January invoices
+  // were about to be bulk-deleted by this exact check before the fix.
+  const orphanCandidates = payments.filter(p => !invNums.has(p.invoiceNumber));
+  const orphanCandidateNums = [...new Set(orphanCandidates.map(p => p.invoiceNumber))];
+  const confirmedExisting = (window.Sync && typeof Sync.verifyInvoiceNumbersExist === 'function')
+    ? await Sync.verifyInvoiceNumbersExist(orphanCandidateNums)
+    : null;
+  const verifyFailed = confirmedExisting === null && orphanCandidates.length > 0;
+  const orphanPay = verifyFailed ? [] : orphanCandidates.filter(p => !confirmedExisting.has(p.invoiceNumber));
   window._fixOrphanPayments = async function() {
     if (!await Utils.confirm(`ลบรายการชำระ ${orphanPay.length} รายการที่ไม่มีใบกำกับ (รวมรูปภาพที่แนบ)?`)) return;
     const candidateRefs = [];
@@ -192,18 +204,26 @@ function _doRun() {
       if (p.signedImage)   candidateRefs.push(p.signedImage);
       (p.imageHistory || []).forEach(h => { if (h.image) candidateRefs.push(h.image); });
     });
-    DB.savePayments(DB.getPayments().filter(p => invNums.has(p.invoiceNumber)));
+    const orphanIds = new Set(orphanPay.map(p => p.id));
+    DB.savePayments(DB.getPayments().filter(p => !orphanIds.has(p.id)));
     const imgCount = await DB.deleteOrphanedImages(candidateRefs);
     DB.logActivity(session.userId, session.username, 'ลบ orphan payments', { count: orphanPay.length, imagesDeleted: imgCount });
     Utils.showAlert(`ลบแล้ว ${orphanPay.length} รายการ`, 'success');
     runDiagnostics();
   };
-  intChecks.push(_checkItem(
-    orphanPay.length ? 'warning' : 'ok',
-    `รายการชำระเงินที่ไม่มีใบกำกับ: <strong>${orphanPay.length}</strong> รายการ`,
-    orphanPay.length ? `<div class="small text-muted">เลขที่: ${orphanPay.slice(0,5).map(p=>p.invoiceNumber).join(', ')}${orphanPay.length>5?'...':''}</div>` : '',
-    orphanPay.length ? { label: `ลบ ${orphanPay.length} รายการ`, action: '_fixOrphanPayments()' } : null
-  ));
+  if (verifyFailed) {
+    intChecks.push(_checkItem('warning',
+      `รายการชำระเงินที่อาจไม่มีใบกำกับ: <strong>${orphanCandidates.length}</strong> รายการ (ตรวจกับ Firestore ไม่ได้ — ออฟไลน์)`,
+      `<div class="small text-muted">ยังไม่ยืนยัน — อาจเป็นใบกำกับเก่าที่ยังไม่โหลดในเครื่องนี้ ไม่ควรลบจนกว่าจะเชื่อมต่อและตรวจสอบใหม่</div>`
+    ));
+  } else {
+    intChecks.push(_checkItem(
+      orphanPay.length ? 'warning' : 'ok',
+      `รายการชำระเงินที่ไม่มีใบกำกับ: <strong>${orphanPay.length}</strong> รายการ`,
+      orphanPay.length ? `<div class="small text-muted">เลขที่: ${orphanPay.slice(0,5).map(p=>p.invoiceNumber).join(', ')}${orphanPay.length>5?'...':''}</div>` : '',
+      orphanPay.length ? { label: `ลบ ${orphanPay.length} รายการ`, action: '_fixOrphanPayments()' } : null
+    ));
+  }
 
   // Invoices without customer
   const invNoCust = [...new Set(invoices.filter(i => !custIds.has(i.customerId)).map(i => i.invoiceNumber))];

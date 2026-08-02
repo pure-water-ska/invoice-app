@@ -2328,6 +2328,36 @@ var Sync = {
     return d.toISOString();
   },
 
+  // Check which of the given invoice numbers genuinely exist in Firestore —
+  // an UNFILTERED query, so it also finds invoices outside the local
+  // ARCHIVE_MONTHS window. Local-only "orphan payment" checks (payments
+  // whose invoiceNumber isn't in DB.getInvoices()) produce false positives
+  // for any payment referencing an invoice older than ARCHIVE_MONTHS, since
+  // that invoice was simply never pulled into the local cache — not deleted.
+  // Confirmed live: 175 payments (~฿1.8M) were about to be bulk-deleted by
+  // Settings/Troubleshoot's orphan-payment cleanup before this check caught
+  // that all 162 referenced invoice numbers still existed server-side, just
+  // past the 6-month window (January invoices, checked in August).
+  // Returns a Set of the numbers confirmed to exist, or null if it couldn't
+  // verify (offline/not ready) — callers must treat null as "unknown", never
+  // as "confirmed deleted".
+  async verifyInvoiceNumbersExist(nums) {
+    if (!nums || !nums.length) return new Set();
+    if (!this.ready || !this._db) return null;
+    const found = new Set();
+    const col = this._orgRef().collection('invoices');
+    for (let i = 0; i < nums.length; i += 10) {
+      const chunk = nums.slice(i, i + 10);
+      try {
+        const snap = await col.where('invoiceNumber', 'in', chunk).get();
+        snap.docs.forEach(d => { const n = d.data().invoiceNumber; if (n) found.add(n); });
+      } catch (e) {
+        console.warn('[Sync] verifyInvoiceNumbersExist chunk failed:', e.message);
+      }
+    }
+    return found;
+  },
+
   _badge(status) {
     const el = document.getElementById('syncStatusBadge');
     if (!el) return;

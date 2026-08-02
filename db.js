@@ -839,10 +839,26 @@ const DB = {
     return toDelete.length;
   },
 
+  // A cheque payment only counts toward "paid" once it's cleared — chequeCleared
+  // is explicitly set to false when a cheque payment is recorded (see
+  // payments.html collectPaymentData/multiPaySave) and flipped to true (with
+  // clearedDate) via markChequeCleared(). Legacy payments predating this
+  // feature never had the field at all, so chequeCleared === false (strict)
+  // is required here, NOT !== true — that would also exclude every legacy
+  // cheque payment and every non-cheque payment, silently breaking every
+  // paid-amount total across the app.
+  isChequePending(p) {
+    return p.method === 'เช็ค' && p.chequeCleared === false;
+  },
+
   getInvoicePaidAmount(invoiceNumber) {
     return this.getPaymentsByInvoice(invoiceNumber)
-      .filter(p => !p.cancelled)
+      .filter(p => !p.cancelled && !this.isChequePending(p))
       .reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+  },
+
+  markChequeCleared(payId, clearedDate) {
+    return this.updatePayment(payId, { chequeCleared: true, clearedDate });
   },
 
   // Net over/under-paid balance for a customer — the SAME calculation the

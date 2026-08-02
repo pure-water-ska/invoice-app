@@ -2236,7 +2236,7 @@ async function migrateImagesToStore() {
 }
 
 /* ─── Health Check ──────────────────────────────────────────────────────── */
-function runHealthCheck() {
+async function runHealthCheck() {
   const checks = [];
 
   const customers = DB.getCustomers();
@@ -2289,12 +2289,31 @@ function runHealthCheck() {
   });
 
   // ── Payments with missing invoice ──
-  const orphanPay = payments.filter(p => !invNums.has(p.invoiceNumber));
-  checks.push({
-    label: 'การชำระเงินไม่มีใบกำกับอ้างอิง',
-    status: orphanPay.length ? 'warn' : 'ok',
-    detail: orphanPay.length ? `${orphanPay.length} รายการ` : `ไม่พบ`
-  });
+  // A payment whose invoiceNumber isn't in DB.getInvoices() (the LOCAL,
+  // ARCHIVE_MONTHS-windowed cache) is not necessarily orphaned — its invoice
+  // may simply be older than the local window. Verify candidates directly
+  // against Firestore (unfiltered) before reporting them as a real problem.
+  const orphanCandidates = payments.filter(p => !invNums.has(p.invoiceNumber));
+  const orphanCandidateNums = [...new Set(orphanCandidates.map(p => p.invoiceNumber))];
+  const confirmedExisting = (window.Sync && typeof Sync.verifyInvoiceNumbersExist === 'function')
+    ? await Sync.verifyInvoiceNumbersExist(orphanCandidateNums)
+    : null;
+  if (confirmedExisting === null) {
+    checks.push({
+      label: 'การชำระเงินไม่มีใบกำกับอ้างอิง',
+      status: orphanCandidates.length ? 'warn' : 'ok',
+      detail: orphanCandidates.length
+        ? `${orphanCandidates.length} รายการ (ยังไม่ยืนยันกับ Firestore — ออฟไลน์ อาจรวมใบกำกับเก่าที่ยังไม่โหลด)`
+        : `ไม่พบ`
+    });
+  } else {
+    const orphanPay = orphanCandidates.filter(p => !confirmedExisting.has(p.invoiceNumber));
+    checks.push({
+      label: 'การชำระเงินไม่มีใบกำกับอ้างอิง',
+      status: orphanPay.length ? 'warn' : 'ok',
+      detail: orphanPay.length ? `${orphanPay.length} รายการ` : `ไม่พบ`
+    });
+  }
 
   // ── Invoices missing required fields ──
   const badInv = invoices.filter(i => !i.invoiceNumber || !i.createdAt || !i.totalAmount);
