@@ -851,10 +851,40 @@ const DB = {
     return p.method === 'เช็ค' && p.chequeCleared === false;
   },
 
+  // A payment's amount minus whatever's been cut away to OTHER invoices via
+  // the overpay-allocation flow (payments.html applyOverpayToOutstanding /
+  // autoApplyOverpay). The original amount is never rewritten — it stays the
+  // true record of what the customer actually transferred that day, for
+  // print/audit — but only the un-allocated remainder counts toward THIS
+  // invoice's paid total. Without this, cutting an overpayment to another
+  // invoice created a new payment record there WITHOUT reducing the source,
+  // so the same excess was counted twice system-wide (source stayed
+  // "overpaid" forever while target correctly reduced) — inflating every
+  // paid-amount total that touches either invoice: dashboard, reports,
+  // customers.html balance cards, invoice-create's balance table, and every
+  // invoice's paid/unpaid status.
+  effectivePaymentAmount(p) {
+    return Math.max(0, (parseFloat(p.amount) || 0) - (parseFloat(p.allocatedOut) || 0));
+  },
+
   getInvoicePaidAmount(invoiceNumber) {
     return this.getPaymentsByInvoice(invoiceNumber)
       .filter(p => !p.cancelled && !this.isChequePending(p))
-      .reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+      .reduce((s, p) => s + this.effectivePaymentAmount(p), 0);
+  },
+
+  // Record that `amount` of `paymentId`'s excess was cut to `targetInvNum`.
+  // Appends to the audit trail (allocations[]) rather than mutating amount —
+  // recomputes allocatedOut from the full list so repeated cuts accumulate
+  // correctly regardless of call order.
+  recordOverpayAllocation(paymentId, targetInvNum, amount) {
+    const p = this.getPayments().find(x => x.id === paymentId);
+    if (!p) return null;
+    const allocations = [...(p.allocations || []), {
+      invoiceNumber: targetInvNum, amount, at: new Date().toISOString()
+    }];
+    const allocatedOut = allocations.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    return this.updatePayment(paymentId, { allocations, allocatedOut });
   },
 
   markChequeCleared(payId, clearedDate) {

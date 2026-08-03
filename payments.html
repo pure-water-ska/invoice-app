@@ -690,7 +690,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.190"></script><script src="db.js?v=1.0.190"></script><script src="auth.js?v=1.0.190"></script><script src="nav.js?v=1.0.190"></script><script src="idb.js?v=1.0.190"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.191"></script><script src="db.js?v=1.0.191"></script><script src="auth.js?v=1.0.191"></script><script src="nav.js?v=1.0.191"></script><script src="idb.js?v=1.0.191"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -1668,6 +1668,7 @@ function renderExistingPayments(invNum) {
             ${bankAccountLine ? `<div class="text-muted small mt-1">${bankAccountLine}</div>` : ''}
             ${chequePending && !isCancelled ? `<div class="text-warning small mt-1"><i class="bi bi-info-circle me-1"></i>ยังไม่นับเป็นยอดชำระจนกว่าจะขึ้นเงิน</div>` : ''}
             ${p.notes ? `<div class="text-muted small mt-1">${p.notes}</div>` : ''}
+            ${(p.allocatedOut || 0) > 0.005 ? `<div class="text-info small mt-1"><i class="bi bi-arrow-right-circle me-1"></i>หักตัดไปใบอื่นแล้ว ฿${Utils.formatNumber(p.allocatedOut)} — นับเป็นยอดชำระใบนี้ ฿${Utils.formatNumber(DB.effectivePaymentAmount(p))}</div>` : ''}
             ${isCancelled && p.cancelNote
               ? `<div class="text-danger small mt-1"><i class="bi bi-chat-left-text me-1"></i>เหตุผลยกเลิก: ${p.cancelNote}</div>` : ''}
             ${isCancelled
@@ -2231,15 +2232,20 @@ function _renderOverpayBody() {
 // excess was cut to — mirrors the "ตัดยอดเกินจากใบ X" note already written on the
 // destination side, so the source invoice's payment list also shows where the
 // money went. Appended (not overwritten) so repeated cuts each get their own tag,
-// and any note the user typed on the original payment is preserved.
-function _appendSourceOverpayNote(targetInvNum) {
+// and any note the user typed on the original payment is preserved. Also records
+// the structured allocation (DB.recordOverpayAllocation) so the cut amount stops
+// being double-counted in DB.getInvoicePaidAmount() for the source invoice —
+// see the comment there for why this matters.
+function _appendSourceOverpayNote(targetInvNum, amount) {
   if (!pendingOverpayData || !pendingOverpayData.sourcePaymentId) return;
   const p = DB.getPayments().find(x => x.id === pendingOverpayData.sourcePaymentId);
   if (!p) return;
   const tag = `ตัดยอดเกินไปใบ ${targetInvNum}`;
-  if (p.notes && p.notes.includes(tag)) return;
-  const notes = p.notes ? `${p.notes} | ${tag}` : tag;
-  DB.updatePayment(p.id, { notes });
+  if (!p.notes || !p.notes.includes(tag)) {
+    const notes = p.notes ? `${p.notes} | ${tag}` : tag;
+    DB.updatePayment(p.id, { notes });
+  }
+  DB.recordOverpayAllocation(p.id, targetInvNum, amount);
 }
 
 // Cut the overpaid excess into ONE old invoice (manual, repeatable). Modal stays open;
@@ -2257,7 +2263,7 @@ function applyOverpayToOutstanding(targetInvNum, targetRem) {
     imageHistory: [],
   });
   DB.logActivity(session.userId, session.username, 'ตัดยอดเกินชำระ', { sourceInvNum, targetInvNum, amount: applyAmount });
-  _appendSourceOverpayNote(targetInvNum);
+  _appendSourceOverpayNote(targetInvNum, applyAmount);
   pendingOverpayData.diff = diff - applyAmount;   // shrink remaining excess
   Utils.showAlert(`<i class="bi bi-check-circle me-1 text-success"></i>นำยอดเกิน ฿${Utils.formatNumber(applyAmount)} ตัดใบ ${targetInvNum} สำเร็จ`, 'success');
   _commitNow();
@@ -2281,7 +2287,7 @@ function autoApplyOverpay() {
       createdAt: new Date().toISOString(), createdBy: session.name, createdByUser: session.username,
       imageHistory: [],
     });
-    _appendSourceOverpayNote(o.num);
+    _appendSourceOverpayNote(o.num, amt);
     remain -= amt; applied += amt; cuts++;
   }
   if (!cuts) return;

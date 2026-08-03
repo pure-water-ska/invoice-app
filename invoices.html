@@ -169,7 +169,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.190"></script><script src="db.js?v=1.0.190"></script><script src="auth.js?v=1.0.190"></script><script src="nav.js?v=1.0.190"></script><script src="idb.js?v=1.0.190"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.191"></script><script src="db.js?v=1.0.191"></script><script src="auth.js?v=1.0.191"></script><script src="nav.js?v=1.0.191"></script><script src="idb.js?v=1.0.191"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -460,10 +460,14 @@ function render() {
   // ── Build lookup maps once (O(n)) instead of per-row (O(n²)) ───────────────
   // customer map: id → customer object
   const custMap = Object.fromEntries(customers.map(c => [c.id, c]));
-  // paid amount map: invoiceNumber → total paid (non-cancelled)
+  // paid amount map: invoiceNumber → total paid (non-cancelled, excludes
+  // pending cheques and overpay-allocated-away amounts — see
+  // DB.getInvoicePaidAmount()/DB.effectivePaymentAmount() for why)
   const paidMap = {};
   for (const p of DB.getPayments()) {
-    if (!p.cancelled) paidMap[p.invoiceNumber] = (paidMap[p.invoiceNumber] || 0) + (parseFloat(p.amount) || 0);
+    if (!p.cancelled && !DB.isChequePending(p)) {
+      paidMap[p.invoiceNumber] = (paidMap[p.invoiceNumber] || 0) + DB.effectivePaymentAmount(p);
+    }
   }
   // page count map: invoiceNumber → number of pages
   const pageCountMap = {};

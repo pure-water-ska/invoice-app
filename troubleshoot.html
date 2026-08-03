@@ -40,7 +40,7 @@
 </div>
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
-<script src="utils.js?v=1.0.190"></script><script src="db.js?v=1.0.190"></script><script src="auth.js?v=1.0.190"></script><script src="nav.js?v=1.0.190"></script><script src="idb.js?v=1.0.190"></script><script src="image-store.js?v=1.0.162"></script>
+<script src="utils.js?v=1.0.191"></script><script src="db.js?v=1.0.191"></script><script src="auth.js?v=1.0.191"></script><script src="nav.js?v=1.0.191"></script><script src="idb.js?v=1.0.191"></script><script src="image-store.js?v=1.0.162"></script>
 <script>
 const session = Auth.require();
 if (!Auth.isAdmin()) { location.href = 'dashboard.html'; }
@@ -50,6 +50,29 @@ Nav.render('troubleshoot');
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function _checkItem(level, text, extra, fix) {
   return { level, text, extra: extra || '', fix: fix || null };
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Client-side filter over the already-rendered error rows (no re-run needed) —
+// type dropdown + free-text search, combined with AND.
+function filterErrorRows() {
+  const type = (document.getElementById('errTypeFilter')?.value || '');
+  const text = (document.getElementById('errSearchInput')?.value || '').toLowerCase().trim();
+  const rows = document.querySelectorAll('#errTableBody tr');
+  let shown = 0;
+  rows.forEach(row => {
+    const matchesType = !type || row.dataset.errType === type;
+    const matchesText  = !text || row.dataset.errText.includes(text);
+    const visible = matchesType && matchesText;
+    row.style.display = visible ? '' : 'none';
+    if (visible) shown++;
+  });
+  const countEl = document.getElementById('errFilterCount');
+  if (countEl) countEl.textContent = (type || text) ? `แสดง ${shown} จาก ${rows.length} รายการ` : '';
 }
 
 function _renderSection(title, icon, checks) {
@@ -133,7 +156,7 @@ async function _doRun() {
   const PLAIN_STR_KEYS = new Set([
     'wt_last_user', 'wt_lz_migrated', 'wt_customers_seeded',
     'wt_sync_device_id', 'wt_sync_lastAt', 'wt_sync_lastPulledAt',
-    'wt_overdue_check_date', 'wt_restore_pending',
+    'wt_overdue_check_date', 'wt_restore_pending', 'wt_device_label',
   ]);
   let parseErrors = 0;
   for (const k in localStorage) {
@@ -314,18 +337,36 @@ async function _doRun() {
       '',
       { label: 'ล้าง Error Log', action: "Utils.confirm('ล้าง Error Log ทั้งหมด?').then(function(ok){if(ok){DB.clearErrors();Utils.showAlert('ล้าง Error Log แล้ว','success');runDiagnostics();}})" }
     ));
-    const errRows = errors.slice(0, 25).map(e => `
-      <tr>
+    // Render ALL stored errors (up to the 200-entry cap), not just the most
+    // recent 25 — a noisy but intentionally-kept log source (e.g. INV-TRACE,
+    // logged on nearly every page load) can push a rare-but-important error
+    // type (e.g. FIREBASE-SDK-LOAD-FAIL) out of a 25-row window even though
+    // it's still sitting in the stored 200. Type + text filters make it findable
+    // instead of adding a second cap that just moves the same problem.
+    const errTypes = [...new Set(errors.map(e => e.type || '(ไม่ระบุ)'))].sort();
+    const errRows = errors.map(e => `
+      <tr data-err-type="${esc(e.type || '')}" data-err-text="${esc((String(e.type||'') + ' ' + String(e.message||'') + ' ' + String(e.page||'') + ' ' + String(e.user||'')).toLowerCase())}">
         <td class="small text-nowrap text-muted">${Utils.formatDateTimeTH(e.timestamp)}</td>
         <td class="small">${e.page || '-'}</td>
         <td class="small text-danger">${e.type ? `<strong>${e.type}:</strong> ` : ''}${String(e.message || '').slice(0, 120)}</td>
         <td class="small text-muted">${e.user || '-'}</td>
       </tr>`).join('');
-    errChecks.push(_checkItem('info', `รายการล่าสุด ${Math.min(25, errors.length)} รายการ`,
-      `<div class="table-responsive"><table class="table table-sm table-bordered mb-0 mt-1">
-        <thead class="table-light"><tr><th>เวลา</th><th>หน้า</th><th>ข้อผิดพลาด</th><th>ผู้ใช้</th></tr></thead>
-        <tbody>${errRows}</tbody>
-      </table></div>`
+    errChecks.push(_checkItem('info', `ทั้งหมด ${errors.length} รายการ — กรองเพื่อค้นหา`,
+      `<div class="d-flex gap-2 flex-wrap mb-2">
+        <select id="errTypeFilter" class="form-select form-select-sm" style="width:auto" onchange="filterErrorRows()">
+          <option value="">— ทุกประเภท —</option>
+          ${errTypes.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('')}
+        </select>
+        <input type="text" id="errSearchInput" class="form-control form-control-sm" style="width:auto;min-width:200px"
+               placeholder="ค้นหาข้อความ/หน้า/ผู้ใช้..." oninput="filterErrorRows()">
+        <span id="errFilterCount" class="small text-muted align-self-center"></span>
+      </div>
+      <div class="table-responsive" style="max-height:400px;overflow-y:auto">
+        <table class="table table-sm table-bordered mb-0">
+          <thead class="table-light" style="position:sticky;top:0"><tr><th>เวลา</th><th>หน้า</th><th>ข้อผิดพลาด</th><th>ผู้ใช้</th></tr></thead>
+          <tbody id="errTableBody">${errRows}</tbody>
+        </table>
+      </div>`
     ));
   }
   sections.push({ title: 'ประวัติข้อผิดพลาด JavaScript', icon: 'bug', checks: errChecks });
