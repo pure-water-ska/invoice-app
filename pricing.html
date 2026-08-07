@@ -107,6 +107,7 @@
             <input type="hidden" id="priceCustomer">
             <div id="priceCustDropdown" class="cust-dd" style="display:none"></div>
           </div>
+          <div id="priceSuspendAlert" class="mt-2"></div>
         </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">วิธีจัดส่ง</label>
@@ -151,7 +152,7 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
-        <button class="btn btn-primary" onclick="savePrice()"><i class="bi bi-save me-1"></i>บันทึก</button>
+        <button class="btn btn-primary" id="pricingSaveBtn" onclick="savePrice()"><i class="bi bi-save me-1"></i>บันทึก</button>
       </div>
     </div>
   </div>
@@ -181,7 +182,7 @@
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.191"></script><script src="db.js?v=1.0.191"></script><script src="auth.js?v=1.0.191"></script><script src="nav.js?v=1.0.191"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.192"></script><script src="db.js?v=1.0.192"></script><script src="auth.js?v=1.0.192"></script><script src="nav.js?v=1.0.192"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -245,12 +246,32 @@ function _pcSelect(id, name){
   document.getElementById('priceCustomer').value       = id;
   document.getElementById('priceCustomerSearch').value = id ? name : '';
   _pcClose();
+  _pcUpdateSuspendBlock(id);
 }
 // Set both the hidden id and the visible text from a customer id ('' = ทุกลูกค้า)
 function _pcSetById(custId){
   const c = custId ? _pcList.find(x => x.id === custId) : null;
   document.getElementById('priceCustomer').value       = c ? c.id : '';
   document.getElementById('priceCustomerSearch').value = c ? c.name : '';
+  _pcUpdateSuspendBlock(custId);
+}
+// Blocks saving a customer-specific price rule for a suspended customer.
+// The customer-independent "ทุกลูกค้า" base price (custId='') is never blocked.
+function _pcUpdateSuspendBlock(custId){
+  const alertDiv = document.getElementById('priceSuspendAlert');
+  const saveBtn  = document.getElementById('pricingSaveBtn');
+  const c = custId ? DB.getCustomerById(custId) : null;
+  if (c && c.suspended) {
+    alertDiv.innerHTML = `
+      <div class="alert alert-danger d-flex align-items-start gap-2 py-2 mb-0">
+        <i class="bi bi-slash-circle-fill flex-shrink-0 mt-1"></i>
+        <div class="small fw-semibold">ลูกค้ารายนี้ถูกระงับการใช้งาน — ไม่สามารถบันทึกราคาสำหรับลูกค้ารายนี้ได้</div>
+      </div>`;
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.title = 'ลูกค้าถูกระงับการใช้งาน'; }
+  } else {
+    alertDiv.innerHTML = '';
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.title = ''; }
+  }
 }
 // Safety net at save time: if the user typed an exact customer name but didn't click
 // a result, resolve it to that id. Unmatched text falls back to ทุกลูกค้า (id='').
@@ -505,6 +526,10 @@ function savePrice() {
   const customerId = document.getElementById('priceCustomer').value;
   const shippingMethod = document.getElementById('priceShipping').value;
   const price = parseFloat(document.getElementById('priceValue').value);
+  if (customerId && DB.getCustomerById(customerId)?.suspended) {
+    Utils.showAlert('ลูกค้ารายนี้ถูกระงับการใช้งาน — ไม่สามารถบันทึกราคาได้', 'danger', 'modalAlert');
+    return;
+  }
   if (!productId) { Utils.showAlert('กรุณาเลือกสินค้า', 'warning', 'modalAlert'); return; }
   if (isNaN(price) || price < 0) { Utils.showAlert('กรุณากรอกราคา', 'warning', 'modalAlert'); return; }
 

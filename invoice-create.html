@@ -102,6 +102,7 @@
           </select>
         </div>
       </div>
+      <div id="suspendAlert" class="mt-2"></div>
       <div id="balanceAlert" class="mt-2"></div>
       <div id="returnsAlert" class="mt-2"></div>
     </div>
@@ -159,7 +160,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.191"></script><script src="db.js?v=1.0.191"></script><script src="auth.js?v=1.0.191"></script><script src="nav.js?v=1.0.191"></script><script src="idb.js?v=1.0.191"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.192"></script><script src="db.js?v=1.0.192"></script><script src="auth.js?v=1.0.192"></script><script src="nav.js?v=1.0.192"></script><script src="idb.js?v=1.0.192"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -457,7 +458,30 @@ window.addEventListener('DOMContentLoaded', () => {
     } else {
       noteBox.style.display = 'none';
     }
+    updateSuspendBlock(c);
     if (id) onCustomerChange();
+  };
+
+  // Blocks new-invoice creation for a suspended customer (editing an existing
+  // invoice for them is still allowed — only fresh debt is blocked).
+  window.updateSuspendBlock = function(cust) {
+    const alertDiv   = document.getElementById('suspendAlert');
+    const previewBtn = document.getElementById('previewBtn');
+    if (!editMode && cust && cust.suspended) {
+      const when = cust.suspendedAt ? Utils.formatDateTH(cust.suspendedAt.slice(0, 10)) : '';
+      alertDiv.innerHTML = `
+        <div class="alert alert-danger d-flex align-items-start gap-2 py-2 mb-0">
+          <i class="bi bi-slash-circle-fill flex-shrink-0 mt-1"></i>
+          <div class="small">
+            <div class="fw-semibold">ลูกค้ารายนี้ถูกระงับการใช้งาน — ไม่สามารถสร้างใบกำกับใหม่ได้</div>
+            <div>เหตุผล: <em>${(cust.suspendReason || '-').replace(/</g,'&lt;')}</em>${cust.suspendedBy ? ` · ระงับโดย ${cust.suspendedBy}` : ''}${when ? ` เมื่อ ${when}` : ''}</div>
+          </div>
+        </div>`;
+      if (previewBtn) { previewBtn.disabled = true; previewBtn.title = 'ลูกค้าถูกระงับการใช้งาน'; }
+    } else {
+      alertDiv.innerHTML = '';
+      if (previewBtn) { previewBtn.disabled = false; previewBtn.title = ''; }
+    }
   };
 
   window._custFilter  = _custFilter;
@@ -1264,6 +1288,10 @@ function previewInvoice() {
   const dateVal        = document.getElementById('invDate').value;
   if (!customerId)     { Utils.showAlert('กรุณาเลือกลูกค้า', 'warning'); return; }
   if (!shippingMethod) { Utils.showAlert('กรุณาเลือกวิธีจัดส่ง', 'warning'); return; }
+  if (!editMode && DB.getCustomerById(customerId)?.suspended) {
+    Utils.showAlert('ลูกค้ารายนี้ถูกระงับการใช้งาน — ไม่สามารถสร้างใบกำกับใหม่ได้', 'danger');
+    return;
+  }
 
   const activeItems = items.filter(item => {
     if (!item.name) return false;
@@ -1619,6 +1647,10 @@ async function saveInvoiceEdit(shouldPrint = false) {
   const dateVal        = document.getElementById('invDate').value;
   if (!customerId)     { Utils.showAlert('กรุณาเลือกลูกค้า', 'warning'); return; }
   if (!shippingMethod) { Utils.showAlert('กรุณาเลือกวิธีจัดส่ง', 'warning'); return; }
+  if (!editMode && DB.getCustomerById(customerId)?.suspended) {
+    Utils.showAlert('ลูกค้ารายนี้ถูกระงับการใช้งาน — ไม่สามารถสร้างใบกำกับใหม่ได้', 'danger');
+    return;
+  }
 
   const activeItems = items.filter(item => {
     if (!item.name) return false;

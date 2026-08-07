@@ -401,7 +401,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="./vendor/html2canvas.min.js"></script>
-<script src="utils.js?v=1.0.191"></script><script src="db.js?v=1.0.191"></script><script src="auth.js?v=1.0.191"></script><script src="nav.js?v=1.0.191"></script>
+<script src="utils.js?v=1.0.192"></script><script src="db.js?v=1.0.192"></script><script src="auth.js?v=1.0.192"></script><script src="nav.js?v=1.0.192"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -1025,15 +1025,28 @@ function showPriceChangeNotice(id) {
   // order so we can sort/filter and later save the notify date.
   const all = [];
   pricing.forEach(p => {
+    const newP = parseFloat(p.price) || 0;
+    if (newP === 0) return; // a ฿0 price is a placeholder/incomplete entry — never worth notifying
+
+    // Walk newest→oldest skipping consecutive no-op resaves (savePrice() writes a
+    // history entry on every save, even when nothing changed) to find the entry
+    // where the CURRENT price/tier actually took effect, and the entry right
+    // before it (the real "old" value) for the diff.
     const hist = allHist
       .filter(h => h.productId === p.productId &&
                    (h.customerId || '') === id &&
                    (h.shippingMethod || '') === (p.shippingMethod || ''))
       .sort((a, b) => new Date(b.changedAt) - new Date(a.changedAt));
-    const prod = DB.getProductById(p.productId);
-    const prev = hist[1] || null;
+    const sameAsCurrent = h =>
+      (parseFloat(h.price) || 0) === newP &&
+      (h.tierQty || null) === (p.tierQty || null) &&
+      (h.tierPrice || null) === (p.tierPrice || null);
+    let idx = 0;
+    while (idx + 1 < hist.length && sameAsCurrent(hist[idx + 1])) idx++;
+    const changedAt = hist[idx] ? hist[idx].changedAt : null;
+    const prev = hist[idx + 1] || null;
 
-    const newP = parseFloat(p.price) || 0;
+    const prod = DB.getProductById(p.productId);
     const oldP = prev ? (parseFloat(prev.price) || 0) : null;
     const baseChanged = oldP != null && oldP !== newP;
 
@@ -1048,7 +1061,7 @@ function showPriceChangeNotice(id) {
       productOrder: prod ? (prod.order ?? 1e9) : 1e9,
       name: prod ? prod.name : '(สินค้า)',
       ship: p.shippingMethod || 'ทุกวิธีจัดส่ง',
-      oldP, newP, diff: oldP != null ? newP - oldP : 0, baseChanged,
+      oldP, newP, diff: oldP != null ? newP - oldP : 0, baseChanged, changedAt,
       basis: p.tierBasis || 'line',
       newTierQty, newTierPrice, oldTierQty, oldTierPrice, tierChanged,
     });
@@ -1070,7 +1083,7 @@ function showPriceChangeNotice(id) {
   document.getElementById('pcFilterShip').innerHTML =
     '<option value="">— ทุกวิธีจัดส่ง —</option>' +
     ships.map(s => `<option value="${esc(s)}">${esc(s || 'ทุกวิธีจัดส่ง')}</option>`).join('');
-  document.getElementById('pcFilterShow').value = 'all';
+  document.getElementById('pcFilterShow').value = 'changed';
   document.getElementById('pcNotifyPrompt').style.display = 'none';
 
   _pcRender();
@@ -1094,7 +1107,16 @@ function _pcRender() {
   _pcData.rows = rows;
   _pcData.shownPriceIds = rows.map(r => r.priceId);
 
-  const c = _pcData.customer, cfg = _pcData.cfg, today = _pcData.dateStr;
+  // Header date = the most recent actual price-change date among the rows shown
+  // (not "today", which is just whenever staff happens to open/print this).
+  const latestChangedAt = rows.reduce((max, r) => {
+    if (!r.changedAt) return max;
+    return (!max || r.changedAt > max) ? r.changedAt : max;
+  }, null);
+  const c = _pcData.customer, cfg = _pcData.cfg;
+  const today = latestChangedAt
+    ? (Utils.formatDateTH ? Utils.formatDateTH(latestChangedAt) : new Date(latestChangedAt).toLocaleDateString('th-TH'))
+    : _pcData.dateStr;
   const body = rows.length ? `
     <table style="width:100%;border-collapse:collapse;font-size:13px">
       <thead>
