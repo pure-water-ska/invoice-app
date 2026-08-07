@@ -169,7 +169,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.192"></script><script src="db.js?v=1.0.192"></script><script src="auth.js?v=1.0.192"></script><script src="nav.js?v=1.0.192"></script><script src="idb.js?v=1.0.192"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.193"></script><script src="db.js?v=1.0.193"></script><script src="auth.js?v=1.0.193"></script><script src="nav.js?v=1.0.193"></script><script src="idb.js?v=1.0.193"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -731,6 +731,23 @@ async function restoreInvoiceAction(num) {
   render();
 }
 
+// Explicitly delete known ids from Firestore instead of relying on Sync's
+// generic diff-based inference (Sync._serverIds vs local array). That inference
+// races the real-time COLLECTIONS listener, which is deliberately union-only —
+// if a snapshot arrives before this delete's own push reaches Firestore, the
+// listener re-adds the record locally from the still-current server copy,
+// silently undoing the delete (the very next unrelated save then re-persists
+// the "still there" record). Same pattern as invoice-create.html's
+// saveInvoiceEdit() old-page cleanup — see CLAUDE.md.
+function _explicitlyDeleteFromFirestore(colName, ids) {
+  if (!ids.length || !window.Sync || !Sync.ready) return;
+  Sync._addTombstones(colName, ids);
+  const col = Sync._orgRef().collection(colName);
+  const batch = Sync._db.batch();
+  ids.forEach(id => batch.delete(col.doc(id)));
+  batch.commit().catch(e => console.warn(`[DeleteInvoice] ${colName} cleanup failed`, e));
+}
+
 async function deleteInvoice(num, pageCount) {
   const pc  = pageCount || DB.getInvoicesByNumber(num).length || 1;
   const msg = pc > 1
@@ -753,6 +770,8 @@ async function deleteInvoice(num, pageCount) {
   DB.saveInvoices(DB.getInvoices().filter(i => i.invoiceNumber !== num));
   DB.savePayments(DB.getPayments().filter(p => p.invoiceNumber !== num));
   DB.removeCapDeductionsByInvoice(num);
+  _explicitlyDeleteFromFirestore('invoices', pages.map(p => p.id).filter(Boolean));
+  _explicitlyDeleteFromFirestore('payments', pays.map(p => p.id).filter(Boolean));
   const imgCount = await DB.deleteOrphanedImages(candidateRefs);
 
   DB.logActivity(session.userId, session.username, 'ลบใบกำกับ', { invoiceNumber: num, paymentsDeleted: pays.length, imagesDeleted: imgCount });
@@ -779,6 +798,7 @@ async function deleteInvoicePage(pageId, invoiceNumber, pageNum) {
   const page = remaining.find(p => p.id === pageId);
   const candidateRefs = (page && page.signedImage) ? [page.signedImage] : [];
   DB.deleteInvoice(pageId);
+  _explicitlyDeleteFromFirestore('invoices', [pageId]);
   const imgCount = await DB.deleteOrphanedImages(candidateRefs);
   DB.logActivity(session.userId, session.username, 'ลบหน้าใบกำกับ', { invoiceNumber, pageId, pageNum, imagesDeleted: imgCount });
   Utils.showAlert(`ลบหน้า ${pageNum} ของ ${invoiceNumber} แล้ว`, 'warning');
