@@ -690,7 +690,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.194"></script><script src="db.js?v=1.0.194"></script><script src="auth.js?v=1.0.194"></script><script src="nav.js?v=1.0.194"></script><script src="idb.js?v=1.0.194"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.195"></script><script src="db.js?v=1.0.195"></script><script src="auth.js?v=1.0.195"></script><script src="nav.js?v=1.0.195"></script><script src="idb.js?v=1.0.195"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -2505,6 +2505,7 @@ function printPaymentSummary(invNum) {
       <td style="padding:3px 5px;border:1px solid #ccc;text-align:center;white-space:nowrap">${_printDateTimeFmt(p.createdAt)}</td>
       <td style="padding:3px 5px;border:1px solid #ccc;text-align:center">${methodEn}</td>
       <td style="padding:3px 5px;border:1px solid #ccc">${detail}</td>
+      <td style="padding:3px 5px;border:1px solid #ccc;text-align:center">${p.createdBy || '-'}</td>
       <td style="padding:3px 5px;border:1px solid #ccc;text-align:right">${Utils.formatNumber(p.amount)}</td>
     </tr>`;
   }).join('');
@@ -2543,14 +2544,15 @@ function printPaymentSummary(invNum) {
       <table style="width:100%;border-collapse:collapse;font-size:8.5pt;margin-bottom:4mm">
         <thead>
           <tr style="background:#eee">
-            <th style="padding:3px 5px;border:1px solid #bbb;text-align:center;width:6%">#</th>
-            <th style="padding:3px 5px;border:1px solid #bbb;text-align:center;width:20%">วันที่ชำระ</th>
-            <th style="padding:3px 5px;border:1px solid #bbb;text-align:center;width:15%">วิธีชำระ</th>
+            <th style="padding:3px 5px;border:1px solid #bbb;text-align:center;width:5%">#</th>
+            <th style="padding:3px 5px;border:1px solid #bbb;text-align:center;width:16%">วันที่ชำระ</th>
+            <th style="padding:3px 5px;border:1px solid #bbb;text-align:center;width:12%">วิธีชำระ</th>
             <th style="padding:3px 5px;border:1px solid #bbb;text-align:left">รายละเอียด</th>
-            <th style="padding:3px 5px;border:1px solid #bbb;text-align:right;width:18%">จำนวน (฿)</th>
+            <th style="padding:3px 5px;border:1px solid #bbb;text-align:center;width:14%">ผู้บันทึก</th>
+            <th style="padding:3px 5px;border:1px solid #bbb;text-align:right;width:16%">จำนวน (฿)</th>
           </tr>
         </thead>
-        <tbody>${rows || '<tr><td colspan="5" style="padding:5px;text-align:center;color:#888">ยังไม่มีรายการชำระ</td></tr>'}</tbody>
+        <tbody>${rows || '<tr><td colspan="6" style="padding:5px;text-align:center;color:#888">ยังไม่มีรายการชำระ</td></tr>'}</tbody>
       </table>
 
       <table style="width:100%;border-collapse:collapse;font-size:8.5pt;margin-bottom:4mm">
