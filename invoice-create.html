@@ -160,7 +160,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.193"></script><script src="db.js?v=1.0.193"></script><script src="auth.js?v=1.0.193"></script><script src="nav.js?v=1.0.193"></script><script src="idb.js?v=1.0.193"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.194"></script><script src="db.js?v=1.0.194"></script><script src="auth.js?v=1.0.194"></script><script src="nav.js?v=1.0.194"></script><script src="idb.js?v=1.0.194"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -900,6 +900,11 @@ let _balanceDetails = [];
 // pending return IDs the user chose to deduct in this invoice
 let _deductReturnIds = [];
 
+// overpaid source-invoice credits pulled onto this new invoice via
+// addSelectedBalances() — applied to the source invoices' payments once the
+// new invoice number is finalized in saveInvoice(). See DB.allocateOverpayCredit().
+let _pendingCreditAllocations = [];
+
 function checkCustomerBalance(custId) {
   const alertDiv = document.getElementById('balanceAlert');
   if (!custId) { alertDiv.innerHTML = ''; _balanceDetails = []; return; }
@@ -1038,6 +1043,13 @@ function addSelectedBalances() {
     items[idx].price = d.diff.toFixed(2);
     items[idx].total = d.diff;
     added.push(label);
+
+    // Overpaid (diff < 0): the source invoice has real, already-recorded
+    // credit — queue it to be pulled off that invoice's payment(s) once this
+    // new invoice is saved, so it stops recurring on future balance checks.
+    // Owed (diff > 0) balances stay memo-only — the old invoice isn't
+    // actually paid until THIS invoice's own payment comes in later.
+    if (!isOwed) _pendingCreditAllocations.push({ num: d.num, amount: Math.abs(d.diff) });
   });
 
   renderRows();
@@ -1457,6 +1469,17 @@ async function saveInvoice(shouldPrint = false) {
     });
   });
   _deductReturnIds = [];
+
+  // Settle the overpaid credits pulled from other invoices onto this one now
+  // that the real invoice number exists (see addSelectedBalances()).
+  _pendingCreditAllocations.forEach(c => {
+    const allocated = DB.allocateOverpayCredit(c.num, invNumber, c.amount);
+    DB.logActivity(session.userId, session.username, 'ตัดยอดเกินไปใบใหม่', {
+      sourceInvoice: c.num, targetInvoice: invNumber, amount: allocated
+    });
+  });
+  _pendingCreditAllocations = [];
+
   DB.logActivity(session.userId, session.username, 'สร้างใบกำกับ', { invoiceNumber: invNumber, totalAmount, customer: customerId });
 
   // Auto-save PDF

@@ -1,6 +1,10 @@
 # Firebase credentials — local dev only, contains teamPassword (never commit)
 firebase-credentials.js
 
+# Google Drive client ID — local dev only (Drive is disabled in production;
+# was previously committed by mistake, see git log)
+drive-config.js
+
 # Claude Code local settings
 .claude/
 

@@ -54,7 +54,7 @@ jobs:
           JSEOF
             echo "Drive config injected from secrets"
           else
-            echo "No GOOGLE_CLIENT_ID secret found — using drive-config.js from repo"
+            echo "No GOOGLE_CLIENT_ID secret found and no drive-config.js in repo — Google Drive disabled"
           fi
 
       # 3. Update Service Worker cache version with build timestamp

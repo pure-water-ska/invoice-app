@@ -887,6 +887,33 @@ const DB = {
     return this.updatePayment(paymentId, { allocations, allocatedOut });
   },
 
+  // Pulls `amount` of already-recorded credit away from sourceInvNum's payment(s)
+  // and marks it allocated to targetInvNum, via recordOverpayAllocation — same
+  // mechanism the payments.html overpay-cut flow uses, but for invoice-create's
+  // "เพิ่มที่เลือกลงใบใหม่" balance-bar button, which folds an old overpaid
+  // balance into a NEW invoice's total as a discount line instead of a separate
+  // payment record. Without this, that button only shrank the new invoice's
+  // total — the source invoice's own paid amount never changed, so the same
+  // credit kept reappearing on the balance bar for every future invoice.
+  // Spreads across the source invoice's payments oldest-first if the credit
+  // spans more than one. Returns the amount actually allocated (may be less
+  // than requested if the source has less available credit than expected).
+  allocateOverpayCredit(sourceInvNum, targetInvNum, amount) {
+    let remaining = amount;
+    const pays = this.getPaymentsByInvoice(sourceInvNum)
+      .filter(p => !p.cancelled && !this.isChequePending(p))
+      .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+    for (const p of pays) {
+      if (remaining <= 0.005) break;
+      const avail = this.effectivePaymentAmount(p);
+      if (avail <= 0.005) continue;
+      const take = Math.min(avail, remaining);
+      this.recordOverpayAllocation(p.id, targetInvNum, take);
+      remaining -= take;
+    }
+    return amount - remaining;
+  },
+
   markChequeCleared(payId, clearedDate) {
     return this.updatePayment(payId, { chequeCleared: true, clearedDate });
   },
