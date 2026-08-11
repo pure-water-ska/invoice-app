@@ -160,7 +160,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.196"></script><script src="db.js?v=1.0.196"></script><script src="auth.js?v=1.0.196"></script><script src="nav.js?v=1.0.196"></script><script src="idb.js?v=1.0.196"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.197"></script><script src="db.js?v=1.0.197"></script><script src="auth.js?v=1.0.197"></script><script src="nav.js?v=1.0.197"></script><script src="idb.js?v=1.0.197"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -329,6 +329,12 @@ let editMode = false;
 let currentInvNum = null;
 let _editBaseEditCount = 0;   // editCount snapshot taken when entering edit mode — baseline for conflict detection
 let _editSaving = false;      // true while saveInvoiceEdit() is committing — suppresses false-positive conflict banner
+// Re-entrancy lock for saveInvoice()/saveInvoiceEdit(). The "บันทึก & พิมพ์" button stays
+// on screen for several seconds while the PDF is generated, and a second click used to
+// run the whole save again — calling DB.generateInvoiceNumberForDate() a second time and
+// writing a COMPLETE duplicate invoice at the next running number. Confirmed in
+// production: 080869-002 / 080869-003, identical customer+items+total, issuedAt 3 s apart.
+let _saving = false;
 
 let _fpInvDate;
 
@@ -1365,10 +1371,10 @@ function previewInvoice() {
       </div>` : '';
 
   const actionBtns = editMode
-    ? `<button class="btn btn-success btn-lg" onclick="saveInvoice(false)"><i class="bi bi-save me-1"></i>บันทึกการแก้ไข</button>
-       <button class="btn btn-primary btn-lg" onclick="saveInvoice(true)"><i class="bi bi-printer me-1"></i>บันทึก & พิมพ์</button>`
-    : `<button class="btn btn-primary btn-lg" onclick="saveInvoice(false)"><i class="bi bi-file-earmark-pdf me-1"></i>บันทึก PDF</button>
-       <button class="btn btn-success btn-lg" onclick="saveInvoice(true)"><i class="bi bi-printer me-1"></i>บันทึก & พิมพ์</button>`;
+    ? `<button class="btn btn-success btn-lg js-save-btn" data-print="0" onclick="saveInvoice(false)"><i class="bi bi-save me-1"></i>บันทึกการแก้ไข</button>
+       <button class="btn btn-primary btn-lg js-save-btn" data-print="1" onclick="saveInvoice(true)"><i class="bi bi-printer me-1"></i>บันทึก & พิมพ์</button>`
+    : `<button class="btn btn-primary btn-lg js-save-btn" data-print="0" onclick="saveInvoice(false)"><i class="bi bi-file-earmark-pdf me-1"></i>บันทึก PDF</button>
+       <button class="btn btn-success btn-lg js-save-btn" data-print="1" onclick="saveInvoice(true)"><i class="bi bi-printer me-1"></i>บันทึก & พิมพ์</button>`;
 
   document.getElementById('previewArea').innerHTML = `
     ${mismatchHtml}
@@ -1386,6 +1392,29 @@ function previewInvoice() {
   document.getElementById('previewArea').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+// Disable both save buttons and show a spinner on the one that was clicked, so it is
+// visible that the save is in progress. Paired with the _saving lock — the lock is the
+// real protection, this is the feedback that stops the user from clicking again at all.
+function _setSaveBusy(busy, shouldPrint) {
+  document.querySelectorAll('#previewArea .js-save-btn').forEach(b => {
+    if (busy) {
+      if (b.dataset.origHtml === undefined) b.dataset.origHtml = b.innerHTML;
+      b.disabled = true;
+      if (b.dataset.print === (shouldPrint ? '1' : '0')) {
+        b.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>กำลังบันทึก...';
+      }
+    } else {
+      b.disabled = false;
+      if (b.dataset.origHtml !== undefined) { b.innerHTML = b.dataset.origHtml; delete b.dataset.origHtml; }
+    }
+  });
+}
+
+function _releaseSaveLock() {
+  _saving = false;
+  _setSaveBusy(false);
+}
+
 async function saveInvoice(shouldPrint = false) {
   if (editMode) { await saveInvoiceEdit(shouldPrint); return; }
   const customerId = document.getElementById('invCustomer').value;
@@ -1401,6 +1430,24 @@ async function saveInvoice(shouldPrint = false) {
     return qty !== 0 || rem !== 0;
   });
   if (activeItems.length === 0) { Utils.showAlert('กรุณากรอกรายการสินค้าอย่างน้อย 1 รายการ', 'warning'); return; }
+  // Defense-in-depth: previewInvoice() already blocks this, but the create-save path
+  // had no check of its own (the one in saveInvoiceEdit is behind a dead `!editMode`).
+  if (DB.getCustomerById(customerId)?.suspended) {
+    Utils.showAlert('ลูกค้ารายนี้ถูกระงับการใช้งาน — ไม่สามารถสร้างใบกำกับใหม่ได้', 'danger');
+    return;
+  }
+
+  // ── Re-entrancy lock ────────────────────────────────────────────────────────
+  // Everything above is synchronous, so no second click can interleave before here.
+  // From this point on there are awaits (cap confirm, PDF generation) and a delayed
+  // navigation, during which a second click would mint a NEW invoice number and write
+  // a full duplicate. Released only when we abort — on success we navigate away.
+  if (_saving) return;
+  _saving = true;
+  _setSaveBusy(true, shouldPrint);
+  // Watchdog: if anything below throws before navigation, don't leave the buttons
+  // dead forever.
+  setTimeout(() => { if (_saving) _releaseSaveLock(); }, 30000);
 
   // Check cap stock minimum quantity
   const capWarnings = checkCapMinQty(activeItems);
@@ -1408,7 +1455,7 @@ async function saveInvoice(shouldPrint = false) {
     const lines = capWarnings.map(w =>
       `• ${w.color}: สต๊อก ${Utils.formatNumber(w.currentStock)} → ${Utils.formatNumber(w.afterStock)} ลัง (ขั้นต่ำ ${Utils.formatNumber(w.minQty)} ลัง)`
     ).join('\n');
-    if (!await Utils.confirm(`⚠️ สต๊อกฝาขวดต่ำกว่าขั้นต่ำที่กำหนด!\n\n${lines}\n\nยืนยันบันทึกใบกำกับต่อไปหรือไม่?`)) return;
+    if (!await Utils.confirm(`⚠️ สต๊อกฝาขวดต่ำกว่าขั้นต่ำที่กำหนด!\n\n${lines}\n\nยืนยันบันทึกใบกำกับต่อไปหรือไม่?`)) { _releaseSaveLock(); return; }
   }
 
   const totalAmount = activeItems.reduce((s, item) => s + calcTotal(item), 0);
@@ -1509,9 +1556,15 @@ async function saveInvoice(shouldPrint = false) {
   try { if (window.Sync && typeof Sync.flushNow === 'function') Sync.flushNow(); } catch (e) {}
 
   Utils.showAlert('<i class="bi bi-hourglass-split me-1"></i>กำลังสร้าง PDF...', 'info');
-  await PdfGen.run(_pdfBody, _fn, invNumber);
-  // Mark PDF as fresh so doPrint() can skip regeneration
-  try { sessionStorage.setItem('freshPdf', JSON.stringify({ inv: invNumber, file: _fn })); } catch(e) {}
+  // The invoice is already committed at this point — a PDF failure must not abort the
+  // navigation (and must not strand the save lock), so swallow it and carry on.
+  try {
+    await PdfGen.run(_pdfBody, _fn, invNumber);
+    // Mark PDF as fresh so doPrint() can skip regeneration
+    try { sessionStorage.setItem('freshPdf', JSON.stringify({ inv: invNumber, file: _fn })); } catch(e) {}
+  } catch (e) {
+    console.warn('[saveInvoice] PDF generation failed — invoice is saved, continuing', e);
+  }
 
   if (shouldPrint) {
     // "บันทึก & พิมพ์" — navigate to view mode to trigger auto-print
@@ -1683,13 +1736,21 @@ async function saveInvoiceEdit(shouldPrint = false) {
   });
   if (!activeItems.length) { Utils.showAlert('กรุณากรอกรายการสินค้าอย่างน้อย 1 รายการ', 'warning'); return; }
 
+  // Same re-entrancy lock as saveInvoice() — an edit doesn't mint a new invoice number,
+  // but a double click still replaces the pages twice (new UUIDs each time) and races
+  // the explicit Firestore delete of the old page docs.
+  if (_saving) return;
+  _saving = true;
+  _setSaveBusy(true, shouldPrint);
+  setTimeout(() => { if (_saving) _releaseSaveLock(); }, 30000);
+
   // Check cap stock minimum quantity (re-deduction: current stock already excludes old deduction)
   const capWarningsEdit = checkCapMinQty(activeItems);
   if (capWarningsEdit.length) {
     const lines = capWarningsEdit.map(w =>
       `• ${w.color}: สต๊อก ${Utils.formatNumber(w.currentStock)} → ${Utils.formatNumber(w.afterStock)} ลัง (ขั้นต่ำ ${Utils.formatNumber(w.minQty)} ลัง)`
     ).join('\n');
-    if (!await Utils.confirm(`⚠️ สต๊อกฝาขวดต่ำกว่าขั้นต่ำที่กำหนด!\n\n${lines}\n\nยืนยันบันทึกการแก้ไขต่อไปหรือไม่?`)) return;
+    if (!await Utils.confirm(`⚠️ สต๊อกฝาขวดต่ำกว่าขั้นต่ำที่กำหนด!\n\n${lines}\n\nยืนยันบันทึกการแก้ไขต่อไปหรือไม่?`)) { _releaseSaveLock(); return; }
   }
 
   const existingPages = DB.getInvoices().filter(i => i.invoiceNumber === currentInvNum);
