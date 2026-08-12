@@ -169,7 +169,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.198"></script><script src="db.js?v=1.0.198"></script><script src="auth.js?v=1.0.198"></script><script src="nav.js?v=1.0.198"></script><script src="idb.js?v=1.0.198"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.199"></script><script src="db.js?v=1.0.199"></script><script src="auth.js?v=1.0.199"></script><script src="nav.js?v=1.0.199"></script><script src="idb.js?v=1.0.199"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -621,25 +621,44 @@ function render() {
       </td>
     </tr>`;
 
-    // Expanded sub-rows: one row per page with individual view/edit/delete
+    // Expanded sub-rows: one row per page with individual view/edit/delete.
+    // Each row names its OWN customer and shows its OWN totalAmount. Both matter when
+    // an invoice number is shared by two different customers (see
+    // DB._numberHasMultipleOwners): every such record is page 1, so the rows would
+    // otherwise read as identical "↳ หน้า 1" lines and the only cue to which financial
+    // record you are about to delete was an item-derived subtotal.
     if (pages > 1 && isExp) {
+      const subOwners = new Set(allPages.map(p => p.customerId));
+      const collided  = subOwners.size > 1;
+      if (collided) {
+        html += `<tr class="table-warning" data-parent="${inv.invoiceNumber}" style="font-size:12px">
+          <td class="sel-chk-cell ${_selMode ? '' : 'd-none'}"></td>
+          <td colspan="9" style="padding-left:20px">
+            <i class="bi bi-exclamation-triangle-fill text-warning me-1"></i>
+            <strong>เลขที่นี้ถูกใช้ซ้ำกับลูกค้า ${subOwners.size} ราย</strong>
+            — ตรวจชื่อลูกค้าในแต่ละแถวก่อนลบ
+          </td>
+        </tr>`;
+      }
       html += allPages.map((pg, idx) => {
-        const pgSubtotal = Array.isArray(pg.items)
-          ? pg.items.reduce((s, it) => s + (parseFloat(it.qty)||0) * (parseFloat(it.price)||0), 0)
-          : 0;
         const pgItemSummary = Array.isArray(pg.items) && pg.items.length
           ? pg.items.filter(it => it.name).slice(0, 2).map(it => it.name).join(', ') + (pg.items.length > 2 ? '…' : '')
           : '—';
-        const pgNum = pg.page || (idx + 1);
-        return `<tr class="table-light" data-parent="${inv.invoiceNumber}" style="font-size:12px">
+        const pgNum   = pg.page || (idx + 1);
+        const pgCust  = custMap[pg.customerId];
+        const pgName  = pgCust ? pgCust.name : '-';
+        const pgTotal = parseFloat(pg.totalAmount) || 0;
+        // Flag the rows that do NOT belong to the customer shown on the parent row.
+        const foreign = collided && pg.customerId !== inv.customerId;
+        return `<tr class="${foreign ? 'table-warning' : 'table-light'}" data-parent="${inv.invoiceNumber}" style="font-size:12px">
           <td class="sel-chk-cell ${_selMode ? '' : 'd-none'}"></td>
-          <td style="border-left:3px solid #0d6efd; padding-left:20px; color:#666">
+          <td style="border-left:3px solid ${foreign ? '#ffc107' : '#0d6efd'}; padding-left:20px; color:#666">
             ↳ หน้า ${pgNum}
           </td>
           <td class="text-muted">${Utils.formatDateTH(pg.createdAt)}</td>
-          <td class="text-muted">${pgItemSummary}</td>
+          <td class="text-muted">${collided ? `<span class="fw-semibold text-dark">${pgName}</span> · ` : ''}${pgItemSummary}</td>
           <td class="d-none d-md-table-cell"></td>
-          <td class="text-end d-none d-md-table-cell text-muted">฿${Utils.formatNumber(pgSubtotal)}</td>
+          <td class="text-end d-none d-md-table-cell text-muted">฿${Utils.formatNumber(pgTotal)}</td>
           <td class="d-none d-md-table-cell"></td>
           <td></td>
           <td></td>
@@ -647,7 +666,7 @@ function render() {
             <div class="btn-group btn-group-sm">
               <a class="btn btn-outline-primary btn-sm" href="invoice-create.html?view=${inv.invoiceNumber}" title="ดู/พิมพ์"><i class="bi bi-eye"></i></a>
               <a class="btn btn-outline-warning btn-sm" href="invoice-create.html?edit=${inv.invoiceNumber}" title="แก้ไข"><i class="bi bi-pencil"></i></a>
-              <button class="btn btn-outline-danger btn-sm" onclick="deleteInvoicePage('${pg.id}','${inv.invoiceNumber}',${pgNum})" title="ลบหน้านี้"><i class="bi bi-trash"></i></button>
+              <button class="btn btn-outline-danger btn-sm" onclick="deleteInvoicePage('${pg.id}','${inv.invoiceNumber}',${pgNum},'${(pgName||'').replace(/'/g,"\\'")}')" title="ลบหน้านี้"><i class="bi bi-trash"></i></button>
             </div>
           </td>
         </tr>`;
@@ -786,21 +805,31 @@ function toggleInvExpand(num) {
   render();
 }
 
-async function deleteInvoicePage(pageId, invoiceNumber, pageNum) {
+// `custName` is passed from the sub-row so the confirm dialog names the customer and
+// amount of the exact record being removed. On a shared invoice number every record is
+// page 1, so "ลบหน้า 1" alone does not identify which customer's invoice is about to be
+// destroyed — and this is a hard, unrecoverable delete of a financial record.
+async function deleteInvoicePage(pageId, invoiceNumber, pageNum, custName) {
   // If this is the last page, delete the whole invoice instead
   const remaining = DB.getInvoicesByNumber(invoiceNumber);
+  const target    = remaining.find(p => p.id === pageId);
+  const who       = custName ? `\nลูกค้า: ${custName}` : '';
+  const amt       = target ? `\nยอด: ฿${Utils.formatNumber(parseFloat(target.totalAmount) || 0)}` : '';
   if (remaining.length <= 1) {
-    if (!await Utils.confirm(`ลบใบกำกับ "${invoiceNumber}" ใช่หรือไม่?\n(หน้า ${pageNum} เป็นหน้าสุดท้าย — จะลบใบกำกับนี้ทั้งหมด)\nการลบไม่สามารถกู้คืนได้`)) return;
+    if (!await Utils.confirm(`ลบใบกำกับ "${invoiceNumber}" ใช่หรือไม่?${who}${amt}\n(หน้า ${pageNum} เป็นหน้าสุดท้าย — จะลบใบกำกับนี้ทั้งหมด)\nการลบไม่สามารถกู้คืนได้`)) return;
     deleteInvoice(invoiceNumber, 1);
     return;
   }
-  if (!await Utils.confirm(`ลบหน้า ${pageNum} ของใบกำกับ "${invoiceNumber}" ใช่หรือไม่?\nการลบไม่สามารถกู้คืนได้`)) return;
+  if (!await Utils.confirm(`ลบหน้า ${pageNum} ของใบกำกับ "${invoiceNumber}" ใช่หรือไม่?${who}${amt}\nการลบไม่สามารถกู้คืนได้`)) return;
   const page = remaining.find(p => p.id === pageId);
   const candidateRefs = (page && page.signedImage) ? [page.signedImage] : [];
   DB.deleteInvoice(pageId);
   _explicitlyDeleteFromFirestore('invoices', [pageId]);
   const imgCount = await DB.deleteOrphanedImages(candidateRefs);
-  DB.logActivity(session.userId, session.username, 'ลบหน้าใบกำกับ', { invoiceNumber, pageId, pageNum, imagesDeleted: imgCount });
+  DB.logActivity(session.userId, session.username, 'ลบหน้าใบกำกับ', {
+    invoiceNumber, pageId, pageNum, imagesDeleted: imgCount,
+    customer: custName || '', totalAmount: target ? (parseFloat(target.totalAmount) || 0) : 0
+  });
   Utils.showAlert(`ลบหน้า ${pageNum} ของ ${invoiceNumber} แล้ว`, 'warning');
   render();
 }
