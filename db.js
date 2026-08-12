@@ -772,6 +772,33 @@ const DB = {
     return `${prefix}${String(next).padStart(3, '0')}`;
   },
 
+  // The n-th candidate number for a date WITHOUT consuming the counter, so a caller can
+  // walk candidates while asking the server whether each is already taken
+  // (Sync.reserveFreeInvoiceNumber). offset 0 == what generateInvoiceNumberForDate would
+  // have returned. Everything here is derived from LOCAL data — the server check is what
+  // makes it trustworthy; see Sync.invoiceNumberOwners().
+  invoiceNumberCandidate(isoDate, offset = 0) {
+    const { prefix, dateKey } = this._invNumParts(isoDate);
+    const counters = this._getObj(this.K.COUNTER, {});
+    const next = Math.max(counters[dateKey] || 0, this._maxRunningForPrefix(prefix)) + 1 + (offset || 0);
+    return `${prefix}${String(next).padStart(3, '0')}`;
+  },
+
+  // Consume the counter up to the number actually used, so it is never handed out again.
+  // Pairs with invoiceNumberCandidate(); together they are generateInvoiceNumberForDate()
+  // split into "choose" and "commit".
+  commitInvoiceNumber(isoDate, invoiceNumber) {
+    const { prefix, dateKey } = this._invNumParts(isoDate);
+    if (!invoiceNumber || invoiceNumber.indexOf(prefix) !== 0) return;
+    const run = parseInt(invoiceNumber.slice(prefix.length), 10);
+    if (isNaN(run)) return;
+    const counters = this._getObj(this.K.COUNTER, {});
+    if ((counters[dateKey] || 0) < run) {
+      counters[dateKey] = run;
+      this._set(this.K.COUNTER, counters);
+    }
+  },
+
   // Price valid AS OF a given date, from the wt_price_history timeline.
   // Same fallback chain as getPrice (exact → by customer → by shipping →
   // default), but each level uses the latest history entry on/before the date.

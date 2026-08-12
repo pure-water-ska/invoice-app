@@ -160,7 +160,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.199"></script><script src="db.js?v=1.0.199"></script><script src="auth.js?v=1.0.199"></script><script src="nav.js?v=1.0.199"></script><script src="idb.js?v=1.0.199"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.200"></script><script src="db.js?v=1.0.200"></script><script src="auth.js?v=1.0.200"></script><script src="nav.js?v=1.0.200"></script><script src="idb.js?v=1.0.200"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -1460,8 +1460,29 @@ async function saveInvoice(shouldPrint = false) {
 
   const totalAmount = activeItems.reduce((s, item) => s + calcTotal(item), 0);
   const _dateISO  = Utils.parseBEToISO(dateVal) || Utils.todayInputValue();
-  // Number prefix/run follows the chosen invoice DATE (continues that day's sequence)
-  const invNumber = DB.generateInvoiceNumberForDate(_dateISO);
+  // Number prefix/run follows the chosen invoice DATE (continues that day's sequence).
+  // The candidate is derived from LOCAL data, which covers only ARCHIVE_MONTHS and can be
+  // cold — that is exactly how four numbers in production ended up shared by two
+  // different customers. Ask the server before committing, and advance past anything
+  // already owned by someone else. Offline the check returns "unknown" and we keep the
+  // local number rather than blocking the save (the app is offline-first).
+  const _firstNum = DB.invoiceNumberCandidate(_dateISO, 0);
+  let invNumber   = _firstNum;
+  if (window.Sync && typeof Sync.reserveFreeInvoiceNumber === 'function') {
+    try {
+      const _res = await Sync.reserveFreeInvoiceNumber(
+        _firstNum, customerId, n => DB.invoiceNumberCandidate(_dateISO, n));
+      invNumber = _res.number || _firstNum;
+      if (_res.bumped) {
+        DB.logActivity(session.userId, session.username, 'เลื่อนเลขที่ใบกำกับ (เลขซ้ำบนเซิร์ฟเวอร์)',
+          { from: _firstNum, to: invNumber, customer: customerId });
+        Utils.showAlert(`เลขที่ ${_firstNum} ถูกใช้แล้วบนเซิร์ฟเวอร์ — เปลี่ยนเป็น ${invNumber}`, 'warning');
+      }
+    } catch (e) {
+      console.warn('[saveInvoice] invoice-number server check failed, using local number', e);
+    }
+  }
+  DB.commitInvoiceNumber(_dateISO, invNumber);
   const createdAt = new Date(_dateISO).toISOString();
   // issuedAt = actual wall-clock save time, shown as the footer "issued :" stamp —
   // createdAt stays date-only (midnight) so numbering/archiving keep using the

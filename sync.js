@@ -2358,6 +2358,66 @@ var Sync = {
     return found;
   },
 
+  // Who already owns this invoice number ON THE SERVER?
+  //
+  // An invoice number must identify exactly one invoice, but four numbers in production
+  // ended up shared by two different customers (180669-209, 300669-209, 270369-203,
+  // 280169-206). Every one of them came from the PDF import path, which DID already guard
+  // uniqueness — via DB.getInvoicesByNumber() — but that reads LOCAL data only. Local
+  // holds just the last ARCHIVE_MONTHS and can be cold, so the other customer's invoice
+  // simply wasn't there and the guard passed. Two identical ทรัพย์มณี copies got in the
+  // same way: the second import couldn't see the first either. A local check cannot fix
+  // this; only the server knows.
+  //
+  // Returns an array of { id, customerId, totalAmount, createdAt } for every server
+  // record carrying this number, or null if it could NOT be checked (offline / not
+  // ready). Same contract as verifyInvoiceNumbersExist(): null means UNKNOWN — never
+  // treat it as "no conflict", and never let it block an offline save.
+  async invoiceNumberOwners(invoiceNumber) {
+    if (!invoiceNumber) return [];
+    if (!this.ready || !this._db) return null;
+    try {
+      const snap = await this._orgRef().collection('invoices')
+        .where('invoiceNumber', '==', invoiceNumber).get();
+      return snap.docs.map(d => {
+        const v = d.data() || {};
+        return { id: d.id, customerId: v.customerId || '', totalAmount: v.totalAmount, createdAt: v.createdAt };
+      });
+    } catch (e) {
+      console.warn('[Sync] invoiceNumberOwners failed:', e.message);
+      return null;   // unknown, NOT "free"
+    }
+  },
+
+  // Advance past any number the server already holds — by ANY customer, not just a
+  // different one. A new invoice's number is chosen from local data, which is guaranteed
+  // to exceed every LOCAL number, so the server reporting that number as already used can
+  // only mean local is stale. Writing it anyway produces a duplicate: a cross-customer
+  // collision if the owner differs, and a same-customer duplicate if it doesn't (the shape
+  // of the two identical ทรัพย์มณี records under 300669-209). Neither is acceptable.
+  //
+  // This cannot false-positive on a multi-page invoice: every page of one invoice is
+  // created in a single saveInvoice() call AFTER this check runs, so the check never sees
+  // its own siblings.
+  //
+  // `nextFor(n)` returns the n-th candidate. Yields the first candidate the server does
+  // not know about; the ORIGINAL number when the check could not run (offline — never
+  // block a save); and `bumped` so the caller can tell the user and log it.
+  async reserveFreeInvoiceNumber(firstNumber, customerId, nextFor, maxTries = 20) {
+    let num = firstNumber;
+    for (let i = 0; i < maxTries; i++) {
+      const owners = await this.invoiceNumberOwners(num);
+      if (owners === null) return { number: firstNumber, verified: false, bumped: false };
+      if (!owners.length) return { number: num, verified: true, bumped: num !== firstNumber };
+      const sameCust = owners.every(o => o.customerId === customerId);
+      console.warn(`[Sync] invoice number ${num} already exists on the server` +
+        `${sameCust ? ' for this same customer' : ' for another customer'} — advancing`);
+      num = nextFor(i + 1);
+      if (!num) break;
+    }
+    return { number: num || firstNumber, verified: true, bumped: num !== firstNumber };
+  },
+
   _badge(status) {
     const el = document.getElementById('syncStatusBadge');
     if (!el) return;

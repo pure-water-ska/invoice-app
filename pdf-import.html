@@ -136,7 +136,7 @@
 </div>
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
-<script src="utils.js?v=1.0.199"></script><script src="db.js?v=1.0.199"></script><script src="auth.js?v=1.0.199"></script><script src="nav.js?v=1.0.199"></script><script src="idb.js?v=1.0.199"></script>
+<script src="utils.js?v=1.0.200"></script><script src="db.js?v=1.0.200"></script><script src="auth.js?v=1.0.200"></script><script src="nav.js?v=1.0.200"></script><script src="idb.js?v=1.0.200"></script>
 <script src="drive-config.js" onerror="window.GOOGLE_CLIENT_ID=''"></script>
 <script src="drive-store.js"></script>
 <script>
@@ -629,6 +629,25 @@ async function _doSave() {
     if (DB.getInvoicesByNumber(d.invoiceNumber).length) {
       errors.push(`${d.invoiceNumber}: มีอยู่ในระบบแล้ว`); continue;
     }
+    // The local check above is NOT sufficient. It reads local data, which holds only the
+    // last ARCHIVE_MONTHS and can be cold — every invoice-number collision in production
+    // (180669-209, 300669-209, 270369-203, 280169-206) got in through exactly this guard
+    // passing because the other customer's invoice wasn't local at import time. The two
+    // identical ทรัพย์มณี copies got in the same way. So ask the server too.
+    // An imported number comes off a paper invoice and must never be silently changed —
+    // block the card and name the existing owner instead. Offline returns null = unknown,
+    // and we proceed rather than stall an import.
+    const _srvOwners = (window.Sync && typeof Sync.invoiceNumberOwners === 'function')
+      ? await Sync.invoiceNumberOwners(d.invoiceNumber)
+      : null;
+    if (_srvOwners && _srvOwners.length) {
+      const _who = [...new Set(_srvOwners.map(o => {
+        const c = DB.getCustomerById(o.customerId);
+        return c ? c.name : (o.customerId || '?');
+      }))].join(', ');
+      errors.push(`${d.invoiceNumber}: มีอยู่บนเซิร์ฟเวอร์แล้ว (ลูกค้า: ${_who}) — ยังไม่ถูกโหลดมาที่เครื่องนี้`);
+      continue;
+    }
 
     const createdAt = d.invoiceDate
       ? new Date(d.invoiceDate).toISOString()
@@ -825,6 +844,21 @@ async function saveSingleCard(ci) {
   if (!(d.totalAmount > 0)){ Utils.showAlert(`การ์ด ${ci+1}: ต้องระบุยอดเงินรวม`, 'warning'); return; }
   if (DB.getInvoicesByNumber(d.invoiceNumber).length) {
     Utils.showAlert(`${d.invoiceNumber}: มีอยู่ในระบบแล้ว`, 'warning'); return;
+  }
+  // Server-side duplicate check — see the same guard in _doSave() for why the local one
+  // above is not enough (it is the guard every production collision walked straight past).
+  {
+    const owners = (window.Sync && typeof Sync.invoiceNumberOwners === 'function')
+      ? await Sync.invoiceNumberOwners(d.invoiceNumber)
+      : null;
+    if (owners && owners.length) {
+      const who = [...new Set(owners.map(o => {
+        const c = DB.getCustomerById(o.customerId);
+        return c ? c.name : (o.customerId || '?');
+      }))].join(', ');
+      Utils.showAlert(`${d.invoiceNumber}: มีอยู่บนเซิร์ฟเวอร์แล้ว (ลูกค้า: ${who}) — ยังไม่ถูกโหลดมาที่เครื่องนี้`, 'danger');
+      return;
+    }
   }
 
   const btn = document.getElementById(`saveBtn_${ci}`);
