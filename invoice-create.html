@@ -160,7 +160,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.201"></script><script src="db.js?v=1.0.201"></script><script src="auth.js?v=1.0.201"></script><script src="nav.js?v=1.0.201"></script><script src="idb.js?v=1.0.201"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.202"></script><script src="db.js?v=1.0.202"></script><script src="auth.js?v=1.0.202"></script><script src="nav.js?v=1.0.202"></script><script src="idb.js?v=1.0.202"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -1463,10 +1463,8 @@ async function saveInvoice(shouldPrint = false) {
   // Number prefix/run follows the chosen invoice DATE (continues that day's sequence).
   // The candidate is derived from LOCAL data, which covers only ARCHIVE_MONTHS and can be
   // cold — that is exactly how four numbers in production ended up shared by two
-  // different customers. Ask the server before committing, and advance past anything
-  // already owned by someone else. Offline the check returns "unknown" and we keep the
-  // local number rather than blocking the save (the app is offline-first).
-  // Three tiers, strongest first:
+  // different customers. Verify with the server before committing. Three tiers, strongest
+  // first, each falling through to the next on failure so nothing can block a save:
   //   1. atomic  — Firestore transaction on a per-day counter. Two devices saving at the
   //                same instant cannot receive the same number.
   //   2. checked — query the server and step past anything already taken. Closes the

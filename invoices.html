@@ -169,7 +169,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.201"></script><script src="db.js?v=1.0.201"></script><script src="auth.js?v=1.0.201"></script><script src="nav.js?v=1.0.201"></script><script src="idb.js?v=1.0.201"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.202"></script><script src="db.js?v=1.0.202"></script><script src="auth.js?v=1.0.202"></script><script src="nav.js?v=1.0.202"></script><script src="idb.js?v=1.0.202"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -460,15 +460,25 @@ function render() {
   // ── Build lookup maps once (O(n)) instead of per-row (O(n²)) ───────────────
   // customer map: id → customer object
   const custMap = Object.fromEntries(customers.map(c => [c.id, c]));
-  // paid amount map: invoiceNumber → total paid (non-cancelled, excludes
-  // pending cheques and overpay-allocated-away amounts — see
-  // DB.getInvoicePaidAmount()/DB.effectivePaymentAmount() for why)
+  // paid amount map: invoiceNumber + '|' + customerId → total paid (non-cancelled,
+  // excludes pending cheques and overpay-allocated-away amounts — see
+  // DB.getInvoicePaidAmount()/DB.effectivePaymentAmount() for why).
+  // Keyed WITH customerId, not just invoiceNumber. A handful of historical numbers are
+  // shared by two different customers (see DB._numberHasMultipleOwners) — keying by
+  // number alone summed both customers' payments into one figure and showed it on BOTH
+  // rows, e.g. ทรัพย์มณี's ฿4,485.00 row on 180669-209 showed paid=฿10,661.40 (that
+  // payment is ร้านอรวรรณ's), reading as fully settled when ทรัพย์มณี had paid nothing.
+  // This is the same class of bug v1.0.198 fixed via DB.getInvoicePaidAmount(num, custId)
+  // — invoices.html's list view built its own sum here instead of going through that
+  // helper, so it kept the bug. Payments always carry customerId (verified 1,274/1,274).
   const paidMap = {};
   for (const p of DB.getPayments()) {
     if (!p.cancelled && !DB.isChequePending(p)) {
-      paidMap[p.invoiceNumber] = (paidMap[p.invoiceNumber] || 0) + DB.effectivePaymentAmount(p);
+      const key = p.invoiceNumber + '|' + (p.customerId || '');
+      paidMap[key] = (paidMap[key] || 0) + DB.effectivePaymentAmount(p);
     }
   }
+  const paidFor = inv => paidMap[inv.invoiceNumber + '|' + (inv.customerId || '')] || 0;
   // page count map: invoiceNumber → number of pages
   const pageCountMap = {};
   for (const inv of allInvoices) pageCountMap[inv.invoiceNumber] = (pageCountMap[inv.invoiceNumber] || 0) + 1;
@@ -481,15 +491,29 @@ function render() {
   }
   for (const [, pgs] of allPagesMap) pgs.sort((a, b) => (a.page || 1) - (b.page || 1));
 
+  // One representative record per invoice number for the main row. Prefers the higher
+  // editCount when two records share the same customer AND page — an edit writes a new
+  // page record (new id) and the old one is supposed to be explicitly deleted from
+  // Firestore, but that delete has occasionally failed to land (confirmed: 180769-001,
+  // 220769-007, 070869-001), leaving both. Picking array-order-first then showed
+  // whichever survived to load first — the STALE pre-edit total, not the corrected one.
+  // A normal multi-page invoice is unaffected: its pages differ by page number, so this
+  // condition never triggers and the first-seen page (any of them; every page carries the
+  // same totalAmount) still wins exactly as before.
   const seen = new Map();
   for (const inv of allInvoices) {
-    if (!seen.has(inv.invoiceNumber)) seen.set(inv.invoiceNumber, inv);
+    const cur = seen.get(inv.invoiceNumber);
+    if (!cur) { seen.set(inv.invoiceNumber, inv); continue; }
+    if (cur.customerId === inv.customerId && (cur.page || 1) === (inv.page || 1)
+        && (inv.editCount || 0) > (cur.editCount || 0)) {
+      seen.set(inv.invoiceNumber, inv);
+    }
   }
 
   let list = [...seen.values()];
   list = list.filter(inv => {
     const cust  = custMap[inv.customerId];
-    const paid  = paidMap[inv.invoiceNumber] || 0;
+    const paid  = paidFor(inv);
     const total = parseFloat(inv.totalAmount) || 0;
     const si    = statusInfo(paid, total, inv.cancelled);
     const d     = new Date(inv.createdAt);
@@ -508,8 +532,8 @@ function render() {
   });
 
   list.sort((a, b) => {
-    const pa = paidMap[a.invoiceNumber] || 0;
-    const pb = paidMap[b.invoiceNumber] || 0;
+    const pa = paidFor(a);
+    const pb = paidFor(b);
     const ta = parseFloat(a.totalAmount) || 0;
     const tb = parseFloat(b.totalAmount) || 0;
     let cmp = 0;
@@ -537,7 +561,7 @@ function render() {
   for (const inv of list) {
     if (inv.cancelled) continue;
     const total = parseFloat(inv.totalAmount) || 0;
-    const paid  = paidMap[inv.invoiceNumber] || 0;
+    const paid  = paidFor(inv);
     sumTotal += total; sumPaid += Math.min(paid, total);
   }
   document.getElementById('sumTotal').textContent   = '฿' + Utils.formatNumber(sumTotal);
@@ -569,7 +593,7 @@ function render() {
   tbody.innerHTML = pageList.map(inv => {
     const cust      = custMap[inv.customerId];
     const total     = parseFloat(inv.totalAmount) || 0;
-    const paid      = paidMap[inv.invoiceNumber] || 0;
+    const paid      = paidFor(inv);
     const remaining = Math.max(0, total - paid);
     const si        = statusInfo(paid, total, inv.cancelled);
     const pages     = pageCountMap[inv.invoiceNumber] || 1;
@@ -630,6 +654,22 @@ function render() {
     if (pages > 1 && isExp) {
       const subOwners = new Set(allPages.map(p => p.customerId));
       const collided  = subOwners.size > 1;
+
+      // Same-customer, same-page duplicates — two different bugs produce this shape:
+      // (1) an edit writes a new page record but the old one's explicit Firestore
+      //     delete has occasionally failed to land (confirmed: 180769-001, 220769-007,
+      //     070869-001 — the OLD, pre-edit record survived alongside the new one), and
+      // (2) a plain re-import with no edit involved at all (010469-206 — three page-1
+      //     records, none carrying editHistory). Group key = customerId + page number.
+      const pageGroups = new Map();
+      allPages.forEach(pg => {
+        const gk = pg.customerId + '|' + (pg.page || 1);
+        if (!pageGroups.has(gk)) pageGroups.set(gk, []);
+        pageGroups.get(gk).push(pg);
+      });
+      const dupIds = new Set();
+      for (const grp of pageGroups.values()) if (grp.length > 1) grp.forEach(pg => dupIds.add(pg.id));
+
       if (collided) {
         html += `<tr class="table-warning" data-parent="${inv.invoiceNumber}" style="font-size:12px">
           <td class="sel-chk-cell ${_selMode ? '' : 'd-none'}"></td>
@@ -640,6 +680,17 @@ function render() {
           </td>
         </tr>`;
       }
+      if (dupIds.size) {
+        html += `<tr class="table-info" data-parent="${inv.invoiceNumber}" style="font-size:12px">
+          <td class="sel-chk-cell ${_selMode ? '' : 'd-none'}"></td>
+          <td colspan="9" style="padding-left:20px">
+            <i class="bi bi-clock-history text-info me-1"></i>
+            <strong>มีหน้าซ้ำของลูกค้าเดียวกัน</strong>
+            — แถวที่มีป้าย "ปัจจุบัน" คือรายการที่ระบบใช้แสดงยอด ตรวจให้แน่ใจว่ายอดตรงกับยอดชำระก่อนลบรายการเก่า
+          </td>
+        </tr>`;
+      }
+
       html += allPages.map((pg, idx) => {
         const pgItemSummary = Array.isArray(pg.items) && pg.items.length
           ? pg.items.filter(it => it.name).slice(0, 2).map(it => it.name).join(', ') + (pg.items.length > 2 ? '…' : '')
@@ -648,17 +699,28 @@ function render() {
         const pgCust  = custMap[pg.customerId];
         const pgName  = pgCust ? pgCust.name : '-';
         const pgTotal = parseFloat(pg.totalAmount) || 0;
-        // Flag the rows that do NOT belong to the customer shown on the parent row.
+        // Flag rows that do NOT belong to the customer shown on the parent row.
         const foreign = collided && pg.customerId !== inv.customerId;
-        return `<tr class="${foreign ? 'table-warning' : 'table-light'}" data-parent="${inv.invoiceNumber}" style="font-size:12px">
+        // Among same-customer duplicates, `inv` IS the record the seen-map above picked
+        // (highest editCount, or array-first if tied) — so pg.id === inv.id identifies
+        // the one actually driving the main row's total/paid/status right now.
+        const isDup     = dupIds.has(pg.id);
+        const isCurrent = isDup && pg.id === inv.id;
+        const isStale   = isDup && !isCurrent;
+        const rowClass  = foreign ? 'table-warning' : (isStale ? 'table-secondary' : 'table-light');
+        const borderClr = foreign ? '#ffc107' : (isStale ? '#adb5bd' : '#0d6efd');
+        const dupBadge  = isCurrent
+          ? '<span class="badge bg-success ms-1">ปัจจุบัน</span>'
+          : (isStale ? '<span class="badge bg-secondary ms-1">เก่า/ซ้ำ</span>' : '');
+        return `<tr class="${rowClass}" data-parent="${inv.invoiceNumber}" style="font-size:12px${isStale ? ';opacity:.75' : ''}">
           <td class="sel-chk-cell ${_selMode ? '' : 'd-none'}"></td>
-          <td style="border-left:3px solid ${foreign ? '#ffc107' : '#0d6efd'}; padding-left:20px; color:#666">
-            ↳ หน้า ${pgNum}
+          <td style="border-left:3px solid ${borderClr}; padding-left:20px; color:#666">
+            ↳ หน้า ${pgNum}${dupBadge}
           </td>
           <td class="text-muted">${Utils.formatDateTH(pg.createdAt)}</td>
-          <td class="text-muted">${collided ? `<span class="fw-semibold text-dark">${pgName}</span> · ` : ''}${pgItemSummary}</td>
+          <td class="text-muted">${(collided || isDup) ? `<span class="fw-semibold text-dark">${pgName}</span> · ` : ''}${pgItemSummary}</td>
           <td class="d-none d-md-table-cell"></td>
-          <td class="text-end d-none d-md-table-cell text-muted">฿${Utils.formatNumber(pgTotal)}</td>
+          <td class="text-end d-none d-md-table-cell ${isStale ? 'text-decoration-line-through' : ''} text-muted">฿${Utils.formatNumber(pgTotal)}</td>
           <td class="d-none d-md-table-cell"></td>
           <td></td>
           <td></td>
