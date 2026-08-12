@@ -702,7 +702,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.197"></script><script src="db.js?v=1.0.197"></script><script src="auth.js?v=1.0.197"></script><script src="nav.js?v=1.0.197"></script><script src="idb.js?v=1.0.197"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.198"></script><script src="db.js?v=1.0.198"></script><script src="auth.js?v=1.0.198"></script><script src="nav.js?v=1.0.198"></script><script src="idb.js?v=1.0.198"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -1281,7 +1281,7 @@ function openPayModal(invNum, custId) {
 
   const inv   = DB.getInvoices().find(i => i.invoiceNumber === invNum);
   const total = parseFloat(inv?.totalAmount) || 0;
-  const paid  = DB.getInvoicePaidAmount(invNum);
+  const paid  = DB.getInvoicePaidAmount(invNum, inv?.customerId);
   let rem     = total - paid;
   if (Math.abs(rem) < 0.005) rem = 0;
   document.getElementById('invSummary').innerHTML =
@@ -1975,7 +1975,7 @@ function refreshSummary(invNum) {
   renderExistingPayments(invNum);
   const inv   = DB.getInvoices().find(i => i.invoiceNumber === invNum);
   const total = parseFloat(inv?.totalAmount) || 0;
-  const paid  = DB.getInvoicePaidAmount(invNum);
+  const paid  = DB.getInvoicePaidAmount(invNum, inv?.customerId);
   let rem     = total - paid;
   if (Math.abs(rem) < 0.005) rem = 0;
   document.getElementById('invSummary').innerHTML =
@@ -2071,7 +2071,7 @@ function renderPendingPayments() {
   const invNum = document.getElementById('payInvNumHidden').value;
   const inv    = DB.getInvoices().find(i => i.invoiceNumber === invNum);
   const total  = parseFloat(inv?.totalAmount) || 0;
-  const alreadyPaid  = DB.getInvoicePaidAmount(invNum);
+  const alreadyPaid  = DB.getInvoicePaidAmount(invNum, inv?.customerId);
   const pendingTotal = _pendingPayments.reduce((s, p) => s + p.amount, 0);
   const rem    = total - alreadyPaid - pendingTotal;
   document.getElementById('invSummary').innerHTML =
@@ -2093,7 +2093,7 @@ function removePendingPayment(index) {
     const invNum = document.getElementById('payInvNumHidden').value;
     const inv    = DB.getInvoices().find(i => i.invoiceNumber === invNum);
     const total  = parseFloat(inv?.totalAmount) || 0;
-    const paid   = DB.getInvoicePaidAmount(invNum);
+    const paid   = DB.getInvoicePaidAmount(invNum, inv?.customerId);
     let rem      = total - paid;
     if (Math.abs(rem) < 0.005) rem = 0;
     document.getElementById('invSummary').innerHTML =
@@ -2187,7 +2187,7 @@ async function doSaveAllPayments(payments) {
   const invNum      = payments[0].invoiceNumber;
   const inv         = DB.getInvoices().find(i => i.invoiceNumber === invNum);
   const total       = parseFloat(inv?.totalAmount) || 0;
-  const alreadyPaid = DB.getInvoicePaidAmount(invNum);
+  const alreadyPaid = DB.getInvoicePaidAmount(invNum, inv?.customerId);
 
   // (signed-invoice image is saved independently via uploadSignedInvoice())
 
@@ -2231,7 +2231,7 @@ function _overpayOutstanding() {
     const pg1 = allInvs.find(i => i.invoiceNumber === num && i.page === 1)
              || allInvs.find(i => i.invoiceNumber === num);
     if (!pg1) return null;
-    const rem = (parseFloat(pg1.totalAmount) || 0) - DB.getInvoicePaidAmount(num);
+    const rem = (parseFloat(pg1.totalAmount) || 0) - DB.getInvoicePaidAmount(num, custId);
     if (rem <= 0.005) return null;
     return { num, date: pg1.createdAt, rem };
   }).filter(Boolean).sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -2382,7 +2382,7 @@ function showOutstandingPreview(custId) {
                 || allInvoices.find(i => i.invoiceNumber === num);
     if (!page1) return null;
     const total = parseFloat(page1.totalAmount) || 0;
-    const paid  = DB.getInvoicePaidAmount(num);
+    const paid  = DB.getInvoicePaidAmount(num, page1.customerId);
     const rem   = total - paid;
     if (rem <= 0.005) return null;
     return { num, date: page1.createdAt, total, paid, rem };
@@ -2530,7 +2530,7 @@ function printPaymentSummary(invNum) {
   const cust      = DB.getCustomerById(inv.customerId);
   const payments  = DB.getPaymentsByInvoice(invNum).filter(p => !p.cancelled);
   const total     = parseFloat(inv.totalAmount) || 0;
-  const paid      = DB.getInvoicePaidAmount(invNum);
+  const paid      = DB.getInvoicePaidAmount(invNum, inv.customerId);
   const remaining = total - paid;
   const printedBy = session ? session.name : '';
 
@@ -2694,7 +2694,7 @@ function openMultiPayModal() {
     const page1 = invoices.find(i => i.invoiceNumber === num && i.page === 1)
                 || invoices.find(i => i.invoiceNumber === num);
     if (!page1) return;
-    const due = (parseFloat(page1.totalAmount) || 0) - DB.getInvoicePaidAmount(num);
+    const due = (parseFloat(page1.totalAmount) || 0) - DB.getInvoicePaidAmount(num, page1.customerId);
     if (due > 0.005) custIds.add(page1.customerId);
   });
   // Build the searchable customer list (only customers with outstanding invoices)
@@ -2811,7 +2811,7 @@ function onMultiCustChange() {
     const page1 = invoices.find(i => i.invoiceNumber === num && i.page === 1)
                 || invoices.find(i => i.invoiceNumber === num);
     if (!page1) return null;
-    const due = (parseFloat(page1.totalAmount) || 0) - DB.getInvoicePaidAmount(num);
+    const due = (parseFloat(page1.totalAmount) || 0) - DB.getInvoicePaidAmount(num, custId);
     if (due <= 0.005) return null;
     return { invNum: num, custId, due, alloc: 0, date: page1.createdAt };
   }).filter(Boolean).sort((a, b) => new Date(a.date) - new Date(b.date));

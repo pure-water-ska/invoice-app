@@ -933,7 +933,7 @@ function _checkOverdueAlert() {
     const uniqNums = [...new Set(custInvs.map(i => i.invoiceNumber))];
     const unpaidNums = uniqNums.filter(num => {
       const inv = custInvs.find(i => i.invoiceNumber === num);
-      return inv && DB.getInvoicePaidAmount(num) < (parseFloat(inv.totalAmount)||0);
+      return inv && DB.getInvoicePaidAmount(num, c.id) < (parseFloat(inv.totalAmount)||0);
     });
     const msgs = [];
     if (pt.maxBills && unpaidNums.length > pt.maxBills)

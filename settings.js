@@ -1417,7 +1417,7 @@ function previewArchive() {
   for (const inv of all) {
     const dateStr = inv.createdAt || inv.date || '';
     if (!dateStr || dateStr >= cutoffIso) continue;
-    const paid  = DB.getInvoicePaidAmount(inv.invoiceNumber);
+    const paid  = DB.getInvoicePaidAmount(inv.invoiceNumber, inv.customerId);
     const total = parseFloat(inv.totalAmount || inv.total || 0);
     if (total > 0 && paid >= total - 0.005) count++;
   }

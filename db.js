@@ -867,10 +867,38 @@ const DB = {
     return Math.max(0, (parseFloat(p.amount) || 0) - (parseFloat(p.allocatedOut) || 0));
   },
 
-  getInvoicePaidAmount(invoiceNumber) {
-    return this.getPaymentsByInvoice(invoiceNumber)
-      .filter(p => !p.cancelled && !this.isChequePending(p))
-      .reduce((s, p) => s + this.effectivePaymentAmount(p), 0);
+  // True when one invoice NUMBER is shared by two DIFFERENT customers. That should
+  // never happen, but generateInvoiceNumberForDate() allocates from local data only
+  // (local counter + a scan of local getInvoices()) with no server-side reservation,
+  // so a device whose local copy lags can hand out a number another device already
+  // used. Four such numbers exist in production (180669-209, 300669-209, 270369-203,
+  // 280169-206). Multi-page invoices legitimately share a number, so nothing else in
+  // the app flags this.
+  _numberHasMultipleOwners(invoiceNumber) {
+    let first;
+    for (const i of this.getInvoices()) {
+      if (i.invoiceNumber !== invoiceNumber) continue;
+      if (first === undefined) first = i.customerId;
+      else if (i.customerId !== first) return true;
+    }
+    return false;
+  },
+
+  // Pass `customerId` whenever you have the invoice in hand. On a collided number the
+  // number alone does not identify an invoice, and since payments are looked up BY
+  // NUMBER one customer's payment was settling the other customer's invoice — silently
+  // understating what was owed (฿33,986.65 across เมขลา / ทรัพย์มณี / บูรพา when this
+  // was found). Payments always carry customerId (verified: 1,274/1,274 populated and
+  // every one matching an invoice record on its number), so scoping is reliable.
+  // Numbers with a single owner are untouched, so omitting customerId keeps the exact
+  // previous behaviour everywhere except those few numbers.
+  getInvoicePaidAmount(invoiceNumber, customerId) {
+    let ps = this.getPaymentsByInvoice(invoiceNumber)
+      .filter(p => !p.cancelled && !this.isChequePending(p));
+    if (customerId && ps.length && this._numberHasMultipleOwners(invoiceNumber)) {
+      ps = ps.filter(p => p.customerId === customerId);
+    }
+    return ps.reduce((s, p) => s + this.effectivePaymentAmount(p), 0);
   },
 
   // Record that `amount` of `paymentId`'s excess was cut to `targetInvNum`.
@@ -933,7 +961,7 @@ const DB = {
       const pg1 = invs.find(i => i.invoiceNumber === num && i.page === 1)
                || invs.find(i => i.invoiceNumber === num);
       if (!pg1) continue;
-      const diff = (parseFloat(pg1.totalAmount) || 0) - this.getInvoicePaidAmount(num);
+      const diff = (parseFloat(pg1.totalAmount) || 0) - this.getInvoicePaidAmount(num, custId);
       if (diff > 0.005)      { owed += diff;  owedCount++; }
       else if (diff < -0.005){ over += -diff; overCount++; }
     }
@@ -1051,7 +1079,7 @@ const DB = {
       if (!dateStr || dateStr >= cutoffIso) { toKeep.push(inv); continue; }
 
       // Calculate paid total (sum of non-cancelled payments)
-      const paid  = this.getInvoicePaidAmount(inv.invoiceNumber);
+      const paid  = this.getInvoicePaidAmount(inv.invoiceNumber, inv.customerId);
       const total = parseFloat(inv.totalAmount || inv.total || 0);
 
       if (total > 0 && paid >= total - 0.005) {

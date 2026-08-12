@@ -186,7 +186,7 @@
 </div>
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
-<script src="utils.js?v=1.0.197"></script><script src="db.js?v=1.0.197"></script><script src="auth.js?v=1.0.197"></script><script src="nav.js?v=1.0.197"></script>
+<script src="utils.js?v=1.0.198"></script><script src="db.js?v=1.0.198"></script><script src="auth.js?v=1.0.198"></script><script src="nav.js?v=1.0.198"></script>
 <script>
 // Tauri: unregister stale service workers (old SW could serve pre-fix JS files)
 if (window.IS_TAURI && 'serviceWorker' in navigator) {
@@ -309,7 +309,7 @@ function resetLabels() {
 }
 
 function getInvoiceStatus(inv) {
-  const paid = DB.getInvoicePaidAmount(inv.invoiceNumber);
+  const paid = DB.getInvoicePaidAmount(inv.invoiceNumber, inv.customerId);
   const total = parseFloat(inv.totalAmount) || 0;
   if (paid <= 0) return 'pending';
   if (paid >= total - 0.005) return 'paid';  // half-satang epsilon for float-sum totals
@@ -342,7 +342,7 @@ function load() {
     const pages = invoices.filter(i => i.invoiceNumber === num);
     const first = pages[0];
     const total = parseFloat(first.totalAmount) || 0;
-    const paid = DB.getInvoicePaidAmount(num);
+    const paid = DB.getInvoicePaidAmount(num, first.customerId);
     const status = paid <= 0 ? 'pending' : paid >= total - 0.005 ? 'paid' : 'partial';
     const created = new Date(first.createdAt);
 
@@ -388,7 +388,7 @@ function load() {
     if (seen2.has(inv.invoiceNumber)) continue;
     seen2.add(inv.invoiceNumber);
     const total = parseFloat(inv.totalAmount) || 0;
-    const paid = DB.getInvoicePaidAmount(inv.invoiceNumber);
+    const paid = DB.getInvoicePaidAmount(inv.invoiceNumber, inv.customerId);
     if (paid < total) unpaidInvs.push({ ...inv, remaining: total - paid });
   }
   unpaidInvs.sort((a,b) => b.remaining - a.remaining);

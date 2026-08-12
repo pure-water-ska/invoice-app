@@ -160,7 +160,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.197"></script><script src="db.js?v=1.0.197"></script><script src="auth.js?v=1.0.197"></script><script src="nav.js?v=1.0.197"></script><script src="idb.js?v=1.0.197"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.198"></script><script src="db.js?v=1.0.198"></script><script src="auth.js?v=1.0.198"></script><script src="nav.js?v=1.0.198"></script><script src="idb.js?v=1.0.198"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -924,7 +924,7 @@ function checkCustomerBalance(custId) {
     const page1 = allInvoices.find(i => i.invoiceNumber === num && i.page === 1)
                 || allInvoices.find(i => i.invoiceNumber === num);
     const total = parseFloat(page1.totalAmount) || 0;
-    const paid  = DB.getInvoicePaidAmount(num);
+    const paid  = DB.getInvoicePaidAmount(num, page1.customerId);
     const diff  = total - paid;
     if (Math.abs(diff) > 0.005) _balanceDetails.push({ num, total, paid, diff });
   });
@@ -937,7 +937,7 @@ function checkCustomerBalance(custId) {
       const page1 = allInvoices.find(i => i.invoiceNumber === num && i.page === 1)
                   || allInvoices.find(i => i.invoiceNumber === num);
       if (!page1) return false;
-      return DB.getInvoicePaidAmount(num) < (parseFloat(page1.totalAmount) || 0);
+      return DB.getInvoicePaidAmount(num, page1.customerId) < (parseFloat(page1.totalAmount) || 0);
     });
     const viols = [];
     if (pt.maxBills && unpaidNums.length > pt.maxBills)
@@ -1966,7 +1966,7 @@ async function renderPreview(pages) {
   const firstPage = pages[0];
   const cust = customers.find(c => c.id === firstPage.customerId);
   const totalPages = firstPage.totalPages || pages.length;
-  const paid = DB.getInvoicePaidAmount(firstPage.invoiceNumber);
+  const paid = DB.getInvoicePaidAmount(firstPage.invoiceNumber, firstPage.customerId);
   const total = parseFloat(firstPage.totalAmount) || 0;
   const remaining = total - paid;
   const editCount   = firstPage.editCount   || 0;

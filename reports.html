@@ -133,7 +133,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.197"></script><script src="db.js?v=1.0.197"></script><script src="auth.js?v=1.0.197"></script><script src="nav.js?v=1.0.197"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.198"></script><script src="db.js?v=1.0.198"></script><script src="auth.js?v=1.0.198"></script><script src="nav.js?v=1.0.198"></script><script src="bedate.js"></script>
 <script>
 Auth.require();
 DB.init();
@@ -192,11 +192,17 @@ function runReport() {
   const allPayments = DB.getPayments();
   const customers   = DB.getCustomers();
 
+  // Keyed on invoiceNumber + customerId, NOT invoiceNumber alone. A few historical
+  // numbers are shared by two different customers (see DB._numberHasMultipleOwners);
+  // all their records are page 1, so a number-only key silently dropped one customer's
+  // invoice out of every report — understating totalInvoiced by ฿43,099.15 when this
+  // was found. pagesByNum stays number-keyed: it feeds the per-invoice page list.
   const invByNum = {}, pagesByNum = {};
   allInvoices.forEach(inv => {
     if (!pagesByNum[inv.invoiceNumber]) pagesByNum[inv.invoiceNumber] = [];
     pagesByNum[inv.invoiceNumber].push(inv);
-    if (!invByNum[inv.invoiceNumber] || inv.page === 1) invByNum[inv.invoiceNumber] = inv;
+    const key = inv.invoiceNumber + '|' + (inv.customerId || '');
+    if (!invByNum[key] || inv.page === 1) invByNum[key] = inv;
   });
 
   const filtered = Object.values(invByNum).filter(inv => {
@@ -212,7 +218,7 @@ function runReport() {
   let totalInvoiced=0, totalPaid=0;
   filtered.forEach(inv => {
     totalInvoiced += parseFloat(inv.totalAmount)||0;
-    totalPaid     += DB.getInvoicePaidAmount(inv.invoiceNumber);
+    totalPaid     += DB.getInvoicePaidAmount(inv.invoiceNumber, inv.customerId);
   });
 
   renderSummary(filtered.length, totalInvoiced, totalPaid, totalInvoiced-totalPaid);
@@ -269,7 +275,7 @@ function groupInvoices(filtered, keyFn) {
     if (!map[k]) map[k] = { count:0, invoiced:0, paid:0 };
     map[k].count++;
     map[k].invoiced += parseFloat(inv.totalAmount)||0;
-    map[k].paid     += DB.getInvoicePaidAmount(inv.invoiceNumber);
+    map[k].paid     += DB.getInvoicePaidAmount(inv.invoiceNumber, inv.customerId);
   });
   return map;
 }
@@ -479,10 +485,14 @@ function renderByPayBehavior(customers, area) {
   const allInvoices = DB.getInvoices().filter(i => !i.cancelled);
   const allPayments = DB.getPayments();
 
-  // Build invoice map: invoiceNumber -> first-page invoice record
+  // Build invoice map: invoiceNumber + customerId -> first-page invoice record.
+  // Keyed with the customer because a few numbers are shared by two customers, and
+  // this report looks bills up from a specific customer's payments — a number-only
+  // key could return the OTHER customer's invoice and mis-date the on-time check.
   const invByNum = {};
   allInvoices.forEach(inv => {
-    if (!invByNum[inv.invoiceNumber] || inv.page === 1) invByNum[inv.invoiceNumber] = inv;
+    const key = inv.invoiceNumber + '|' + (inv.customerId || '');
+    if (!invByNum[key] || inv.page === 1) invByNum[key] = inv;
   });
 
   // Only customers with maxDays > 0
@@ -504,7 +514,7 @@ function renderByPayBehavior(customers, area) {
     let onTime = 0, late = 0, totalLateDays = 0;
 
     paidBills.forEach(num => {
-      const inv = invByNum[num];
+      const inv = invByNum[num + '|' + c.id];
       if (!inv) return;
       const invoiceDate = new Date(inv.createdAt).getTime();
       // Use latest payment date for this invoice
@@ -632,7 +642,7 @@ function renderDetailInvoices(group) {
   const sorted = [...invoices].sort((a,b) => new Date(a.createdAt)-new Date(b.createdAt));
 
   let totalInv=0, totalPaid=0;
-  sorted.forEach(inv => { totalInv+=parseFloat(inv.totalAmount)||0; totalPaid+=DB.getInvoicePaidAmount(inv.invoiceNumber); });
+  sorted.forEach(inv => { totalInv+=parseFloat(inv.totalAmount)||0; totalPaid+=DB.getInvoicePaidAmount(inv.invoiceNumber, inv.customerId); });
   const unpaid = totalInv-totalPaid;
 
   document.getElementById('detailSubtitle').textContent = `${sorted.length} ใบกำกับ`;
@@ -644,7 +654,7 @@ function renderDetailInvoices(group) {
 
   const rows = sorted.map(inv => {
     const cust = customers.find(c=>c.id===inv.customerId);
-    const paid = DB.getInvoicePaidAmount(inv.invoiceNumber);
+    const paid = DB.getInvoicePaidAmount(inv.invoiceNumber, inv.customerId);
     const u    = (parseFloat(inv.totalAmount)||0) - paid;
     const statusBadge = u <= 0
       ? '<span class="badge bg-success">ชำระครบ</span>'

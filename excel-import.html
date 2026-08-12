@@ -173,7 +173,7 @@ td.editable-cell input, td.editable-cell select { font-size: 13px; }
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.197"></script><script src="db.js?v=1.0.197"></script><script src="auth.js?v=1.0.197"></script><script src="nav.js?v=1.0.197"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.198"></script><script src="db.js?v=1.0.198"></script><script src="auth.js?v=1.0.198"></script><script src="nav.js?v=1.0.198"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -366,7 +366,7 @@ function matchInvoice(invNum, custName, amount) {
   if (invNum) {
     const found = invs.find(i => i.invoiceNumber === invNum);
     if (found) {
-      const paid      = DB.getInvoicePaidAmount(found.invoiceNumber);
+      const paid      = DB.getInvoicePaidAmount(found.invoiceNumber, found.customerId);
       const remaining = (parseFloat(found.totalAmount) || 0) - paid;
       return { type: 'matched', invoice: found, paid, remaining };
     }
@@ -388,12 +388,12 @@ function matchInvoice(invNum, custName, amount) {
       const uniqNums = [...new Set(allCustInvs.map(i => i.invoiceNumber))];
       const unpaidNums = uniqNums.filter(num => {
         const pg = allCustInvs.find(i => i.invoiceNumber === num);
-        return DB.getInvoicePaidAmount(num) < (parseFloat(pg?.totalAmount) || 0);
+        return DB.getInvoicePaidAmount(num, bestC.id) < (parseFloat(pg?.totalAmount) || 0);
       });
       const targetNums = unpaidNums.length ? unpaidNums : uniqNums;
       if (targetNums.length === 1) {
         const found     = allCustInvs.find(i => i.invoiceNumber === targetNums[0]);
-        const paid      = DB.getInvoicePaidAmount(found.invoiceNumber);
+        const paid      = DB.getInvoicePaidAmount(found.invoiceNumber, found.customerId);
         const remaining = (parseFloat(found.totalAmount) || 0) - paid;
         return { type: 'cust_only', invoice: found, paid, remaining, custName: bestC.name };
       }
@@ -573,7 +573,7 @@ function filterInvPick() {
   });
   const tbody = document.getElementById('invPickBody');
   tbody.innerHTML = invs.slice(0,100).map(inv => {
-    const paid  = DB.getInvoicePaidAmount(inv.invoiceNumber);
+    const paid  = DB.getInvoicePaidAmount(inv.invoiceNumber, inv.customerId);
     const total = parseFloat(inv.totalAmount) || 0;
     const rem   = total - paid;
     const cName = custMap[inv.customerId] || '';
@@ -591,7 +591,7 @@ function filterInvPick() {
 function pickInvoice(invId) {
   if (_pickRowIdx < 0) return;
   const inv       = DB.getInvoiceById(invId);
-  const paid      = DB.getInvoicePaidAmount(inv.invoiceNumber);
+  const paid      = DB.getInvoicePaidAmount(inv.invoiceNumber, inv.customerId);
   const remaining = (parseFloat(inv.totalAmount)||0) - paid;
   const ri        = _pickRowIdx;
   _rows[ri].match          = { type: 'matched', invoice: inv, paid, remaining };

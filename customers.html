@@ -401,7 +401,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="./vendor/html2canvas.min.js"></script>
-<script src="utils.js?v=1.0.197"></script><script src="db.js?v=1.0.197"></script><script src="auth.js?v=1.0.197"></script><script src="nav.js?v=1.0.197"></script>
+<script src="utils.js?v=1.0.198"></script><script src="db.js?v=1.0.198"></script><script src="auth.js?v=1.0.198"></script><script src="nav.js?v=1.0.198"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -586,7 +586,7 @@ function render() {
     return nums.reduce((s, n) => {
       const pg1 = invs.find(i => i.invoiceNumber === n && i.page === 1) || invs.find(i => i.invoiceNumber === n);
       const t = parseFloat(pg1?.totalAmount) || 0;
-      return s + Math.max(0, t - DB.getInvoicePaidAmount(n));
+      return s + Math.max(0, t - DB.getInvoicePaidAmount(n, c.id));
     }, 0);
   };
   const _nm = c => (c && c.name != null ? String(c.name) : '');
@@ -622,7 +622,7 @@ function render() {
     const totalBill = uniqNums.length;
     const unpaid = uniqNums.filter(num => {
       const inv = invoices.find(i => i.invoiceNumber === num);
-      return DB.getInvoicePaidAmount(num) < (inv ? parseFloat(inv.totalAmount)||0 : 0);
+      return DB.getInvoicePaidAmount(num, c.id) < (inv ? parseFloat(inv.totalAmount)||0 : 0);
     }).length;
     // Last invoice date
     const lastInv = invoices.length
@@ -733,7 +733,7 @@ function render() {
               const unpaidList = uniqNums
                 .map(num => {
                   const iv = invoices.find(i => i.invoiceNumber === num);
-                  const rem = (parseFloat(iv?.totalAmount)||0) - DB.getInvoicePaidAmount(num);
+                  const rem = (parseFloat(iv?.totalAmount)||0) - DB.getInvoicePaidAmount(num, c.id);
                   return rem > 0.01 ? { num, rem } : null;
                 })
                 .filter(Boolean)
@@ -863,11 +863,11 @@ function copyOverdueMsg(id) {
   const uniqNums  = [...new Set(invoices.map(i => i.invoiceNumber))];
   const unpaidNums = uniqNums.filter(num => {
     const inv = invoices.find(i => i.invoiceNumber === num);
-    return inv && DB.getInvoicePaidAmount(num) < (parseFloat(inv.totalAmount)||0);
+    return inv && DB.getInvoicePaidAmount(num, id) < (parseFloat(inv.totalAmount)||0);
   });
   const totalUnpaid = unpaidNums.reduce((sum, num) => {
     const inv = invoices.find(i => i.invoiceNumber === num);
-    const paid = DB.getInvoicePaidAmount(num);
+    const paid = DB.getInvoicePaidAmount(num, id);
     return sum + ((parseFloat(inv?.totalAmount)||0) - paid);
   }, 0);
   const msg = `เรียน ${c.name}\nมียอดค้างชำระ ${unpaidNums.length} ใบ รวม ${totalUnpaid.toLocaleString('th-TH',{minimumFractionDigits:2})} บาท\nกรุณาติดต่อชำระ ขอบคุณครับ/ค่ะ`;
@@ -887,7 +887,7 @@ function showOutstandingPreview(id) {
   const uniqNums  = [...new Set(invoices.map(i => i.invoiceNumber))];
   const unpaidRows = uniqNums.map(num => {
     const inv  = invoices.find(i => i.invoiceNumber === num);
-    const paid = DB.getInvoicePaidAmount(num);
+    const paid = DB.getInvoicePaidAmount(num, id);
     const rem  = (parseFloat(inv?.totalAmount)||0) - paid;
     return rem > 0 ? { num, date: inv?.createdAt, total: parseFloat(inv?.totalAmount)||0, paid, rem } : null;
   }).filter(Boolean).sort((a,b) => new Date(a.date)-new Date(b.date));
@@ -1379,7 +1379,7 @@ function getPayTermsViolations(c, invoices, uniqNums) {
   if (!pt || (!pt.maxBills && !pt.maxDays)) return [];
   const unpaidNums = uniqNums.filter(num => {
     const inv = invoices.find(i => i.invoiceNumber === num);
-    return inv && DB.getInvoicePaidAmount(num) < (parseFloat(inv.totalAmount) || 0);
+    return inv && DB.getInvoicePaidAmount(num, c.id) < (parseFloat(inv.totalAmount) || 0);
   });
   const result = [];
   if (pt.maxBills && unpaidNums.length > pt.maxBills)
