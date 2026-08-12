@@ -784,6 +784,15 @@ const DB = {
     return `${prefix}${String(next).padStart(3, '0')}`;
   },
 
+  // Highest run number THIS DEVICE knows about for a date — the floor a server-side
+  // reservation must not drop below. Same inputs as invoiceNumberCandidate(), without
+  // the +1.
+  localFloorRunForDate(isoDate) {
+    const { prefix, dateKey } = this._invNumParts(isoDate);
+    const counters = this._getObj(this.K.COUNTER, {});
+    return Math.max(counters[dateKey] || 0, this._maxRunningForPrefix(prefix));
+  },
+
   // Consume the counter up to the number actually used, so it is never handed out again.
   // Pairs with invoiceNumberCandidate(); together they are generateInvoiceNumberForDate()
   // split into "choose" and "commit".

@@ -160,7 +160,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.200"></script><script src="db.js?v=1.0.200"></script><script src="auth.js?v=1.0.200"></script><script src="nav.js?v=1.0.200"></script><script src="idb.js?v=1.0.200"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.201"></script><script src="db.js?v=1.0.201"></script><script src="auth.js?v=1.0.201"></script><script src="nav.js?v=1.0.201"></script><script src="idb.js?v=1.0.201"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -1466,21 +1466,39 @@ async function saveInvoice(shouldPrint = false) {
   // different customers. Ask the server before committing, and advance past anything
   // already owned by someone else. Offline the check returns "unknown" and we keep the
   // local number rather than blocking the save (the app is offline-first).
+  // Three tiers, strongest first:
+  //   1. atomic  — Firestore transaction on a per-day counter. Two devices saving at the
+  //                same instant cannot receive the same number.
+  //   2. checked — query the server and step past anything already taken. Closes the
+  //                stale-local hole but leaves a small read→write race window.
+  //   3. local   — offline. Local data only, unverified.
   const _firstNum = DB.invoiceNumberCandidate(_dateISO, 0);
+  const _parts    = DB._invNumParts(_dateISO);
   let invNumber   = _firstNum;
-  if (window.Sync && typeof Sync.reserveFreeInvoiceNumber === 'function') {
+  let _numSource  = 'local';
+  if (window.Sync && typeof Sync.reserveInvoiceNumberAtomic === 'function') {
+    try {
+      const _atomic = await Sync.reserveInvoiceNumberAtomic(
+        _parts.dateKey, _parts.prefix, DB.localFloorRunForDate(_dateISO));
+      if (_atomic && _atomic.number) { invNumber = _atomic.number; _numSource = 'atomic'; }
+    } catch (e) {
+      console.warn('[saveInvoice] atomic number reservation failed', e);
+    }
+  }
+  if (_numSource === 'local' && window.Sync && typeof Sync.reserveFreeInvoiceNumber === 'function') {
     try {
       const _res = await Sync.reserveFreeInvoiceNumber(
         _firstNum, customerId, n => DB.invoiceNumberCandidate(_dateISO, n));
       invNumber = _res.number || _firstNum;
-      if (_res.bumped) {
-        DB.logActivity(session.userId, session.username, 'เลื่อนเลขที่ใบกำกับ (เลขซ้ำบนเซิร์ฟเวอร์)',
-          { from: _firstNum, to: invNumber, customer: customerId });
-        Utils.showAlert(`เลขที่ ${_firstNum} ถูกใช้แล้วบนเซิร์ฟเวอร์ — เปลี่ยนเป็น ${invNumber}`, 'warning');
-      }
+      if (_res.verified) _numSource = 'checked';
     } catch (e) {
       console.warn('[saveInvoice] invoice-number server check failed, using local number', e);
     }
+  }
+  if (invNumber !== _firstNum) {
+    DB.logActivity(session.userId, session.username, 'เลื่อนเลขที่ใบกำกับ (เลขซ้ำบนเซิร์ฟเวอร์)',
+      { from: _firstNum, to: invNumber, customer: customerId, source: _numSource });
+    Utils.showAlert(`เลขที่ ${_firstNum} ถูกใช้แล้วบนเซิร์ฟเวอร์ — เปลี่ยนเป็น ${invNumber}`, 'warning');
   }
   DB.commitInvoiceNumber(_dateISO, invNumber);
   const createdAt = new Date(_dateISO).toISOString();

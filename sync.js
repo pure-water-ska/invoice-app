@@ -2418,6 +2418,78 @@ var Sync = {
     return { number: num || firstNumber, verified: true, bumped: num !== firstNumber };
   },
 
+  // Highest run number the SERVER holds for an invoice-number prefix (e.g. "300669-").
+  // Firestore has no prefix operator; the standard trick is a range query bounded above
+  // by U+F8FF, the highest private-use BMP char. Single-field range, so no composite
+  // index is required.
+  // Forced to source:'server' — a cached read could report a max that is too LOW, which
+  // would seed the counter below numbers already in use. Throws offline, which is correct
+  // here: the caller must fall back rather than guess.
+  async _serverMaxRunForPrefix(prefix) {
+    if (!this.ready || !this._db || !prefix) return null;
+    try {
+      const snap = await this._orgRef().collection('invoices')
+        .where('invoiceNumber', '>=', prefix)
+        .where('invoiceNumber', '<',  prefix + '\uf8ff')
+        .get({ source: 'server' });
+      let max = 0;
+      snap.docs.forEach(d => {
+        const n = (d.data() || {}).invoiceNumber || '';
+        if (n.indexOf(prefix) !== 0) return;
+        const run = parseInt(n.slice(prefix.length), 10);
+        if (!isNaN(run) && run > max) max = run;
+      });
+      return max;
+    } catch (e) {
+      console.warn('[Sync] _serverMaxRunForPrefix failed:', e.message);
+      return null;
+    }
+  },
+
+  // ── Atomic invoice-number reservation ───────────────────────────────────────────────
+  // The strongest guarantee available client-side: a Firestore TRANSACTION against a
+  // per-day counter document, so two devices saving at the same instant cannot be handed
+  // the same number. reserveFreeInvoiceNumber() only *checks* — between its read and the
+  // write there is still a race window. This closes it.
+  //
+  //   counter doc:  orgs/<org>/inv_counters/<YYYY-MM-DD>  →  { run, at, by }
+  //
+  // Seeding is the subtle part. The counter must never start below the numbers already in
+  // use for that date, or every reservation collides with existing invoices. A client-SDK
+  // transaction can only get() documents — it cannot run queries — so the floor is
+  // computed BEFORE the transaction (server prefix max, plus the caller's local max) and
+  // applied as a floor inside it. If the floor cannot be established, we do NOT guess.
+  //
+  // The counter is deliberately NOT wiped by settings.js runRebaseline(): a counter that
+  // only ever moves forward can never reissue a number, even across a full re-import.
+  // Worst case it leaves a gap in the sequence, which is the safe direction to err.
+  //
+  // Returns { number, run } or null on ANY failure — offline (transactions require
+  // connectivity and do not work against the offline cache), security rules denying the
+  // collection, or contention. Callers MUST fall back: failing to reserve must never stop
+  // an invoice from being saved.
+  async reserveInvoiceNumberAtomic(dateKey, prefix, localFloorRun = 0) {
+    if (!this.ready || !this._db || !dateKey || !prefix) return null;
+    if (typeof this._db.runTransaction !== 'function') return null;
+    const srvMax = await this._serverMaxRunForPrefix(prefix);
+    if (srvMax === null) return null;                    // no trustworthy floor → fall back
+    const floor = Math.max(srvMax, localFloorRun || 0);
+    const ref = this._orgRef().collection('inv_counters').doc(dateKey);
+    try {
+      const run = await this._db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        const cur  = (snap.exists && Number(snap.data().run)) || 0;
+        const next = Math.max(cur, floor) + 1;
+        tx.set(ref, { run: next, at: new Date().toISOString(), by: this._deviceId || '' }, { merge: true });
+        return next;
+      });
+      return { number: `${prefix}${String(run).padStart(3, '0')}`, run };
+    } catch (e) {
+      console.warn('[Sync] reserveInvoiceNumberAtomic failed:', e.message);
+      return null;
+    }
+  },
+
   _badge(status) {
     const el = document.getElementById('syncStatusBadge');
     if (!el) return;

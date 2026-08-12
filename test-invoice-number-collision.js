@@ -50,20 +50,53 @@ function freshDB() {
   return DB;
 }
 
+// Fake Firestore: a chainable query builder that actually applies the ==/>=/< operators
+// the real code passes, plus an inv_counters document store and runTransaction. Only the
+// network round-trip is fake; every code path under test is the real implementation.
 function syncWithServer(records, opts = {}) {
   const S = loadSync();
   S.ready = opts.ready === undefined ? true : opts.ready;
-  S._db = {};
-  S._orgRef = () => ({
-    collection: () => ({
-      where: (field, op, val) => ({
-        get: async () => {
-          if (opts.throws) throw new Error('permission-denied');
-          return { docs: records.filter(r => r[field] === val).map(r => ({ id: r.id, data: () => r })) };
+  S._deviceId = 'test-device';
+  const counters = opts.counters || {};       // dateKey -> { run }
+  const OPS = {
+    '==': (a, b) => a === b,
+    '>=': (a, b) => a >= b,
+    '<':  (a, b) => a <  b,
+  };
+
+  const makeQuery = (colName, constraints) => ({
+    where: (field, op, val) => makeQuery(colName, constraints.concat([{ field, op, val }])),
+    get: async (getOpts) => {
+      if (opts.throwsQuery) throw new Error('unavailable: offline');
+      if (getOpts && getOpts.source === 'server' && opts.offline) {
+        throw new Error('Failed to get document because the client is offline.');
+      }
+      const docs = records
+        .filter(r => constraints.every(c => OPS[c.op](r[c.field], c.val)))
+        .map(r => ({ id: r.id, data: () => r }));
+      return { docs };
+    },
+  });
+
+  S._db = {
+    runTransaction: async (fn) => {
+      if (opts.throwsTx) throw new Error('PERMISSION_DENIED: Missing or insufficient permissions');
+      const tx = {
+        get: async (ref) => {
+          const cur = counters[ref._id];
+          return { exists: cur !== undefined, data: () => cur };
         },
-      }),
+        set: (ref, val) => { counters[ref._id] = Object.assign({}, counters[ref._id], val); },
+      };
+      return fn(tx);
+    },
+  };
+  S._orgRef = () => ({
+    collection: (name) => Object.assign(makeQuery(name, []), {
+      doc: (id) => ({ _id: id }),
     }),
   });
+  S._counters = counters;                     // so tests can inspect what was written
   return S;
 }
 
@@ -121,9 +154,9 @@ const t = (label, cond, detail) => {
   t('not bumped', r.bumped === false);
 
   console.log('\nquery error — must read as UNKNOWN, never as free');
-  const owners = await syncWithServer([], { throws: true }).invoiceNumberOwners(first);
+  const owners = await syncWithServer([], { throwsQuery: true }).invoiceNumberOwners(first);
   t('invoiceNumberOwners() returns null', owners === null, String(owners));
-  r = await syncWithServer([], { throws: true }).reserveFreeInvoiceNumber(first, CUST_A, nextFor);
+  r = await syncWithServer([], { throwsQuery: true }).reserveFreeInvoiceNumber(first, CUST_A, nextFor);
   t('reserve falls back to the original number', r.number === first && r.verified === false);
 
   console.log('\ninvoiceNumberOwners() shape');
@@ -151,6 +184,76 @@ const t = (label, cond, detail) => {
   t('true for a collided number', DB._numberHasMultipleOwners(PREFIX + '009') === true);
   t('false for a normal number', DB._numberHasMultipleOwners(PREFIX + '001') === false);
   t('false for an unknown number', DB._numberHasMultipleOwners('nope') === false);
+
+  // ── atomic reservation (Firestore transaction on a per-day counter) ────────────────
+  const DKEY = '2026-06-30';
+  const serverInvoices = [
+    { id: 's1', invoiceNumber: PREFIX + '001', customerId: CUST_A },
+    { id: 's2', invoiceNumber: PREFIX + '007', customerId: CUST_B },   // server max run = 7
+    { id: 's3', invoiceNumber: '010769-099',   customerId: CUST_B },   // different date, must be ignored
+  ];
+
+  console.log('\nserver prefix max (range query must not leak other dates)');
+  let S = syncWithServer(serverInvoices);
+  t('max run for this prefix is 7', (await S._serverMaxRunForPrefix(PREFIX)) === 7,
+    String(await S._serverMaxRunForPrefix(PREFIX)));
+
+  console.log('\natomic: no counter doc yet — seeds above the server max');
+  S = syncWithServer(serverInvoices, { counters: {} });
+  let a = await S.reserveInvoiceNumberAtomic(DKEY, PREFIX, 0);
+  t('first reservation is server max + 1', a && a.number === PREFIX + '008', JSON.stringify(a));
+  t('counter doc was written', S._counters[DKEY] && S._counters[DKEY].run === 8, JSON.stringify(S._counters));
+
+  console.log('\natomic: consecutive reservations never repeat');
+  const seen = new Set();
+  for (let i = 0; i < 3; i++) seen.add((await S.reserveInvoiceNumberAtomic(DKEY, PREFIX, 0)).number);
+  t('three more reservations are all distinct', seen.size === 3, [...seen].join(', '));
+  t('and all above the first', [...seen].every(n => n > a.number));
+
+  console.log('\natomic: counter ahead of the server wins (monotonic, never reissues)');
+  S = syncWithServer(serverInvoices, { counters: { [DKEY]: { run: 50 } } });
+  a = await S.reserveInvoiceNumberAtomic(DKEY, PREFIX, 0);
+  t('uses counter + 1, not serverMax + 1', a && a.number === PREFIX + '051', JSON.stringify(a));
+
+  console.log('\natomic: counter BEHIND the server (e.g. after a re-import) — floor applies');
+  S = syncWithServer(serverInvoices, { counters: { [DKEY]: { run: 2 } } });
+  a = await S.reserveInvoiceNumberAtomic(DKEY, PREFIX, 0);
+  t('clears the server max instead of reissuing 003', a && a.number === PREFIX + '008', JSON.stringify(a));
+
+  console.log('\natomic: local floor above both is respected');
+  S = syncWithServer(serverInvoices, { counters: { [DKEY]: { run: 2 } } });
+  a = await S.reserveInvoiceNumberAtomic(DKEY, PREFIX, 30);
+  t('uses the local floor + 1', a && a.number === PREFIX + '031', JSON.stringify(a));
+
+  console.log('\natomic: two devices sharing one counter cannot collide');
+  const shared = {};
+  const d1 = syncWithServer(serverInvoices, { counters: shared });
+  const d2 = syncWithServer(serverInvoices, { counters: shared });
+  const n1 = (await d1.reserveInvoiceNumberAtomic(DKEY, PREFIX, 0)).number;
+  const n2 = (await d2.reserveInvoiceNumberAtomic(DKEY, PREFIX, 0)).number;
+  t('the two devices get different numbers', n1 !== n2, `${n1} vs ${n2}`);
+
+  console.log('\natomic: every failure mode must return null so the caller falls back');
+  t('not ready → null',
+    (await syncWithServer(serverInvoices, { ready: false }).reserveInvoiceNumberAtomic(DKEY, PREFIX, 0)) === null);
+  t('offline (server-source read throws) → null',
+    (await syncWithServer(serverInvoices, { offline: true }).reserveInvoiceNumberAtomic(DKEY, PREFIX, 0)) === null);
+  t('prefix query throws → null (never guesses the floor)',
+    (await syncWithServer(serverInvoices, { throwsQuery: true }).reserveInvoiceNumberAtomic(DKEY, PREFIX, 0)) === null);
+  t('rules deny the transaction → null',
+    (await syncWithServer(serverInvoices, { throwsTx: true }).reserveInvoiceNumberAtomic(DKEY, PREFIX, 0)) === null);
+  t('missing dateKey/prefix → null',
+    (await syncWithServer(serverInvoices).reserveInvoiceNumberAtomic('', PREFIX, 0)) === null &&
+    (await syncWithServer(serverInvoices).reserveInvoiceNumberAtomic(DKEY, '', 0)) === null);
+
+  console.log('\natomic: a denied transaction must not have consumed anything');
+  const untouched = {};
+  await syncWithServer(serverInvoices, { counters: untouched, throwsTx: true }).reserveInvoiceNumberAtomic(DKEY, PREFIX, 0);
+  t('counter store still empty', Object.keys(untouched).length === 0, JSON.stringify(untouched));
+
+  console.log('\nDB.localFloorRunForDate()');
+  t('reports the highest run this device knows (009)', DB.localFloorRunForDate(ISO) >= 9,
+    String(DB.localFloorRunForDate(ISO)));
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
