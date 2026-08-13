@@ -160,7 +160,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.202"></script><script src="db.js?v=1.0.202"></script><script src="auth.js?v=1.0.202"></script><script src="nav.js?v=1.0.202"></script><script src="idb.js?v=1.0.202"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.203"></script><script src="db.js?v=1.0.203"></script><script src="auth.js?v=1.0.203"></script><script src="nav.js?v=1.0.203"></script><script src="idb.js?v=1.0.203"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -910,6 +910,11 @@ let _deductReturnIds = [];
 // addSelectedBalances() — applied to the source invoices' payments once the
 // new invoice number is finalized in saveInvoice(). See DB.allocateOverpayCredit().
 let _pendingCreditAllocations = [];
+// owed source-invoice balances pulled onto this new invoice via
+// addSelectedBalances() — retired on the source invoice via a non-cash
+// carry-forward payment once the new invoice number exists. See
+// DB.carryForwardOwedBalance().
+let _pendingCarryForwards = [];
 
 function checkCustomerBalance(custId) {
   const alertDiv = document.getElementById('balanceAlert');
@@ -926,7 +931,7 @@ function checkCustomerBalance(custId) {
     const total = parseFloat(page1.totalAmount) || 0;
     const paid  = DB.getInvoicePaidAmount(num, page1.customerId);
     const diff  = total - paid;
-    if (Math.abs(diff) > 0.005) _balanceDetails.push({ num, total, paid, diff });
+    if (Math.abs(diff) > 0.005) _balanceDetails.push({ num, total, paid, diff, custId: page1.customerId });
   });
 
   // Payment terms violations
@@ -1053,9 +1058,12 @@ function addSelectedBalances() {
     // Overpaid (diff < 0): the source invoice has real, already-recorded
     // credit — queue it to be pulled off that invoice's payment(s) once this
     // new invoice is saved, so it stops recurring on future balance checks.
-    // Owed (diff > 0) balances stay memo-only — the old invoice isn't
-    // actually paid until THIS invoice's own payment comes in later.
-    if (!isOwed) _pendingCreditAllocations.push({ num: d.num, amount: Math.abs(d.diff) });
+    // Owed (diff > 0): queue a non-cash carry-forward payment on the source
+    // invoice for the same reason — without it, the source invoice kept
+    // showing as owed forever while the SAME debt was now also billed here,
+    // a real double-billing risk. See DB.carryForwardOwedBalance().
+    if (isOwed) _pendingCarryForwards.push({ num: d.num, custId: d.custId, amount: d.diff });
+    else        _pendingCreditAllocations.push({ num: d.num, amount: Math.abs(d.diff) });
   });
 
   renderRows();
@@ -1563,6 +1571,17 @@ async function saveInvoice(shouldPrint = false) {
     });
   });
   _pendingCreditAllocations = [];
+
+  // Retire the owed balances carried forward from other invoices onto this one —
+  // the mirror of the overpaid step above (see addSelectedBalances() /
+  // DB.carryForwardOwedBalance()).
+  _pendingCarryForwards.forEach(c => {
+    DB.carryForwardOwedBalance(c.num, c.custId, invNumber, c.amount, session.name, session.username);
+    DB.logActivity(session.userId, session.username, 'ยกยอดค้างชำระไปใบใหม่', {
+      sourceInvoice: c.num, targetInvoice: invNumber, amount: c.amount
+    });
+  });
+  _pendingCarryForwards = [];
 
   DB.logActivity(session.userId, session.username, 'สร้างใบกำกับ', { invoiceNumber: invNumber, totalAmount, customer: customerId });
 

@@ -978,6 +978,48 @@ const DB = {
     return amount - remaining;
   },
 
+  // A payment record with NO real money behind it — it exists purely to mark an
+  // invoice's own debt as administratively retired because that debt was folded into
+  // a DIFFERENT invoice's total instead. See carryForwardOwedBalance() below.
+  isCarryForwardPayment(p) { return !!p.carryForward; },
+
+  // Mirror of allocateOverpayCredit(), for the OWED side. Adding a ค้างชำระ balance
+  // onto a new invoice via invoice-create.html's "เพิ่มที่เลือกลงใบใหม่" button folds
+  // the old debt into the NEW invoice's total as a memo line (billing the customer
+  // again for it there) — but unlike the overpaid case, there is no existing payment
+  // to reallocate; the source invoice is simply underpaid. Without this, the source
+  // invoice kept showing as owed forever (inflating every balance figure
+  // indefinitely) while the SAME debt was now also billed on the new invoice — a real
+  // double-billing risk if anyone later paid the source invoice directly too.
+  //
+  // Creates a payment record with NO cash behind it — amount is the debt being
+  // retired, not money received — tagged carryForward:true / carryForwardTo so it
+  // reads clearly as a non-cash transfer (not a receipt) everywhere a payment method
+  // is shown (print, history). getInvoicePaidAmount() counts it like any other
+  // payment, which is the whole point: it settles the source invoice's own balance.
+  // System-wide the customer's total owed is unchanged by this — it is simply
+  // consolidated onto the new invoice number instead of split across two.
+  carryForwardOwedBalance(sourceInvNum, sourceCustId, targetInvNum, amount, by, byUser) {
+    if (!(amount > 0.005)) return null;
+    const p = {
+      id: Utils.uuid(),
+      invoiceNumber: sourceInvNum,
+      customerId: sourceCustId,
+      method: 'ยกยอดไปใบใหม่',
+      amount,
+      carryForward: true,
+      carryForwardTo: targetInvNum,
+      notes: `ยกยอดค้างชำระไปใบกำกับ ${targetInvNum}`,
+      payDate: new Date().toISOString().slice(0, 10),
+      createdAt: new Date().toISOString(),
+      createdBy: by,
+      createdByUser: byUser,
+      imageHistory: [],
+    };
+    this.addPayment(p);
+    return p;
+  },
+
   markChequeCleared(payId, clearedDate) {
     return this.updatePayment(payId, { chequeCleared: true, clearedDate });
   },
