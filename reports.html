@@ -133,7 +133,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.205"></script><script src="db.js?v=1.0.205"></script><script src="auth.js?v=1.0.205"></script><script src="nav.js?v=1.0.205"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.206"></script><script src="db.js?v=1.0.206"></script><script src="auth.js?v=1.0.206"></script><script src="nav.js?v=1.0.206"></script><script src="bedate.js"></script>
 <script>
 Auth.require();
 DB.init();
@@ -210,7 +210,14 @@ function runReport() {
     return d >= from && d <= to;
   });
 
+  // Feeds ONLY renderByPayment() (the "รายการชำระ" tab). Excludes cancelled and
+  // still-pending cheques — the same filter DB.getInvoicePaidAmount() applies
+  // everywhere else in the app. Before this, a still-uncleared cheque showed here at
+  // its full face amount even though it's excluded from every paid-amount total
+  // elsewhere (getInvoicePaidAmount/effectivePaymentAmount), and a cancelled payment
+  // was counted as received money outright.
   const paymentsInRange = allPayments.filter(p => {
+    if (p.cancelled || DB.isChequePending(p)) return false;
     const d = new Date(p.createdAt);
     return d >= from && d <= to;
   });
