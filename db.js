@@ -1020,8 +1020,15 @@ const DB = {
     return p;
   },
 
+  // Also writes clearedDate into payDate. A cheque payment is created with payDate:''
+  // (see payments.html collectPaymentData/multiPaySave) — there is no meaningful
+  // "payment date" until it actually clears. Mirroring clearedDate into payDate here
+  // means every EXISTING payDate reader (the before-invoice-date sanity check, the
+  // printed payment receipt, the payment-detail view) automatically shows the right
+  // date the moment it's cleared, with no per-method branching needed at any of those
+  // call sites — single source of truth, not two fields kept in sync by hand.
   markChequeCleared(payId, clearedDate) {
-    return this.updatePayment(payId, { chequeCleared: true, clearedDate });
+    return this.updatePayment(payId, { chequeCleared: true, clearedDate, payDate: clearedDate });
   },
 
   // Net over/under-paid balance for a customer — the SAME calculation the

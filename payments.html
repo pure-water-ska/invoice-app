@@ -702,7 +702,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.204"></script><script src="db.js?v=1.0.204"></script><script src="auth.js?v=1.0.204"></script><script src="nav.js?v=1.0.204"></script><script src="idb.js?v=1.0.204"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.205"></script><script src="db.js?v=1.0.205"></script><script src="auth.js?v=1.0.205"></script><script src="nav.js?v=1.0.205"></script><script src="idb.js?v=1.0.205"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -1302,8 +1302,15 @@ function openPayModal(invNum, custId) {
 
 // ── Date check ────────────────────────────────────────────────────────────────
 function checkPayDate() {
-  // For "โอน" the active date is วันที่โอน; otherwise it's วันที่ชำระเงิน.
+  // For "โอน" the active date is วันที่โอน; for "เช็ค" there is no date to check yet
+  // at entry time (see onMethodChange) — this same check re-runs once the cheque is
+  // marked cleared, since markChequeCleared() populates payDate at that point.
+  // Otherwise it's วันที่ชำระเงิน.
   const method     = document.getElementById('payMethod').value;
+  if (method === 'เช็ค') {
+    document.getElementById('payDateAlert').style.display = 'none';
+    return;
+  }
   const dateStr    = method === 'โอน'
     ? document.getElementById('payTransferDateBE').value
     : document.getElementById('payDate').value;
@@ -1470,8 +1477,14 @@ function onMethodChange() {
   document.querySelectorAll('.pay-cash').forEach(el     => el.style.display = isCash     ? '' : 'none');
   document.querySelectorAll('.pay-transfer').forEach(el => el.style.display = isTransfer ? '' : 'none');
   document.querySelectorAll('.pay-cheque').forEach(el   => el.style.display = isCheque   ? '' : 'none');
-  // "วันที่ชำระเงิน" is hidden for transfer — วันที่โอน serves as the payment date there.
-  document.querySelectorAll('.pay-date-field').forEach(el => el.style.display = isTransfer ? 'none' : '');
+  // "วันที่ชำระเงิน" is hidden for transfer (วันที่โอน serves as the payment date there)
+  // and for cheque — a cheque isn't real money until it clears, so there is no
+  // meaningful "payment date" to collect at entry time. The date comes from the
+  // "ขึ้นเงินแล้ว" (cleared) button instead: markChequeCleared() writes clearedDate
+  // into payDate itself, so every existing payDate reader (this before-invoice-date
+  // check, the printed receipt, the payment-detail view) picks it up automatically
+  // with no per-method branching — see markChequeCleared() in db.js.
+  document.querySelectorAll('.pay-date-field').forEach(el => el.style.display = (isTransfer || isCheque) ? 'none' : '');
   checkPayDate(); // re-evaluate the before-invoice-date warning against the now-active date field
   if (isCash) buildCashCollectorSelect();
   if (isTransfer || isCheque) buildTransferAccountSelect();
@@ -2031,6 +2044,11 @@ function collectPaymentData() {
     payDate:        (function(){
                       // Transfer has no separate "วันที่ชำระเงิน" field — use วันที่โอน as the payment date.
                       if (method === 'โอน') return Utils.parseBEToISO(document.getElementById('payTransferDateBE').value) || Utils.todayInputValue();
+                      // Cheque has no payment date yet — left blank until markChequeCleared()
+                      // fills it in with the actual clearance date. Every payDate reader
+                      // already guards on `p.payDate &&`, so a pending cheque naturally
+                      // shows as dateless rather than misleadingly "paid today".
+                      if (method === 'เช็ค') return '';
                       return Utils.parseBEToISO(document.getElementById('payDate').value) || Utils.todayInputValue();
                     })(),
     createdAt:      now,
@@ -2553,9 +2571,18 @@ function printPaymentSummary(invNum) {
   const rows = payments.map((p, i) => {
     const detail  = [methodDetail(p), p.notes].filter(Boolean).join(' | ');
     const methodEn = _methodEn[p.method] || p.method;
+    // A cheque isn't real money until it clears, so the receipt shouldn't print the
+    // date it was merely recorded (createdAt) as if that were the payment date. Show
+    // the cleared date once available (mirrored into payDate by markChequeCleared),
+    // or "รอขึ้นเงิน" while still pending. Cash/transfer rows are unaffected.
+    const dateCell = DB.isChequePending(p)
+      ? '<span class="text-muted">รอขึ้นเงิน</span>'
+      : (p.method === 'เช็ค' && p.payDate)
+        ? Utils.formatDateTH(p.payDate)
+        : _printDateTimeFmt(p.createdAt);
     return `<tr>
       <td style="padding:3px 5px;border:1px solid #ccc;text-align:center">${i+1}</td>
-      <td style="padding:3px 5px;border:1px solid #ccc;text-align:center;white-space:nowrap">${_printDateTimeFmt(p.createdAt)}</td>
+      <td style="padding:3px 5px;border:1px solid #ccc;text-align:center;white-space:nowrap">${dateCell}</td>
       <td style="padding:3px 5px;border:1px solid #ccc;text-align:center">${methodEn}</td>
       <td style="padding:3px 5px;border:1px solid #ccc">${detail}</td>
       <td style="padding:3px 5px;border:1px solid #ccc;text-align:center">${p.createdBy || '-'}</td>
@@ -3018,7 +3045,9 @@ async function saveMultiPay() {
       chequeImage:   sharedChequeImg,
       imageHistory,
       notes:         '',
-      payDate:       todayISO,
+      // Cheque: left blank until markChequeCleared() fills it in — see the matching
+      // comment in collectPaymentData().
+      payDate:       method === 'เช็ค' ? '' : todayISO,
       createdAt:     now,
       createdBy:     session.name,
       createdByUser: session.username,
