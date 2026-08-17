@@ -661,6 +661,29 @@ const DB = {
   saveInvoices(v) { this._set(this.K.INVOICES, v); },
   getInvoiceById(id) { return this.getInvoices().find(v => v.id === id) || null; },
   getInvoicesByNumber(num) { return this.getInvoices().filter(v => v.invoiceNumber === num); },
+  // Same-page, same-customer duplicates under one invoice number — an edit writes a new
+  // page record and is supposed to explicitly delete the old one from Firestore, but
+  // that delete has occasionally still failed to land (documented live recurrence on
+  // invoice 180769-001 — see saveInvoiceEdit()'s own comment). getInvoicesByNumber()
+  // deliberately returns EVERYTHING, because deletion/cleanup flows need the full raw
+  // list. Anything that DISPLAYS a record's content, or uses one as the basis for
+  // further edits (view, print, the edit form, editCount/editHistory/printCount
+  // metadata), must call this instead: it collapses each (customerId, page) group down
+  // to the highest-editCount record, so a stale pre-edit page is never shown, printed,
+  // double-counted toward printCount, or used to seed the next edit's metadata.
+  // Ordinary multi-page invoices are unaffected — distinct page numbers never share a
+  // group — and a genuine cross-customer collision is unaffected too, since different
+  // customerId means a different group.
+  getCurrentPagesByNumber(num) {
+    const all = this.getInvoicesByNumber(num);
+    const groups = new Map();
+    for (const p of all) {
+      const key = (p.customerId || '') + '|' + (p.page || 1);
+      const cur = groups.get(key);
+      if (!cur || (p.editCount || 0) > (cur.editCount || 0)) groups.set(key, p);
+    }
+    return [...groups.values()].sort((a, b) => (a.page || 1) - (b.page || 1));
+  },
   addInvoice(v) { const a = this.getInvoices(); a.unshift(v); this.saveInvoices(a); },
   updateInvoice(id, patch) {
     const a = this.getInvoices();

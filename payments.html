@@ -702,7 +702,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.207"></script><script src="db.js?v=1.0.207"></script><script src="auth.js?v=1.0.207"></script><script src="nav.js?v=1.0.207"></script><script src="idb.js?v=1.0.207"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.208"></script><script src="db.js?v=1.0.208"></script><script src="auth.js?v=1.0.208"></script><script src="nav.js?v=1.0.208"></script><script src="idb.js?v=1.0.208"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -1242,8 +1242,15 @@ function render() {
 }
 
 // ── Open modal ────────────────────────────────────────────────────────────────
+// Every DB.getCurrentPagesByNumber(invNum)[0] in this file (was DB.getInvoices().find(...)
+// — see db.js) exists because an edit's old page sometimes survives a failed Firestore
+// delete, leaving two records under one number. Plain .find() picks array-order-first,
+// which can be the STALE pre-edit record — showing the wrong totalAmount when
+// calculating remaining balance for a payment, or clearing signedImage on the wrong
+// record. getCurrentPagesByNumber() always resolves to the current (highest-editCount)
+// record instead.
 function openPayModal(invNum, custId) {
-  const _inv = DB.getInvoices().find(i => i.invoiceNumber === invNum);
+  const _inv = DB.getCurrentPagesByNumber(invNum)[0];
   if (_inv?.cancelled) { Utils.showAlert(`ใบกำกับ ${invNum} ถูกยกเลิกแล้ว — ไม่สามารถบันทึกชำระเงินได้`, 'warning'); return; }
   document.getElementById('payInvNum').textContent     = invNum;
   document.getElementById('payInvNumHidden').value     = invNum;
@@ -1279,7 +1286,7 @@ function openPayModal(invNum, custId) {
   buildTransferAccountSelect();
   onMethodChange();
 
-  const inv   = DB.getInvoices().find(i => i.invoiceNumber === invNum);
+  const inv   = DB.getCurrentPagesByNumber(invNum)[0];
   const total = parseFloat(inv?.totalAmount) || 0;
   const paid  = DB.getInvoicePaidAmount(invNum, inv?.customerId);
   let rem     = total - paid;
@@ -1634,7 +1641,7 @@ function renderExistingPayments(invNum) {
   const isAdmin = Auth.isAdmin();
 
   // Show signed invoice image once at the top (stored on invoice, not per-payment)
-  const inv = DB.getInvoices().find(i => i.invoiceNumber === invNum);
+  const inv = DB.getCurrentPagesByNumber(invNum)[0];
   // Fallback: check legacy per-payment signedImage for older records
   const legacySigned = payments.find(p => p.signedImage)?.signedImage || '';
   const signedSrc = inv?.signedImage || legacySigned;
@@ -1856,7 +1863,7 @@ async function confirmImageUpdate() {
 // as the transfer-receipt picture.
 async function uploadSignedInvoice(invNum, inputEl) {
   if (!_needPerm('payment_edit')) return;
-  const inv = DB.getInvoices().find(i => i.invoiceNumber === invNum);
+  const inv = DB.getCurrentPagesByNumber(invNum)[0];
   if (!inv) { Utils.showAlert('ไม่พบใบกำกับ ' + invNum, 'warning'); return; }
   const file = inputEl && inputEl.files && inputEl.files[0];
   if (!file) return;
@@ -1880,7 +1887,7 @@ async function uploadSignedInvoice(invNum, inputEl) {
 async function removeSignedInvoice(invNum) {
   if (!_needPerm('payment_edit')) return;
   if (!(await Utils.confirm('ลบรูปใบกำกับที่เซ็นของบิล ' + invNum + ' ใช่หรือไม่?'))) return;
-  const inv = DB.getInvoices().find(i => i.invoiceNumber === invNum);
+  const inv = DB.getCurrentPagesByNumber(invNum)[0];
   if (inv) DB.updateInvoice(inv.id, { signedImage: '' });
   // also clear any legacy per-payment copy
   DB.getPaymentsByInvoice(invNum).forEach(p => {
@@ -1986,7 +1993,7 @@ async function deletePayment(payId, invNum) {
 
 function refreshSummary(invNum) {
   renderExistingPayments(invNum);
-  const inv   = DB.getInvoices().find(i => i.invoiceNumber === invNum);
+  const inv   = DB.getCurrentPagesByNumber(invNum)[0];
   const total = parseFloat(inv?.totalAmount) || 0;
   const paid  = DB.getInvoicePaidAmount(invNum, inv?.customerId);
   let rem     = total - paid;
@@ -2087,7 +2094,7 @@ function renderPendingPayments() {
 
   // Update summary to reflect pending totals
   const invNum = document.getElementById('payInvNumHidden').value;
-  const inv    = DB.getInvoices().find(i => i.invoiceNumber === invNum);
+  const inv    = DB.getCurrentPagesByNumber(invNum)[0];
   const total  = parseFloat(inv?.totalAmount) || 0;
   const alreadyPaid  = DB.getInvoicePaidAmount(invNum, inv?.customerId);
   const pendingTotal = _pendingPayments.reduce((s, p) => s + p.amount, 0);
@@ -2109,7 +2116,7 @@ function removePendingPayment(index) {
     document.getElementById('pendingPaymentsList').style.display = 'none';
     // Restore original summary
     const invNum = document.getElementById('payInvNumHidden').value;
-    const inv    = DB.getInvoices().find(i => i.invoiceNumber === invNum);
+    const inv    = DB.getCurrentPagesByNumber(invNum)[0];
     const total  = parseFloat(inv?.totalAmount) || 0;
     const paid   = DB.getInvoicePaidAmount(invNum, inv?.customerId);
     let rem      = total - paid;
@@ -2203,7 +2210,7 @@ function confirmSavePayment() {
 async function doSaveAllPayments(payments) {
   if (!payments.length) return;
   const invNum      = payments[0].invoiceNumber;
-  const inv         = DB.getInvoices().find(i => i.invoiceNumber === invNum);
+  const inv         = DB.getCurrentPagesByNumber(invNum)[0];
   const total       = parseFloat(inv?.totalAmount) || 0;
   const alreadyPaid = DB.getInvoicePaidAmount(invNum, inv?.customerId);
 
@@ -2543,7 +2550,7 @@ function _bankCode(val) {
 const _methodEn = { 'เงินสด': 'Cash', 'โอน': 'Transfer', 'เช็ค': 'Cheque' };
 
 function printPaymentSummary(invNum) {
-  const inv = DB.getInvoices().find(i => i.invoiceNumber === invNum);
+  const inv = DB.getCurrentPagesByNumber(invNum)[0];
   if (!inv) return;
   const cust      = DB.getCustomerById(inv.customerId);
   const payments  = DB.getPaymentsByInvoice(invNum).filter(p => !p.cancelled);

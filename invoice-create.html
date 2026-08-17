@@ -160,7 +160,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.207"></script><script src="db.js?v=1.0.207"></script><script src="auth.js?v=1.0.207"></script><script src="nav.js?v=1.0.207"></script><script src="idb.js?v=1.0.207"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.208"></script><script src="db.js?v=1.0.208"></script><script src="auth.js?v=1.0.208"></script><script src="nav.js?v=1.0.208"></script><script src="idb.js?v=1.0.208"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -528,7 +528,7 @@ window.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('sync:updated', (e) => {
     // ── Admin settings change: re-render preview header ──────────────────────
     if (e.detail?.key === 'wt_settings' && currentInvNum && (viewMode || editMode)) {
-      const pages = DB.getInvoices().filter(i => i.invoiceNumber === currentInvNum);
+      const pages = DB.getCurrentPagesByNumber(currentInvNum);
       if (pages.length) renderPreview(pages);
       return;
     }
@@ -536,7 +536,7 @@ window.addEventListener('DOMContentLoaded', () => {
     // ── Concurrent-edit conflict detection ───────────────────────────────────
     if (!editMode || _editSaving) return;
     if (e.detail?.key !== 'wt_invoices') return;
-    const remotePages = DB.getInvoices().filter(i => i.invoiceNumber === currentInvNum);
+    const remotePages = DB.getCurrentPagesByNumber(currentInvNum);
     if (!remotePages.length) {
       _showEditConflictBanner('deleted');
       return;
@@ -611,11 +611,11 @@ async function loadView(invNum) {
 
   // Retry up to 4 s — Firestore listener may briefly overwrite cache before
   // _startInit runs, or Tauri HDD init may still be settling on first load.
-  let pages = DB.getInvoices().filter(i => i.invoiceNumber === invNum);
+  let pages = DB.getCurrentPagesByNumber(invNum);
   if (!pages.length) {
     for (let t = 0; t < 8 && !pages.length; t++) {
       await new Promise(r => setTimeout(r, 500));
-      pages = DB.getInvoices().filter(i => i.invoiceNumber === invNum);
+      pages = DB.getCurrentPagesByNumber(invNum);
     }
   }
   if (pages.length === 0) { Utils.showAlert(`ไม่พบใบกำกับ ${invNum}`, 'danger'); return; }
@@ -651,7 +651,7 @@ async function loadView(invNum) {
 }
 
 async function doPrint() {
-  const pages = DB.getInvoices().filter(i => i.invoiceNumber === currentInvNum);
+  const pages = DB.getCurrentPagesByNumber(currentInvNum);
   if (!pages.length) return;
 
   const reprintCount = pages[0].printCount || 0;  // count BEFORE this print
@@ -1727,12 +1727,15 @@ async function loadEdit(invNum) {
   document.getElementById('editTable').style.display = '';
   document.getElementById('saveBtnRow').style.display = '';  // show in edit mode
 
-  // Retry up to 4 s (same race-condition guard as loadView)
-  let pages = DB.getInvoices().filter(i => i.invoiceNumber === invNum);
+  // Retry up to 4 s (same race-condition guard as loadView). Uses
+  // getCurrentPagesByNumber(), not the raw list — flatMapping items from a stale
+  // pre-edit page (see DB.getCurrentPagesByNumber's comment) into the edit form would
+  // show duplicated/wrong line items and risk saving that corruption back out.
+  let pages = DB.getCurrentPagesByNumber(invNum);
   if (!pages.length) {
     for (let t = 0; t < 8 && !pages.length; t++) {
       await new Promise(r => setTimeout(r, 500));
-      pages = DB.getInvoices().filter(i => i.invoiceNumber === invNum);
+      pages = DB.getCurrentPagesByNumber(invNum);
     }
   }
   if (!pages.length) { Utils.showAlert(`ไม่พบใบกำกับ ${invNum}`, 'danger'); return; }
@@ -1809,11 +1812,19 @@ async function saveInvoiceEdit(shouldPrint = false) {
     if (!await Utils.confirm(`⚠️ สต๊อกฝาขวดต่ำกว่าขั้นต่ำที่กำหนด!\n\n${lines}\n\nยืนยันบันทึกการแก้ไขต่อไปหรือไม่?`)) { _releaseSaveLock(); return; }
   }
 
+  // existingPages stays the RAW full list — oldIds below needs every physical record
+  // (including any stale leftover from a previous edit) so this save's cleanup deletes
+  // it too, which is how this self-heals on the next edit. But meta/editHistory/the
+  // "previous" snapshot must come from the CURRENT record only — using existingPages[0]
+  // directly picks whichever record sorts first, which can be the STALE one, silently
+  // resetting editCount backward and truncating the editHistory array (the stale record
+  // has an older, shorter history). See DB.getCurrentPagesByNumber().
   const existingPages = DB.getInvoices().filter(i => i.invoiceNumber === currentInvNum);
-  const meta          = existingPages[0] || {};
+  const currentPages  = DB.getCurrentPagesByNumber(currentInvNum);
+  const meta          = currentPages[0] || existingPages[0] || {};
   const newEditCount  = (meta.editCount || 0) + 1;
-  // Snapshot the full pre-edit invoice (all pages) into the history entry — the
-  // old data is preserved here, not by leaving the old page record behind, which
+  // Snapshot the full pre-edit invoice (all CURRENT pages) into the history entry —
+  // the old data is preserved here, not by leaving the old page record behind, which
   // is what caused amounts to sometimes stay stuck at the old value everywhere
   // ("amount shown must be the latest") when the old record's Firestore delete
   // silently missed (see the explicit cleanup below).
@@ -1825,7 +1836,7 @@ async function saveInvoiceEdit(shouldPrint = false) {
       totalAmount:    parseFloat(meta.totalAmount) || 0,
       customerId:     meta.customerId,
       shippingMethod: meta.shippingMethod,
-      items: existingPages.flatMap(p => p.items || []),
+      items: currentPages.flatMap(p => p.items || []),
     },
   }];
 
