@@ -15,10 +15,18 @@
 <link rel="stylesheet" href="style.css">
 <style>
 .brand-tag {
-  display:inline-flex;align-items:center;gap:3px;
+  display:inline-flex;align-items:center;gap:2px;
   background:#e0f2fe;color:#0369a1;border:1px solid #7dd3fc;
-  border-radius:20px;padding:1px 8px 1px 10px;font-size:12px;font-weight:600;
+  border-radius:20px;padding:1px 6px 1px 4px;font-size:12px;font-weight:600;
+  cursor:grab;
 }
+.brand-tag:active { cursor:grabbing; }
+.brand-tag.dragging { opacity:.4; }
+.brand-tag.drag-over { border-color:#0369a1;box-shadow:0 0 0 2px #7dd3fc; }
+.brand-tag .mv { background:none;border:none;padding:0 2px;line-height:1;color:#0369a1;cursor:pointer;font-size:12px; }
+.brand-tag .mv:hover:not(:disabled) { color:#0d6efd; }
+.brand-tag .mv:disabled { color:#bae6fd;cursor:default; }
+.brand-tag .sep { width:1px;height:12px;background:#7dd3fc;margin:0 1px; }
 .brand-tag .rm { background:none;border:none;padding:0;line-height:1;color:#0369a1;cursor:pointer;font-size:13px; }
 .brand-tag .rm:hover { color:#dc2626; }
 .brand-add-btn { background:none;border:1px dashed #94a3b8;border-radius:20px;padding:1px 9px;font-size:12px;color:#64748b;cursor:pointer; }
@@ -401,7 +409,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="./vendor/html2canvas.min.js"></script>
-<script src="utils.js?v=1.0.208"></script><script src="db.js?v=1.0.208"></script><script src="auth.js?v=1.0.208"></script><script src="nav.js?v=1.0.208"></script>
+<script src="utils.js?v=1.0.209"></script><script src="db.js?v=1.0.209"></script><script src="auth.js?v=1.0.209"></script><script src="nav.js?v=1.0.209"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -642,11 +650,27 @@ function render() {
       : `<div class="small mb-1 text-muted"><i class="bi bi-clock-history me-1"></i>ยังไม่มีใบกำกับ</div>`;
 
     const brands = getBrands(c);
-    const brandTags = brands.map(b => `
-      <span class="brand-tag">
+    // First tag is the "primary" brand — written to the legacy c.brand field whenever
+    // brands changes (see moveBrand/confirmBrandInput/removeBrand). ‹ › swap a tag with
+    // its neighbor; works identically on any device. draggable is a purely additive
+    // desktop enhancement on top — same end result via _brandDrop(), never the only way
+    // to reorder (native HTML5 drag does not fire on touch at all).
+    const brandTags = brands.map((b, i) => {
+      const bEsc = b.replace(/'/g,"\\'");
+      return `
+      <span class="brand-tag" draggable="true"
+            ondragstart="_brandDragStart(event,'${c.id}',${i})"
+            ondragover="_brandDragOver(event)"
+            ondragleave="_brandDragLeave(event)"
+            ondrop="_brandDrop(event,'${c.id}',${i})"
+            ondragend="_brandDragEnd(event)">
+        <button class="mv" ${i===0?'disabled':''} onclick="moveBrand('${c.id}',${i},-1,event)" title="เลื่อนไปทางซ้าย" aria-label="เลื่อนไปทางซ้าย">‹</button>
         ${b}
-        <button class="rm" onclick="removeBrand('${c.id}','${b.replace(/'/g,"\\'")}',event)" title="ลบยี่ห้อนี้">×</button>
-      </span>`).join('');
+        <button class="mv" ${i===brands.length-1?'disabled':''} onclick="moveBrand('${c.id}',${i},1,event)" title="เลื่อนไปทางขวา" aria-label="เลื่อนไปทางขวา">›</button>
+        <span class="sep"></span>
+        <button class="rm" onclick="removeBrand('${c.id}','${bEsc}',event)" title="ลบยี่ห้อนี้">×</button>
+      </span>`;
+    }).join('');
 
     const isSel = _selected.has(c.id);
 
@@ -1336,15 +1360,88 @@ function removeBrand(custId, brand, e) {
   render();
 }
 
+// Swaps the brand at `idx` with its neighbor in the direction `dir` (-1 left, +1
+// right). brands[0] is written to the legacy c.brand field, so reordering can change
+// which brand counts as "primary" — see getBrands().
+function moveBrand(custId, idx, dir, e) {
+  e.stopPropagation();
+  const c = DB.getCustomerById(custId);
+  const brands = getBrands(c);
+  const j = idx + dir;
+  if (j < 0 || j >= brands.length) return;
+  [brands[idx], brands[j]] = [brands[j], brands[idx]];
+  DB.updateCustomer(custId, { brands, brand: brands[0] });
+  DB.logActivity(session.userId, session.username, 'จัดเรียงยี่ห้อลูกค้า', { customerName: c.name, brands });
+  render();
+}
+
+// Desktop-only drag reorder, purely additive on top of moveBrand()'s ‹ › buttons —
+// native HTML5 drag events never fire on touch devices, so the buttons remain the
+// only way to reorder on phone/tablet. _brandDragFrom tracks the source index; the
+// customer id is included so a drag started on one customer's card can't be dropped
+// onto a different customer's (each card re-renders its own tags independently).
+let _brandDragFrom = null;
+function _brandDragStart(e, custId, idx) {
+  e.stopPropagation();
+  _brandDragFrom = { custId, idx };
+  e.dataTransfer.effectAllowed = 'move';
+  try { e.dataTransfer.setData('text/plain', String(idx)); } catch (err) {}
+  e.currentTarget.classList.add('dragging');
+}
+function _brandDragOver(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  e.dataTransfer.dropEffect = 'move';
+  e.currentTarget.classList.add('drag-over');
+}
+function _brandDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
+}
+function _brandDrop(e, custId, toIdx) {
+  e.preventDefault();
+  e.stopPropagation();
+  e.currentTarget.classList.remove('drag-over');
+  if (!_brandDragFrom || _brandDragFrom.custId !== custId) { _brandDragFrom = null; return; }
+  const fromIdx = _brandDragFrom.idx;
+  _brandDragFrom = null;
+  if (fromIdx === toIdx) return;
+  const c = DB.getCustomerById(custId);
+  const brands = getBrands(c);
+  const [moved] = brands.splice(fromIdx, 1);
+  brands.splice(toIdx, 0, moved);
+  DB.updateCustomer(custId, { brands, brand: brands[0] });
+  DB.logActivity(session.userId, session.username, 'จัดเรียงยี่ห้อลูกค้า', { customerName: c.name, brands });
+  render();
+}
+function _brandDragEnd(e) {
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('.brand-tag.drag-over').forEach(el => el.classList.remove('drag-over'));
+  _brandDragFrom = null;
+}
+
 // ── Modal brand management ────────────────────────────────────────────────────
+// Same reorder pattern as the card view (moveBrand/_brandDrag*) but operating on the
+// in-memory modalBrands array instead of a saved customer — nothing persists until
+// the modal's own save handler writes brands out.
 function renderModalBrands() {
   document.getElementById('modalBrandTags').innerHTML = modalBrands.length === 0
     ? '<span class="text-muted small">ยังไม่มียี่ห้อ</span>'
-    : modalBrands.map(b => `
-        <span class="brand-tag">
+    : modalBrands.map((b, i) => {
+        const bEsc = b.replace(/'/g,"\\'");
+        return `
+        <span class="brand-tag" draggable="true"
+              ondragstart="_modalBrandDragStart(event,${i})"
+              ondragover="_modalBrandDragOver(event)"
+              ondragleave="_modalBrandDragLeave(event)"
+              ondrop="_modalBrandDrop(event,${i})"
+              ondragend="_modalBrandDragEnd(event)">
+          <button class="mv" ${i===0?'disabled':''} onclick="moveModalBrand(${i},-1)" title="เลื่อนไปทางซ้าย" aria-label="เลื่อนไปทางซ้าย">‹</button>
           ${b}
-          <button class="rm" onclick="removeModalBrand('${b.replace(/'/g,"\\'")}')">×</button>
-        </span>`).join('');
+          <button class="mv" ${i===modalBrands.length-1?'disabled':''} onclick="moveModalBrand(${i},1)" title="เลื่อนไปทางขวา" aria-label="เลื่อนไปทางขวา">›</button>
+          <span class="sep"></span>
+          <button class="rm" onclick="removeModalBrand('${bEsc}')">×</button>
+        </span>`;
+      }).join('');
 }
 function addModalBrand() {
   const inp = document.getElementById('custBrandInput');
@@ -1357,6 +1454,43 @@ function addModalBrand() {
 function removeModalBrand(brand) {
   modalBrands = modalBrands.filter(b => b !== brand);
   renderModalBrands();
+}
+function moveModalBrand(idx, dir) {
+  const j = idx + dir;
+  if (j < 0 || j >= modalBrands.length) return;
+  [modalBrands[idx], modalBrands[j]] = [modalBrands[j], modalBrands[idx]];
+  renderModalBrands();
+}
+let _modalBrandDragFrom = null;
+function _modalBrandDragStart(e, idx) {
+  _modalBrandDragFrom = idx;
+  e.dataTransfer.effectAllowed = 'move';
+  try { e.dataTransfer.setData('text/plain', String(idx)); } catch (err) {}
+  e.currentTarget.classList.add('dragging');
+}
+function _modalBrandDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  e.currentTarget.classList.add('drag-over');
+}
+function _modalBrandDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
+}
+function _modalBrandDrop(e, toIdx) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  if (_modalBrandDragFrom === null) return;
+  const fromIdx = _modalBrandDragFrom;
+  _modalBrandDragFrom = null;
+  if (fromIdx === toIdx) return;
+  const [moved] = modalBrands.splice(fromIdx, 1);
+  modalBrands.splice(toIdx, 0, moved);
+  renderModalBrands();
+}
+function _modalBrandDragEnd(e) {
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('.brand-tag.drag-over').forEach(el => el.classList.remove('drag-over'));
+  _modalBrandDragFrom = null;
 }
 
 // ── Payment Terms helpers ─────────────────────────────────────────────────────
