@@ -169,7 +169,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.203"></script><script src="db.js?v=1.0.203"></script><script src="auth.js?v=1.0.203"></script><script src="nav.js?v=1.0.203"></script><script src="idb.js?v=1.0.203"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.204"></script><script src="db.js?v=1.0.204"></script><script src="auth.js?v=1.0.204"></script><script src="nav.js?v=1.0.204"></script><script src="idb.js?v=1.0.204"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -728,6 +728,7 @@ function render() {
             <div class="btn-group btn-group-sm">
               <a class="btn btn-outline-primary btn-sm" href="invoice-create.html?view=${inv.invoiceNumber}" title="ดู/พิมพ์"><i class="bi bi-eye"></i></a>
               <a class="btn btn-outline-warning btn-sm" href="invoice-create.html?edit=${inv.invoiceNumber}" title="แก้ไข"><i class="bi bi-pencil"></i></a>
+              ${foreign ? `<button class="btn btn-outline-info btn-sm" onclick="renumberInvoicePage('${pg.id}','${inv.invoiceNumber}','${(pgName||'').replace(/'/g,"\\'")}')" title="เปลี่ยนเลขที่ใบกำกับ (แก้เลขซ้ำ)"><i class="bi bi-arrow-repeat"></i></button>` : ''}
               <button class="btn btn-outline-danger btn-sm" onclick="deleteInvoicePage('${pg.id}','${inv.invoiceNumber}',${pgNum},'${(pgName||'').replace(/'/g,"\\'")}')" title="ลบหน้านี้"><i class="bi bi-trash"></i></button>
             </div>
           </td>
@@ -893,6 +894,71 @@ async function deleteInvoicePage(pageId, invoiceNumber, pageNum, custName) {
     customer: custName || '', totalAmount: target ? (parseFloat(target.totalAmount) || 0) : 0
   });
   Utils.showAlert(`ลบหน้า ${pageNum} ของ ${invoiceNumber} แล้ว`, 'warning');
+  render();
+}
+
+// Renumbers ONE record off a cross-customer-collided invoice number (see
+// DB._numberHasMultipleOwners) onto the next free number for that record's date —
+// following the app's own numbering convention (continue the running sequence, don't
+// backfill a gap) so the new number reads exactly like a normally-issued one. Only
+// shown on the `foreign` sub-rows (v1.0.199), i.e. never offered on an ordinary
+// non-collided invoice.
+//
+// Invoices are one Firestore doc per record keyed by the record's own id (a UUID) —
+// invoiceNumber is just a FIELD on that doc, not its key — so changing the field and
+// letting the normal sync pick up the change is enough; there is no separate
+// old-number/new-number document to move (unlike the images/pdf_pages collections,
+// which genuinely ARE keyed by invoiceNumber — see the hasPdfPage handling below).
+//
+// Reuses the exact same three-tier reservation saveInvoice() uses (v1.0.200/201):
+// atomic Firestore transaction → server-checked → local-only fallback if offline.
+async function renumberInvoicePage(pageId, invoiceNumber, custName) {
+  const rec = DB.getInvoiceById(pageId);
+  if (!rec) return;
+
+  const dateISO = (rec.createdAt || '').slice(0, 10) || Utils.todayInputValue();
+  const parts   = DB._invNumParts(dateISO);
+  let newNum    = null, verified = false;
+
+  if (window.Sync && typeof Sync.reserveInvoiceNumberAtomic === 'function') {
+    try {
+      const r = await Sync.reserveInvoiceNumberAtomic(parts.dateKey, parts.prefix, DB.localFloorRunForDate(dateISO));
+      if (r && r.number) { newNum = r.number; verified = true; }
+    } catch (e) { console.warn('[renumberInvoicePage] atomic reservation failed', e); }
+  }
+  if (!newNum && window.Sync && typeof Sync.reserveFreeInvoiceNumber === 'function') {
+    try {
+      const candidate = DB.invoiceNumberCandidate(dateISO, 0);
+      const r = await Sync.reserveFreeInvoiceNumber(candidate, rec.customerId, n => DB.invoiceNumberCandidate(dateISO, n));
+      newNum = r.number; verified = r.verified;
+    } catch (e) { console.warn('[renumberInvoicePage] checked reservation failed', e); }
+  }
+  if (!newNum) newNum = DB.invoiceNumberCandidate(dateISO, 0);
+
+  const amt = Utils.formatNumber(parseFloat(rec.totalAmount) || 0);
+  const offlineNote = verified ? '' : '\n⚠️ ไม่สามารถตรวจสอบกับเซิร์ฟเวอร์ได้ — เลขที่ใหม่มาจากข้อมูลในเครื่องเท่านั้น ตรวจซ้ำอีกครั้งเมื่อออนไลน์';
+  // Both records under a collided number may carry hasPdfPage pointing at the SAME
+  // Firestore pdf_pages/{invoiceNumber} doc with no way to tell whose scan it actually
+  // is — renumbering does not move that doc, so leaving the flag on risks showing this
+  // customer someone else's scanned invoice. Strip it; safer than guessing.
+  const pdfNote = rec.hasPdfPage
+    ? '\n\nจะลบการเชื่อมโยงไฟล์ PDF เดิม เนื่องจากไฟล์นั้นถูกใช้ร่วมกับใบกำกับเลขที่เดิม — ไม่สามารถระบุได้ว่าเป็นไฟล์ของลูกค้ารายใด'
+    : '';
+  if (!await Utils.confirm(
+    `เปลี่ยนเลขที่ใบกำกับนี้?\n\nลูกค้า: ${custName}\nยอด: ฿${amt}\nเลขที่เดิม: ${invoiceNumber}\nเลขที่ใหม่: ${newNum}${offlineNote}${pdfNote}`
+  )) return;
+
+  const patch = { invoiceNumber: newNum };
+  if (rec.hasPdfPage) patch.hasPdfPage = false;
+  DB.updateInvoice(pageId, patch);
+  DB.commitInvoiceNumber(dateISO, newNum);
+  DB.logActivity(session.userId, session.username, 'เปลี่ยนเลขที่ใบกำกับ (แก้เลขซ้ำ)', {
+    from: invoiceNumber, to: newNum, customer: custName,
+    totalAmount: parseFloat(rec.totalAmount) || 0, verified
+  });
+  try { if (window.Sync && typeof Sync.flushNow === 'function') Sync.flushNow(); } catch (e) {}
+
+  Utils.showAlert(`เปลี่ยนเลขที่ใบกำกับของ ${custName} เป็น ${newNum} สำเร็จ`, 'success');
   render();
 }
 
