@@ -169,7 +169,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.206"></script><script src="db.js?v=1.0.206"></script><script src="auth.js?v=1.0.206"></script><script src="nav.js?v=1.0.206"></script><script src="idb.js?v=1.0.206"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.207"></script><script src="db.js?v=1.0.207"></script><script src="auth.js?v=1.0.207"></script><script src="nav.js?v=1.0.207"></script><script src="idb.js?v=1.0.207"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -728,7 +728,7 @@ function render() {
             <div class="btn-group btn-group-sm">
               <a class="btn btn-outline-primary btn-sm" href="invoice-create.html?view=${inv.invoiceNumber}" title="ดู/พิมพ์"><i class="bi bi-eye"></i></a>
               <a class="btn btn-outline-warning btn-sm" href="invoice-create.html?edit=${inv.invoiceNumber}" title="แก้ไข"><i class="bi bi-pencil"></i></a>
-              ${foreign ? `<button class="btn btn-outline-info btn-sm" onclick="renumberInvoicePage('${pg.id}','${inv.invoiceNumber}','${(pgName||'').replace(/'/g,"\\'")}')" title="เปลี่ยนเลขที่ใบกำกับ (แก้เลขซ้ำ)"><i class="bi bi-arrow-repeat"></i></button>` : ''}
+              ${foreign ? `<button class="btn btn-outline-info btn-sm" onclick="renumberInvoicePage(this,'${pg.id}','${inv.invoiceNumber}','${(pgName||'').replace(/'/g,"\\'")}')" title="เปลี่ยนเลขที่ใบกำกับ (แก้เลขซ้ำ)"><i class="bi bi-arrow-repeat"></i></button>` : ''}
               <button class="btn btn-outline-danger btn-sm" onclick="deleteInvoicePage('${pg.id}','${inv.invoiceNumber}',${pgNum},'${(pgName||'').replace(/'/g,"\\'")}')" title="ลบหน้านี้"><i class="bi bi-trash"></i></button>
             </div>
           </td>
@@ -912,7 +912,37 @@ async function deleteInvoicePage(pageId, invoiceNumber, pageNum, custName) {
 //
 // Reuses the exact same three-tier reservation saveInvoice() uses (v1.0.200/201):
 // atomic Firestore transaction → server-checked → local-only fallback if offline.
-async function renumberInvoicePage(pageId, invoiceNumber, custName) {
+//
+// _renumberInFlight is a REAL lock (checked before any async work), not just a visual
+// disable — the button itself has no re-entrancy guard the same way saveInvoice() did
+// before v1.0.197. Confirmed in production: a single record's history shows FOUR
+// consecutive renumber log entries within about a minute (209→211, then 211→212 three
+// times), each landing on whatever the server said was free AT THAT INSTANT — the tool
+// worked correctly every time, it just had nothing stopping it from being invoked again
+// before the first call's feedback was visible. No duplicate records resulted (every
+// call targets the same fixed pageId), but the counter was needlessly burned three
+// times over and the activity log is confusing. Keyed by pageId, not global, so
+// renumbering two different collided records at once (rare, but possible) isn't
+// blocked by this lock.
+const _renumberInFlight = new Set();
+async function renumberInvoicePage(btn, pageId, invoiceNumber, custName) {
+  if (_renumberInFlight.has(pageId)) return;
+  _renumberInFlight.add(pageId);
+  const origHtml = btn ? btn.innerHTML : null;
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; }
+  try {
+    await _renumberInvoicePageInner(pageId, invoiceNumber, custName);
+  } finally {
+    _renumberInFlight.delete(pageId);
+    // On success render() has already replaced this button's row entirely (the
+    // collision it applied to is gone), so `btn` is a detached node here — restoring
+    // its state is a harmless no-op. On cancel/error the row is unchanged and this is
+    // what actually re-enables the real, still-visible button.
+    if (btn) { btn.disabled = false; btn.innerHTML = origHtml; }
+  }
+}
+
+async function _renumberInvoicePageInner(pageId, invoiceNumber, custName) {
   const rec = DB.getInvoiceById(pageId);
   if (!rec) return;
 
