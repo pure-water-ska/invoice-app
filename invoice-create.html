@@ -160,7 +160,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.211"></script><script src="db.js?v=1.0.211"></script><script src="auth.js?v=1.0.211"></script><script src="nav.js?v=1.0.211"></script><script src="idb.js?v=1.0.211"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.212"></script><script src="db.js?v=1.0.212"></script><script src="auth.js?v=1.0.212"></script><script src="nav.js?v=1.0.212"></script><script src="idb.js?v=1.0.212"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -916,6 +916,32 @@ let _pendingCreditAllocations = [];
 // DB.carryForwardOwedBalance().
 let _pendingCarryForwards = [];
 
+// Scans EVERY invoice's items (system-wide, any customer) for the exact "ค้างชำระ X" /
+// "ชำระเกิน X" label addSelectedBalances() writes when a balance is folded onto a new
+// invoice, and maps sourceInvoiceNumber -> the target invoice(s) it was added to.
+// A balance appearing in _balanceDetails is by definition NOT retired (retiring it
+// zeroes the diff via allocateOverpayCredit/carryForwardOwedBalance, which drops it out
+// of the balance check entirely) — so a hit here means it was added to another invoice
+// BEFORE that retirement mechanism existed for its type (owed: v1.0.203, overpaid:
+// v1.0.194) and is still being double-counted: billed again on the target invoice while
+// still sitting here as outstanding on the source. Most-recent reference wins if more
+// than one invoice ever referenced the same source number.
+function _buildStaleBalanceRefMap() {
+  const map = {};
+  DB.getInvoices().filter(i => !i.cancelled).forEach(inv => {
+    (inv.items || []).forEach(it => {
+      const m = /^(?:ค้างชำระ|ชำระเกิน) (.+)$/.exec(it.name || '');
+      if (!m) return;
+      const src = m[1];
+      const prev = map[src];
+      if (!prev || new Date(inv.createdAt || 0) > new Date(prev.at || 0)) {
+        map[src] = { target: inv.invoiceNumber, at: inv.createdAt };
+      }
+    });
+  });
+  return map;
+}
+
 function checkCustomerBalance(custId) {
   const alertDiv = document.getElementById('balanceAlert');
   if (!custId) { alertDiv.innerHTML = ''; _balanceDetails = []; return; }
@@ -923,6 +949,7 @@ function checkCustomerBalance(custId) {
   const cust = DB.getCustomerById(custId);
   const allInvoices = DB.getInvoices().filter(i => i.customerId === custId && !i.cancelled);
   const invNums = [...new Set(allInvoices.map(i => i.invoiceNumber))];
+  const staleRefMap = _buildStaleBalanceRefMap();
 
   _balanceDetails = [];
   invNums.forEach(num => {
@@ -931,7 +958,10 @@ function checkCustomerBalance(custId) {
     const total = parseFloat(page1.totalAmount) || 0;
     const paid  = DB.getInvoicePaidAmount(num, page1.customerId);
     const diff  = total - paid;
-    if (Math.abs(diff) > 0.005) _balanceDetails.push({ num, total, paid, diff, custId: page1.customerId });
+    if (Math.abs(diff) > 0.005) {
+      const staleRef = staleRefMap[num] && staleRefMap[num].target !== num ? staleRefMap[num].target : null;
+      _balanceDetails.push({ num, total, paid, diff, custId: page1.customerId, staleRef });
+    }
   });
 
   // Payment terms violations
@@ -976,11 +1006,14 @@ function checkCustomerBalance(custId) {
   const title = `พบยอดค้างชำระ/เกิน ${_balanceDetails.length} ใบ (สุทธิ ${netBalance >= 0 ? '+' : ''}${Utils.formatNumber(netBalance)} บาท)`;
 
   const rows = _balanceDetails.map((d, idx) => `
-    <tr>
+    <tr${d.staleRef ? ' style="background:#fdece9"' : ''}>
       <td class="text-center">
-        <input type="checkbox" class="balance-chk form-check-input" data-idx="${idx}" id="bchk${idx}" checked onchange="updateAddBtn()">
+        <input type="checkbox" class="balance-chk form-check-input" data-idx="${idx}" id="bchk${idx}" ${d.staleRef ? '' : 'checked'} onchange="updateAddBtn()">
       </td>
-      <td><label for="bchk${idx}" style="cursor:pointer;margin:0">${d.num}</label></td>
+      <td>
+        <label for="bchk${idx}" style="cursor:pointer;margin:0">${d.num}</label>
+        ${d.staleRef ? `<div class="mt-1"><span class="badge rounded-pill" style="background:#f7c1c1;color:#501313;font-weight:normal;font-size:10.5px"><i class="bi bi-exclamation-circle me-1"></i>เพิ่มลงใบ ${d.staleRef} แล้ว แต่ใบนี้ยังไม่ได้ตัดยอด</span></div>` : ''}
+      </td>
       <td class="text-end">${Utils.formatNumber(d.total)}</td>
       <td class="text-end">${Utils.formatNumber(d.paid)}</td>
       <td class="text-end ${d.diff > 0 ? 'text-danger fw-semibold' : 'text-success fw-semibold'}">${d.diff > 0 ? '+' : ''}${Utils.formatNumber(d.diff)}</td>
@@ -1007,6 +1040,7 @@ function checkCustomerBalance(custId) {
         </thead>
         <tbody>${rows}</tbody>
       </table>
+      ${_balanceDetails.some(d => d.staleRef) ? `<div class="small text-muted mt-1">แถวสีแดงอ่อน = เคยเพิ่มลงใบอื่นแล้วแต่ใบนี้ยังไม่ถูกตัดยอด (ไม่ได้เลือกไว้ให้อัตโนมัติ ป้องกันการเพิ่มซ้ำ)</div>` : ''}
     </div>`;
   updateAddBtn();
 }
