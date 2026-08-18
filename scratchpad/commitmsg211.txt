@@ -1,0 +1,22 @@
+release v1.0.211 — log Firestore delete-cleanup failures instead of swallowing them
+
+Both explicit-delete cleanup paths — invoice-create.html's saveInvoiceEdit()
+(removes old pre-edit pages) and invoices.html's _explicitlyDeleteFromFirestore()
+(manual delete) — fire batch.commit() and only console.warn() on rejection.
+console.warn is invisible in release Tauri builds (DevTools disabled), so a
+failed cleanup left no trace anywhere. This is very likely the mechanism behind
+the already-documented live incident: invoice 180769-001's stale pre-edit page
+came back twice after being manually deleted from the Firestore console.
+
+Per explicit user decision (no retry, no persistent queue — just visibility):
+both catch blocks now also call DB.logError(), so a failed cleanup shows up in
+Settings → Troubleshoot even with DevTools off. The existing sub-row cleanup UI
+(ปัจจุบัน/เก่า/ซ้ำ badges, v1.0.210) remains the manual recovery path if this fires.
+
+test-explicit-delete-logging.js adds 12 assertions covering both call sites:
+logError fires with the right type/message/detail on a rejected commit, never
+fires on success, and the invoices.html path is a true no-op for an empty id
+list. Full regression of all eleven suites (196 assertions) green before and
+after the version bump.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
