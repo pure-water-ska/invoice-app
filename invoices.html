@@ -169,7 +169,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.209"></script><script src="db.js?v=1.0.209"></script><script src="auth.js?v=1.0.209"></script><script src="nav.js?v=1.0.209"></script><script src="idb.js?v=1.0.209"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.210"></script><script src="db.js?v=1.0.210"></script><script src="auth.js?v=1.0.210"></script><script src="nav.js?v=1.0.210"></script><script src="idb.js?v=1.0.210"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -668,7 +668,21 @@ function render() {
         pageGroups.get(gk).push(pg);
       });
       const dupIds = new Set();
-      for (const grp of pageGroups.values()) if (grp.length > 1) grp.forEach(pg => dupIds.add(pg.id));
+      // The one "winning" record per group — same rule as DB.getCurrentPagesByNumber()
+      // (highest editCount, first-seen breaks ties), computed PER GROUP. `inv` (below)
+      // only ever represents ONE customer's pick for the whole invoiceNumber (see the
+      // `seen` map above it in render()) — comparing every row's id against inv.id alone
+      // silently marked NOTHING "current" whenever a duplicate group belonged to a
+      // DIFFERENT customer than inv: every duplicate showed "เก่า/ซ้ำ" with none marked
+      // "ปัจจุบัน", giving no cue for which record to keep. Confirmed live on 300669-209
+      // (ร้านอรวรรณ + 2× ทรัพย์มณี duplicate — the ทรัพย์มณี group never matched inv.id).
+      const currentIds = new Set();
+      for (const grp of pageGroups.values()) {
+        if (grp.length > 1) grp.forEach(pg => dupIds.add(pg.id));
+        let best = grp[0];
+        for (const pg of grp) if ((pg.editCount || 0) > (best.editCount || 0)) best = pg;
+        currentIds.add(best.id);
+      }
 
       if (collided) {
         html += `<tr class="table-warning" data-parent="${inv.invoiceNumber}" style="font-size:12px">
@@ -701,11 +715,8 @@ function render() {
         const pgTotal = parseFloat(pg.totalAmount) || 0;
         // Flag rows that do NOT belong to the customer shown on the parent row.
         const foreign = collided && pg.customerId !== inv.customerId;
-        // Among same-customer duplicates, `inv` IS the record the seen-map above picked
-        // (highest editCount, or array-first if tied) — so pg.id === inv.id identifies
-        // the one actually driving the main row's total/paid/status right now.
         const isDup     = dupIds.has(pg.id);
-        const isCurrent = isDup && pg.id === inv.id;
+        const isCurrent = isDup && currentIds.has(pg.id);
         const isStale   = isDup && !isCurrent;
         const rowClass  = foreign ? 'table-warning' : (isStale ? 'table-secondary' : 'table-light');
         const borderClr = foreign ? '#ffc107' : (isStale ? '#adb5bd' : '#0d6efd');
