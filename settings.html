@@ -521,6 +521,25 @@
     </div>
   </div>
 
+  <!-- ── Stale folded-balance cleanup ──────────────────────────────────── -->
+  <!-- Shown to: Admin | payment_edit -->
+  <div class="card mb-4" id="staleBalCard" style="display:none">
+    <div class="card-header fw-semibold py-2" style="background:#fd7e14;color:#fff">
+      <i class="bi bi-tools me-1"></i>ตัดยอดเก่าที่ยกไปใบใหม่แล้ว (ทุกลูกค้า)
+    </div>
+    <div class="card-body">
+      <div class="text-muted small mb-3" style="line-height:1.7">
+        ค้นหายอดค้างชำระ/ชำระเกินที่เคยเพิ่มลงใบกำกับใหม่แล้ว แต่ใบเดิมยังไม่ถูกตัดยอด
+        (เกิดกับรายการก่อนเวอร์ชัน 1.0.203) — ระบบจะตัดยอดให้เท่ากับ<strong>จำนวนที่น้อยกว่า</strong>ระหว่างยอดที่ยกไปกับยอดค้างปัจจุบัน
+        เพื่อไม่ให้ตัดเกิน
+      </div>
+      <button class="btn btn-warning btn-sm" id="staleScanBtn" onclick="scanStaleBalances()">
+        <i class="bi bi-search me-1"></i>ตรวจหารายการ
+      </button>
+      <div id="staleBalResult" class="mt-3"></div>
+    </div>
+  </div>
+
   <!-- ── Danger Zone ───────────────────────────────────────────────────── -->
   <div class="card mb-4 admin-only">
     <div class="card-header bg-danger text-white fw-semibold py-2">
@@ -949,10 +968,10 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-<script src="utils.js?v=1.0.212"></script><script src="db.js?v=1.0.212"></script><script src="auth.js?v=1.0.212"></script><script src="nav.js?v=1.0.212"></script><script src="idb.js?v=1.0.212"></script><script src="image-store.js?v=1.0.163"></script>
+<script src="utils.js?v=1.0.213"></script><script src="db.js?v=1.0.213"></script><script src="auth.js?v=1.0.213"></script><script src="nav.js?v=1.0.213"></script><script src="idb.js?v=1.0.213"></script><script src="image-store.js?v=1.0.163"></script>
 <script src="drive-config.js" onerror="window.GOOGLE_CLIENT_ID=''"></script>
 <script src="drive-store.js"></script>
-<script src="settings.js?v=1.0.212"></script>
+<script src="settings.js?v=1.0.213"></script>
 <script>Nav.render('settings');</script>
 </body>
 </html>

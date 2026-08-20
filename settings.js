@@ -987,6 +987,12 @@ async function initZipSections() {
     document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'none');
   }
 
+  // Stale folded-balance cleanup — writes payment records, so gate on payment_edit
+  if (isAdmin || Auth.can('payment_edit')) {
+    const _sb = document.getElementById('staleBalCard');
+    if (_sb) _sb.style.display = '';
+  }
+
   // ── Unified Backup card ──────────────────────────────────────────────────
   if (canExpBackup || canExpZip) {
     document.getElementById('backupCard').style.display = '';
@@ -3246,3 +3252,162 @@ window.addEventListener('DOMContentLoaded', () => { _hadDataAtLoad = DB.getInvoi
 window.addEventListener('sync:ready', () => {
   if (!_hadDataAtLoad) { loadStats(); renderStorageBar(); renderLogCounts(); }
 });
+
+// ─── Stale folded-balance cleanup ────────────────────────────────────────────
+// Repairs balances that were folded onto a newer invoice via invoice-create's
+// "เพิ่มที่เลือกลงใบใหม่" button back when no retirement mechanism existed for that type
+// (overpaid: v1.0.194, owed: v1.0.203), leaving the source invoice showing as outstanding
+// forever while the same money was also billed on the newer invoice. See
+// DB.findStaleFoldedBalances() for the detection rule and why settleAmount is capped.
+// The scan is strictly read-only — nothing is written until the user ticks rows and
+// confirms the settle.
+let _staleRows = [];
+
+function scanStaleBalances() {
+  const box = document.getElementById('staleBalResult');
+  box.innerHTML = '<div class="text-muted small"><span class="spinner-border spinner-border-sm me-2"></span>กำลังตรวจ…</div>';
+  setTimeout(() => {
+    let res;
+    try {
+      res = DB.findStaleFoldedBalances();
+    } catch (e) {
+      box.innerHTML = `<div class="alert alert-danger p-2 mb-0 small">ตรวจไม่สำเร็จ: ${esc(e && e.message ? e.message : e)}</div>`;
+      return;
+    }
+    _staleRows = res.rows;
+
+    // Never hide the sign-mismatch cases behind a clean "all good" — they are real
+    // findings the tool deliberately refuses to guess at, not absences.
+    const skipNote = res.skipped.length
+      ? `<div class="alert alert-secondary p-2 mt-2 mb-0 small"><i class="bi bi-info-circle me-1"></i>
+           ข้าม <strong>${res.skipped.length}</strong> รายการที่ทิศทางยอดไม่ตรงกัน (ยกไปเป็นค้างชำระ แต่ตอนนี้ชำระเกิน หรือกลับกัน) —
+           ต้องตรวจสอบเอง: ${esc(res.skipped.map(r => r.sourceNum).join(', '))}
+         </div>`
+      : '';
+
+    if (!_staleRows.length) {
+      box.innerHTML = `<div class="alert alert-success p-2 mb-0 small">
+          <i class="bi bi-check-circle me-1"></i>ไม่พบรายการค้าง — ทุกยอดที่ยกไปใบใหม่ถูกตัดยอดเรียบร้อยแล้ว
+        </div>${skipNote}`;
+      return;
+    }
+
+    const rowsHtml = _staleRows.map((r, i) => `
+      <tr${r.mismatch ? ' style="background:#fdece9"' : ''}>
+        <td class="text-center"><input type="checkbox" class="stale-chk form-check-input" data-idx="${i}" checked onchange="updateStaleBtn()"></td>
+        <td>${esc(r.custName)}</td>
+        <td>${esc(r.sourceNum)}</td>
+        <td>${esc(r.targetNum)}${r.targets.length > 1 ? ` <span class="badge bg-secondary" style="font-size:9.5px">+${r.targets.length - 1}</span>` : ''}</td>
+        <td class="text-end">${Utils.formatNumber(Math.abs(r.folded))}</td>
+        <td class="text-end">${Utils.formatNumber(Math.abs(r.current))}</td>
+        <td class="text-end fw-semibold">${Utils.formatNumber(r.settleAmount)}</td>
+        <td><span class="badge ${r.isOwed ? 'bg-danger' : 'bg-success'}" style="font-size:9.5px">${r.isOwed ? 'ค้างชำระ' : 'ชำระเกิน'}</span></td>
+      </tr>`).join('');
+
+    const hasMismatch = _staleRows.some(r => r.mismatch);
+    box.innerHTML = `
+      <div class="alert alert-warning p-2 mb-2 small">
+        <i class="bi bi-exclamation-triangle me-1"></i>พบ <strong>${_staleRows.length}</strong> รายการที่ยังไม่ถูกตัดยอด
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm table-bordered mb-0" style="font-size:12px">
+          <thead class="table-light">
+            <tr>
+              <th style="width:30px"><input type="checkbox" class="form-check-input" id="staleChkAll" checked onchange="toggleAllStale(this.checked)"></th>
+              <th>ลูกค้า</th><th>ใบเดิม</th><th>ยกไปใบ</th>
+              <th class="text-end">ยกไป</th><th class="text-end">ค้างตอนนี้</th><th class="text-end">จะตัด</th><th>ประเภท</th>
+            </tr>
+          </thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
+      ${hasMismatch ? `<div class="small mt-2 p-2 rounded" style="background:#fdece9;color:#842029;line-height:1.5">
+        <i class="bi bi-info-circle me-1"></i>แถวสีแดงอ่อน = ยอดที่ยกไปไม่เท่ากับยอดค้างปัจจุบัน (มีการชำระเพิ่มภายหลัง) —
+        จะตัดแค่ยอดที่น้อยกว่า ส่วนที่เหลือยังค้างตามจริง
+      </div>` : ''}
+      <div class="d-flex align-items-center gap-2 mt-3 flex-wrap">
+        <button class="btn btn-success btn-sm" id="staleGoBtn" onclick="settleStaleSelected()">
+          <i class="bi bi-check-lg me-1"></i>ตัดยอดที่เลือก (<span id="staleSummary"></span>)
+        </button>
+        <span class="text-muted" style="font-size:11.5px">จะสร้างรายการชำระแบบไม่มีเงินสด (ยกยอด) และบันทึกลงประวัติ</span>
+      </div>${skipNote}`;
+    updateStaleBtn();
+  }, 30);
+}
+
+function toggleAllStale(checked) {
+  document.querySelectorAll('.stale-chk').forEach(el => el.checked = checked);
+  updateStaleBtn();
+}
+
+function updateStaleBtn() {
+  const checked = [...document.querySelectorAll('.stale-chk:checked')];
+  const sum = checked.reduce((s, el) => s + _staleRows[+el.dataset.idx].settleAmount, 0);
+  const btn = document.getElementById('staleGoBtn');
+  const sm  = document.getElementById('staleSummary');
+  if (!btn || !sm) return;
+  sm.textContent = checked.length === 0 ? 'ไม่มีที่เลือก'
+    : `${checked.length} รายการ, ${Utils.formatNumber(sum)} บ.`;
+  btn.disabled = checked.length === 0;
+  const all = document.querySelectorAll('.stale-chk');
+  const chkAll = document.getElementById('staleChkAll');
+  if (chkAll) {
+    chkAll.indeterminate = checked.length > 0 && checked.length < all.length;
+    chkAll.checked = checked.length === all.length;
+  }
+}
+
+async function settleStaleSelected() {
+  if (!Auth.isAdmin() && !Auth.can('payment_edit')) {
+    Utils.showAlert('ไม่มีสิทธิ์แก้ไขการชำระเงิน', 'danger');
+    return;
+  }
+  const checked = [...document.querySelectorAll('.stale-chk:checked')];
+  if (!checked.length) return;
+  const picked = checked.map(el => _staleRows[+el.dataset.idx]);
+  const sum = picked.reduce((s, r) => s + r.settleAmount, 0);
+
+  // Utils.confirm (not window.confirm) — in Tauri window.confirm returns a Promise,
+  // which is always truthy, so a bare confirm() would never actually block. See CLAUDE.md.
+  const ok = await Utils.confirm(
+    `ตัดยอด ${picked.length} รายการ รวม ${Utils.formatNumber(sum)} บาท?\n\n` +
+    `ใบเดิมจะถูกบันทึกว่าตัดยอดแล้ว (ไม่ใช่การรับเงินจริง) — ยอดรวมที่ลูกค้าค้างทั้งระบบไม่เปลี่ยน`,
+    'ยืนยันการตัดยอด'
+  );
+  if (!ok) return;
+
+  const btn = document.getElementById('staleGoBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลังตัดยอด…'; }
+
+  let done = 0, total = 0;
+  const failed = [];
+  for (const r of picked) {
+    try {
+      const amt = DB.settleStaleFoldedBalance(r, session.name, session.username);
+      if (amt > 0.005) { done++; total += amt; }
+      else failed.push(r.sourceNum);
+    } catch (e) {
+      failed.push(r.sourceNum);
+      try {
+        DB.logError('STALE-SETTLE-FAILED',
+          `ตัดยอด ${r.sourceNum} → ${r.targetNum} ล้มเหลว: ${e && e.message ? e.message : e}`,
+          { sourceNum: r.sourceNum, targetNum: r.targetNum, amount: r.settleAmount });
+      } catch (e2) {}
+    }
+  }
+
+  if (done) {
+    DB.logActivity(session.userId, session.username, 'ตัดยอดเก่าที่ยกไปใบใหม่', {
+      count: done, amount: total,
+      invoices: picked.slice(0, 20).map(r => `${r.sourceNum}→${r.targetNum}`).join(', '),
+    });
+  }
+
+  Utils.showAlert(
+    failed.length
+      ? `ตัดยอดสำเร็จ ${done} รายการ, ไม่สำเร็จ ${failed.length} รายการ (${failed.slice(0, 5).join(', ')})`
+      : `ตัดยอดสำเร็จ ${done} รายการ รวม ${Utils.formatNumber(total)} บาท`,
+    failed.length ? 'warning' : 'success'
+  );
+  scanStaleBalances();   // re-scan so the list reflects reality, not our assumption
+}

@@ -1043,6 +1043,79 @@ const DB = {
     return p;
   },
 
+  // Finds every balance that was folded onto a NEWER invoice via invoice-create's
+  // "เพิ่มที่เลือกลงใบใหม่" button but whose SOURCE invoice was never retired — the memo
+  // line ("ค้างชำระ X" / "ชำระเกิน X") sits on some other invoice, yet X itself still
+  // shows an outstanding balance, so the same money is counted in both places. Only
+  // possible for additions made BEFORE the retirement mechanism existed for that type
+  // (overpaid: v1.0.194, owed: v1.0.203) — anything folded since is retired at save time
+  // and so never turns up here. Used by the Settings cleanup tool.
+  //
+  // Grouped by SOURCE number, not per memo line: if the same source was folded onto two
+  // different invoices, its debt is still only owed once, and summing then capping (below)
+  // handles that without double-settling.
+  //
+  // settleAmount is deliberately min(|folded|, |current|). If part of the source was paid
+  // directly after it was folded, settling the full folded amount would overshoot the
+  // invoice into a phantom credit; capping leaves any genuine remainder outstanding.
+  // Signs must agree — a source folded as owed but now sitting overpaid (or vice versa) is
+  // ambiguous, so it goes to `skipped` rather than being guessed at and silently dropped.
+  findStaleFoldedBalances() {
+    const invoices = this.getInvoices().filter(i => !i.cancelled);
+    const byNum = {};
+    invoices.forEach(inv => {
+      (inv.items || []).forEach(it => {
+        const m = /^(?:ค้างชำระ|ชำระเกิน) (.+)$/.exec(it.name || '');
+        if (!m) return;
+        const src = m[1];
+        if (src === inv.invoiceNumber) return;   // self-reference — meaningless
+        const e = byNum[src] || (byNum[src] = { folded: 0, targets: [], newestTarget: null, newestAt: null });
+        e.folded += parseFloat(it.total) || 0;
+        if (e.targets.indexOf(inv.invoiceNumber) === -1) e.targets.push(inv.invoiceNumber);
+        if (!e.newestAt || new Date(inv.createdAt || 0) > new Date(e.newestAt)) {
+          e.newestAt = inv.createdAt;
+          e.newestTarget = inv.invoiceNumber;
+        }
+      });
+    });
+
+    const rows = [], skipped = [];
+    Object.keys(byNum).forEach(src => {
+      const e = byNum[src];
+      const pg1 = invoices.find(i => i.invoiceNumber === src && i.page === 1)
+               || invoices.find(i => i.invoiceNumber === src);
+      if (!pg1) return;                          // source gone/cancelled — nothing to settle
+      const total   = parseFloat(pg1.totalAmount) || 0;
+      const current = total - this.getInvoicePaidAmount(src, pg1.customerId);
+      if (Math.abs(current) <= 0.005) return;    // already retired — the healthy case
+      const cust = this.getCustomerById(pg1.customerId);
+      const row = {
+        sourceNum: src, targetNum: e.newestTarget, targets: e.targets,
+        custId: pg1.customerId, custName: cust ? cust.name : '(ไม่พบลูกค้า)',
+        folded: e.folded, current, isOwed: current > 0,
+        settleAmount: 0, mismatch: false,
+      };
+      if ((e.folded > 0) !== (current > 0)) { skipped.push(row); return; }
+      row.settleAmount = Math.min(Math.abs(e.folded), Math.abs(current));
+      row.mismatch = Math.abs(Math.abs(e.folded) - Math.abs(current)) > 0.005;
+      rows.push(row);
+    });
+    return { rows, skipped };
+  },
+
+  // Retires ONE row from findStaleFoldedBalances() using the very same primitives a live
+  // invoice save uses — no separate accounting path to drift out of step. Returns the
+  // amount actually settled (allocateOverpayCredit may settle less than asked if the
+  // source's payments hold less spare credit than expected).
+  settleStaleFoldedBalance(row, by, byUser) {
+    if (!row || !(row.settleAmount > 0.005)) return 0;
+    if (row.isOwed) {
+      this.carryForwardOwedBalance(row.sourceNum, row.custId, row.targetNum, row.settleAmount, by, byUser);
+      return row.settleAmount;
+    }
+    return this.allocateOverpayCredit(row.sourceNum, row.targetNum, row.settleAmount);
+  },
+
   // Also writes clearedDate into payDate. A cheque payment is created with payDate:''
   // (see payments.html collectPaymentData/multiPaySave) — there is no meaningful
   // "payment date" until it actually clears. Mirroring clearedDate into payDate here
