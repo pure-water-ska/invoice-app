@@ -1127,6 +1127,20 @@ const DB = {
     return this.updatePayment(payId, { chequeCleared: true, clearedDate, payDate: clearedDate });
   },
 
+  // A customer's invoices with cancelled ones removed — the ONLY list any money
+  // calculation may use. Cancelled invoices stay visible in list views (with a ยกเลิก
+  // badge) but must never count toward owed/outstanding totals; getCustomerBalance()
+  // always applied that rule, while six hand-rolled "unpaid" computations across
+  // customers.html and payments.html each re-filtered by customerId alone and silently
+  // kept them. The result was a customer card contradicting itself — the ค้างสุทธิ money
+  // badge excluded a voided invoice while the "N ค้างชำระ" count and the red chip list
+  // right beside it still counted it — plus reminder messages and printed statements
+  // that billed for voided invoices, and an overpay allocation that would cut real
+  // credit onto one. Route every such list through here instead of re-filtering.
+  getActiveInvoicesByCustomer(custId) {
+    return this.getInvoices().filter(i => i.customerId === custId && !i.cancelled);
+  },
+
   // Net over/under-paid balance for a customer — the SAME calculation the
   // invoice-create balance bar uses (per invoice number: diff = page-1 total −
   // recorded paid). Returns { net, owed, over, owedCount, overCount }:
@@ -1135,7 +1149,7 @@ const DB = {
   //   net   = owed − over  (>0 net owed, <0 net credit)
   // Use this everywhere a customer balance is shown so the figures never drift.
   getCustomerBalance(custId) {
-    const invs = this.getInvoices().filter(i => i.customerId === custId && !i.cancelled);
+    const invs = this.getActiveInvoicesByCustomer(custId);
     const nums = [...new Set(invs.map(i => i.invoiceNumber))];
     let owed = 0, over = 0, owedCount = 0, overCount = 0;
     for (const num of nums) {

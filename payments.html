@@ -702,7 +702,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.213"></script><script src="db.js?v=1.0.213"></script><script src="auth.js?v=1.0.213"></script><script src="nav.js?v=1.0.213"></script><script src="idb.js?v=1.0.213"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.214"></script><script src="db.js?v=1.0.214"></script><script src="auth.js?v=1.0.214"></script><script src="nav.js?v=1.0.214"></script><script src="idb.js?v=1.0.214"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -2250,7 +2250,10 @@ async function doSaveAllPayments(payments) {
 function _overpayOutstanding() {
   if (!pendingOverpayData) return [];
   const { custId, invNum } = pendingOverpayData;
-  const allInvs = DB.getInvoices().filter(i => i.customerId === custId);
+  // Cancelled excluded — this list is what the user cuts real credit onto, so offering a
+  // voided invoice would move money onto a bill that no longer exists. Worst of the six
+  // sites this filter was missing from; see DB.getActiveInvoicesByCustomer.
+  const allInvs = DB.getActiveInvoicesByCustomer(custId);
   const nums    = [...new Set(allInvs.map(i => i.invoiceNumber))].filter(n => n !== invNum);
   return nums.map(num => {
     const pg1 = allInvs.find(i => i.invoiceNumber === num && i.page === 1)
@@ -2399,7 +2402,8 @@ function showOutstandingPreview(custId) {
   const cust = DB.getCustomerById(custId);
   if (!cust) return;
 
-  const allInvoices = DB.getInvoices().filter(i => i.customerId === custId);
+  // Cancelled excluded — printed/shared outstanding statement.
+  const allInvoices = DB.getActiveInvoicesByCustomer(custId);
   const invNums = [...new Set(allInvoices.map(i => i.invoiceNumber))];
 
   const unpaid = invNums.map(num => {

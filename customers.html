@@ -409,7 +409,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="./vendor/html2canvas.min.js"></script>
-<script src="utils.js?v=1.0.213"></script><script src="db.js?v=1.0.213"></script><script src="auth.js?v=1.0.213"></script><script src="nav.js?v=1.0.213"></script>
+<script src="utils.js?v=1.0.214"></script><script src="db.js?v=1.0.214"></script><script src="auth.js?v=1.0.214"></script><script src="nav.js?v=1.0.214"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -589,7 +589,7 @@ function render() {
   });
   const sortMode = document.getElementById('sortCust')?.value || 'name_asc';
   const _custBalance = c => {
-    const invs = DB.getInvoices().filter(i => i.customerId === c.id);
+    const invs = DB.getActiveInvoicesByCustomer(c.id);
     const nums = [...new Set(invs.map(i => i.invoiceNumber))];
     return nums.reduce((s, n) => {
       const pg1 = invs.find(i => i.invoiceNumber === n && i.page === 1) || invs.find(i => i.invoiceNumber === n);
@@ -624,7 +624,13 @@ function render() {
   const pageList = list.slice((_custPage - 1) * CUST_PAGE_SIZE, _custPage * CUST_PAGE_SIZE);
 
   el.innerHTML = pageList.map(c => {
-    const invoices = DB.getInvoices().filter(i => i.customerId === c.id);
+    // Cancelled invoices are invisible to this card entirely — not just to the money
+    // figures (ค้างชำระ count, red unpaid chips, payment-terms check, which must agree
+    // with the bal badge since getCustomerBalance already excludes them) but also to the
+    // ใบกำกับ count and the ใบล่าสุด date, so a voided invoice can't inflate the bill
+    // count or masquerade as the customer's latest activity. They remain visible on
+    // invoices.html with their ยกเลิก badge. See DB.getActiveInvoicesByCustomer.
+    const invoices = DB.getActiveInvoicesByCustomer(c.id);
     const bal = DB.getCustomerBalance(c.id);   // { net, owed, over, owedCount, overCount }
     const uniqNums = [...new Set(invoices.map(i => i.invoiceNumber))];
     const totalBill = uniqNums.length;
@@ -883,7 +889,9 @@ function doSuspend() {
 function copyOverdueMsg(id) {
   const c = DB.getCustomerById(id);
   if (!c) return;
-  const invoices  = DB.getInvoices().filter(i => i.customerId === id);
+  // Cancelled excluded — this text goes TO the customer; billing them for a voided
+  // invoice is worse than any display glitch. See DB.getActiveInvoicesByCustomer.
+  const invoices  = DB.getActiveInvoicesByCustomer(id);
   const uniqNums  = [...new Set(invoices.map(i => i.invoiceNumber))];
   const unpaidNums = uniqNums.filter(num => {
     const inv = invoices.find(i => i.invoiceNumber === num);
@@ -907,7 +915,8 @@ function showOutstandingPreview(id) {
   const c = DB.getCustomerById(id);
   if (!c) return;
   const cfg       = DB.getSettings();
-  const invoices  = DB.getInvoices().filter(i => i.customerId === id);
+  // Cancelled excluded — this is the printed ใบแจ้งยอดค้างชำระ handed to the customer.
+  const invoices  = DB.getActiveInvoicesByCustomer(id);
   const uniqNums  = [...new Set(invoices.map(i => i.invoiceNumber))];
   const unpaidRows = uniqNums.map(num => {
     const inv  = invoices.find(i => i.invoiceNumber === num);
