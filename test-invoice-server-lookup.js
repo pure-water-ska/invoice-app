@@ -184,6 +184,59 @@ console.log('invoiceNumberServerDetail() — the date-unfiltered server query');
       t('the rejection propagates to the caller', threw === true);
     }
 
+    console.log('\nlookup rendering — the stale page is pre-ticked, the current one never is');
+    {
+      // The 150869-004 shape: an edit wrote a corrected record (editCount 1) but the old
+      // one's delete never landed, so both sit on the server under the same customer+page.
+      // Deleting ALL docs for the number would take the corrected record too, so the row
+      // selection must default to the stale one only.
+      const src = fs.readFileSync(path.join(DIR, 'settings.js'), 'utf8');
+      const s = src.indexOf('  const groups = new Map();', src.indexOf('async function lookupInvoiceNumber'));
+      const e = src.indexOf('}).join(\'\');', src.indexOf('const rows = docs.map', s)) + 12;
+      if (s < 0) throw new Error('lookup row block not found — update extraction marker');
+
+      const docs = [
+        { id: 'stale', by: 'PC', ts: 1, rec: { customerId: 'c1', page: 1, totalAmount: 12500, editCount: 0, createdAt: '2026-08-15T07:00:00.000Z' } },
+        { id: 'fixed', by: 'PC', ts: 2, rec: { customerId: 'c1', page: 1, totalAmount: 9800, editCount: 1, createdAt: '2026-08-15T07:00:00.000Z' } },
+      ];
+      const out = new Function('docs', 'localIds', 'DB', 'Utils', 'esc', `
+        ${src.slice(s, e)}
+        return { rows, currentIds, staleCount };
+      `)(docs, new Set(), { getCustomerById: () => ({ name: 'ทดสอบ' }) },
+         { formatNumber: n => String(n) }, x => String(x));
+
+      t('the higher-editCount record is the current one', out.currentIds.has('fixed') && !out.currentIds.has('stale'));
+      t('exactly 1 stale row counted', out.staleCount === 1, String(out.staleCount));
+      const staleRow = out.rows.slice(out.rows.indexOf('data-id="stale"'), out.rows.indexOf('data-id="fixed"'));
+      const fixedRow = out.rows.slice(out.rows.indexOf('data-id="fixed"'));
+      t('stale row is pre-ticked', staleRow.includes('checked'));
+      t('current row is NOT pre-ticked', !fixedRow.slice(0, fixedRow.indexOf('</td>')).includes('checked'));
+      t('stale row is badged เก่า/ซ้ำ', out.rows.includes('เก่า/ซ้ำ'));
+      t('current row is badged ปัจจุบัน', out.rows.includes('ปัจจุบัน'));
+    }
+
+    console.log('\nlookup rendering — a cross-customer collision marks BOTH sides current');
+    {
+      // Two customers legitimately hold one record each: neither is a stale edit, so
+      // nothing may be pre-ticked for deletion.
+      const src = fs.readFileSync(path.join(DIR, 'settings.js'), 'utf8');
+      const s = src.indexOf('  const groups = new Map();', src.indexOf('async function lookupInvoiceNumber'));
+      const e = src.indexOf('}).join(\'\');', src.indexOf('const rows = docs.map', s)) + 12;
+      const docs = [
+        { id: 'a', by: 'PC', ts: 1, rec: { customerId: 'c1', page: 1, totalAmount: 9640, editCount: 0 } },
+        { id: 'b', by: 'PC', ts: 1, rec: { customerId: 'c2', page: 1, totalAmount: 9112, editCount: 0 } },
+      ];
+      const out = new Function('docs', 'localIds', 'DB', 'Utils', 'esc', `
+        ${src.slice(s, e)}
+        return { rows, currentIds, staleCount };
+      `)(docs, new Set(), { getCustomerById: () => ({ name: 'x' }) },
+         { formatNumber: n => String(n) }, x => String(x));
+
+      t('both are current (different customers)', out.currentIds.size === 2);
+      t('nothing pre-ticked for deletion', out.staleCount === 0);
+      t('no เก่า/ซ้ำ badge on a pure collision', !out.rows.includes('เก่า/ซ้ำ'));
+    }
+
     console.log(`\n${pass} passed, ${fail} failed`);
     process.exit(fail ? 1 : 0);
   })();

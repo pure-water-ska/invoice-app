@@ -3473,15 +3473,36 @@ async function lookupInvoiceNumber() {
       + (missing.length ? ` — เครื่องนี้ดึงลงมาไม่ได้ ${missing.length} รายการ` : '')
       + (localOnly.length ? ` — มีในเครื่องแต่ไม่มีบนเซิร์ฟเวอร์ ${localOnly.length} รายการ` : '');
 
+  // Which server doc is the CURRENT one per (customer, page) — same rule as
+  // DB.getCurrentPagesByNumber/currentInvoiceRowMap: highest editCount wins, ties keep
+  // first-seen. An edit writes a new record and deletes the old; when that delete doesn't
+  // land both survive, and only the stale one should be removed. Computed here from the
+  // SERVER's docs, not local, because local may not even hold them.
+  const groups = new Map();
+  for (const d of docs) {
+    const key = (d.rec.customerId || '') + '|' + (d.rec.page || 1);
+    const cur = groups.get(key);
+    if (!cur || (d.rec.editCount || 0) > (cur.rec.editCount || 0)) groups.set(key, d);
+  }
+  const currentIds = new Set([...groups.values()].map(d => d.id));
+  const staleCount = docs.length - currentIds.size;
+
   const rows = docs.map(d => {
     const c = DB.getCustomerById(d.rec.customerId);
     const inLocal = localIds.has(d.id);
+    const isCurrent = currentIds.has(d.id);
     const dt = d.rec.createdAt ? String(d.rec.createdAt).slice(0, 10) : '<span class="text-danger">(ไม่มีวันที่)</span>';
-    return `<tr>
+    // Pre-tick the stale rows only — never the current one. Deleting is destructive, so
+    // the default selection must be the safe one; the confirm lists exactly what goes.
+    return `<tr${isCurrent ? '' : ' style="background:#fdece9"'}>
+      <td class="text-center"><input type="checkbox" class="inv-doc-chk form-check-input" data-id="${esc(d.id)}" ${isCurrent ? '' : 'checked'} onchange="updateInvDelBtn()"></td>
       <td>${esc(c ? c.name : (d.rec.customerId || '?'))}</td>
       <td>${d.rec.page || 1}</td>
       <td class="text-end">${Utils.formatNumber(parseFloat(d.rec.totalAmount) || 0)}</td>
       <td>${dt}</td>
+      <td>${isCurrent
+            ? '<span class="badge bg-success" style="font-size:9.5px">ปัจจุบัน</span>'
+            : `<span class="badge bg-danger" style="font-size:9.5px">เก่า/ซ้ำ</span> <span class="text-muted" style="font-size:10px">E${d.rec.editCount || 0}</span>`}</td>
       <td><code style="font-size:10.5px">${esc(d.by || '?')}</code></td>
       <td>${d.ts ? new Date(d.ts).toLocaleString('th-TH') : '-'}</td>
       <td class="text-center">${inLocal ? '<span class="text-success">&#10003;</span>' : '<span class="text-danger fw-bold">&#10007;</span>'}</td>
@@ -3505,12 +3526,16 @@ async function lookupInvoiceNumber() {
     <div class="table-responsive">
       <table class="table table-sm table-bordered mb-0" style="font-size:11.5px">
         <thead class="table-light"><tr>
-          <th>ลูกค้า</th><th>หน้า</th><th class="text-end">ยอด</th><th>วันที่</th>
+          <th style="width:30px"></th>
+          <th>ลูกค้า</th><th>หน้า</th><th class="text-end">ยอด</th><th>วันที่</th><th>สถานะ</th>
           <th>เขียนโดยเครื่อง</th><th>เมื่อ</th><th class="text-center">ในเครื่องนี้</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
-    </div>` : ''}
+    </div>
+    ${staleCount ? `<div class="small mt-2 p-2 rounded" style="background:#fdece9;color:#842029;line-height:1.55">
+      <i class="bi bi-clock-history me-1"></i>แถวสีแดงอ่อน = หน้าเก่าที่ค้างอยู่ (แก้ไขแล้วแต่ลบไม่สำเร็จ) —
+      ติ๊กไว้ให้แล้ว ${staleCount} รายการ ส่วนแถว “ปัจจุบัน” ไม่ติ๊กไว้ ตรวจยอดให้แน่ใจก่อนลบ</div>` : ''}` : ''}
     ${localOnly.length ? `<div class="small mt-2 p-2 rounded" style="background:#fdece9;color:#842029;line-height:1.55">
       <i class="bi bi-exclamation-triangle me-1"></i>มีในเครื่องนี้แต่ไม่มีบนเซิร์ฟเวอร์ ${localOnly.length} รายการ
       (${esc(localOnly.map(r => (DB.getCustomerById(r.customerId)||{}).name || r.customerId || '?').join(', '))})
@@ -3519,10 +3544,11 @@ async function lookupInvoiceNumber() {
     <div class="d-flex gap-2 mt-3 flex-wrap">
       ${missing.length ? `<button class="btn btn-success btn-sm" onclick="pullInvoiceNumberDown()">
         <i class="bi bi-download me-1"></i>ดึงลงเครื่องนี้ (${missing.length})</button>` : ''}
-      ${docs.length ? `<button class="btn btn-outline-danger btn-sm" onclick="deleteInvoiceNumberOnServer()">
-        <i class="bi bi-trash me-1"></i>ลบออกจากเซิร์ฟเวอร์…</button>` : ''}
+      ${docs.length ? `<button class="btn btn-outline-danger btn-sm" id="invDelBtn" onclick="deleteInvoiceNumberOnServer()">
+        <i class="bi bi-trash me-1"></i>ลบที่เลือกออกจากเซิร์ฟเวอร์ (<span id="invDelCount"></span>)…</button>` : ''}
     </div>
     ${missing.length ? '<div class="text-muted mt-2" style="font-size:11px">ปุ่ม “ดึงลงเครื่องนี้” เขียนลงเครื่องอย่างเดียว ไม่แตะเซิร์ฟเวอร์ — ปลอดภัยเสมอ</div>' : ''}`;
+  updateInvDelBtn();   // seed the delete button's count from the pre-ticked stale rows
 }
 
 async function pullInvoiceNumberDown() {
@@ -3539,14 +3565,31 @@ async function pullInvoiceNumberDown() {
   }
 }
 
+function updateInvDelBtn() {
+  const checked = [...document.querySelectorAll('.inv-doc-chk:checked')];
+  const btn = document.getElementById('invDelBtn');
+  const cnt = document.getElementById('invDelCount');
+  if (!btn || !cnt) return;
+  cnt.textContent = checked.length;
+  btn.disabled = checked.length === 0;
+}
+
 async function deleteInvoiceNumberOnServer() {
-  const ids = _invLookupDocs.map(d => d.id);
+  const ids = [...document.querySelectorAll('.inv-doc-chk:checked')].map(el => el.dataset.id);
   if (!ids.length) return;
+  // Deleting EVERY doc for the number removes the invoice outright — legitimate for a pure
+  // ghost, but not what "clean up the stale page" means, so it gets its own warning.
+  const all = ids.length === _invLookupDocs.length;
+  const lines = _invLookupDocs.filter(d => ids.includes(d.id)).map(d => {
+    const c = DB.getCustomerById(d.rec.customerId);
+    return `• ${(c ? c.name : d.rec.customerId || '?')} — ฿${Utils.formatNumber(parseFloat(d.rec.totalAmount) || 0)}`;
+  }).join('\n');
   // Utils.confirm, not window.confirm — see CLAUDE.md (Tauri returns a Promise, always truthy).
   const ok = await Utils.confirm(
-    `ลบใบกำกับ ${_invLookupNum} ออกจากเซิร์ฟเวอร์ทั้ง ${ids.length} รายการ?\n\n` +
-    `ใช้เมื่อยืนยันแล้วว่าเป็นข้อมูลค้าง/ผิดพลาด — ถ้ามีเครื่องอื่นที่ยังเก็บสำเนาเก่าไว้ ` +
-    `รายการอาจถูกอัปโหลดกลับขึ้นไปอีก`, 'ยืนยันการลบจากเซิร์ฟเวอร์');
+    `ลบ ${ids.length} รายการของใบกำกับ ${_invLookupNum} ออกจากเซิร์ฟเวอร์?\n\n${lines}\n\n` +
+    (all ? `⚠️ นี่คือทุกรายการของเลขนี้ — ใบกำกับจะหายไปทั้งใบ\n\n` : '') +
+    `ถ้ามีเครื่องอื่นที่ยังเก็บสำเนาเก่าไว้ รายการอาจถูกอัปโหลดกลับขึ้นไปอีก`,
+    'ยืนยันการลบจากเซิร์ฟเวอร์');
   if (!ok) return;
   try {
     const n = await Sync.deleteInvoiceDocsFromServer(ids);
