@@ -1199,13 +1199,33 @@ const DB = {
   //   over  = Σ of |negative diffs| (over-paid / credit)
   //   net   = owed − over  (>0 net owed, <0 net credit)
   // Use this everywhere a customer balance is shown so the figures never drift.
+  // Should `cand` replace `cur` as the single record representing an invoice number?
+  // Prefer page 1; among records of the SAME page prefer the highest editCount. An edit
+  // writes a new record and the old one's Firestore delete has repeatedly failed to land
+  // (180769-001, 220769-007, 070869-001, 150869-004), so both can be present and the
+  // stale one must never win. Plain `find(page === 1)` picked whichever came first and
+  // reports' `if (!cur || page === 1)` picked whichever came LAST — so on the same data
+  // the customer balance and the revenue report could each land on either amount, and
+  // disagree with each other, since array order follows sync/load order. This rule is
+  // deterministic: with no editCount difference the incumbent stays.
+  // Normal multi-page invoices are unaffected — page 1 still wins exactly as before.
+  _isBetterInvoiceRep(cur, cand) {
+    if (!cur) return true;
+    const cp = cur.page || 1, np = cand.page || 1;
+    if (cp !== 1 && np === 1) return true;
+    if (cp === 1 && np !== 1) return false;
+    return (cand.editCount || 0) > (cur.editCount || 0);
+  },
+
   getCustomerBalance(custId) {
     const invs = this.getActiveInvoicesByCustomer(custId);
     const nums = [...new Set(invs.map(i => i.invoiceNumber))];
     let owed = 0, over = 0, owedCount = 0, overCount = 0;
     for (const num of nums) {
-      const pg1 = invs.find(i => i.invoiceNumber === num && i.page === 1)
-               || invs.find(i => i.invoiceNumber === num);
+      let pg1 = null;
+      for (const i of invs) {
+        if (i.invoiceNumber === num && this._isBetterInvoiceRep(pg1, i)) pg1 = i;
+      }
       if (!pg1) continue;
       const diff = (parseFloat(pg1.totalAmount) || 0) - this.getInvoicePaidAmount(num, custId);
       if (diff > 0.005)      { owed += diff;  owedCount++; }

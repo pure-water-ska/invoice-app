@@ -133,7 +133,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.217"></script><script src="db.js?v=1.0.217"></script><script src="auth.js?v=1.0.217"></script><script src="nav.js?v=1.0.217"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.218"></script><script src="db.js?v=1.0.218"></script><script src="auth.js?v=1.0.218"></script><script src="nav.js?v=1.0.218"></script><script src="bedate.js"></script>
 <script>
 Auth.require();
 DB.init();
@@ -202,7 +202,11 @@ function runReport() {
     if (!pagesByNum[inv.invoiceNumber]) pagesByNum[inv.invoiceNumber] = [];
     pagesByNum[inv.invoiceNumber].push(inv);
     const key = inv.invoiceNumber + '|' + (inv.customerId || '');
-    if (!invByNum[key] || inv.page === 1) invByNum[key] = inv;
+    // Was `!invByNum[key] || inv.page === 1` — the LAST page-1 record won, so a stale
+    // pre-edit page left behind by a failed delete could take the slot and report the OLD
+    // total. DB._isBetterInvoiceRep prefers page 1 then the highest editCount, matching
+    // getCustomerBalance so the two can't disagree about the same invoice.
+    if (DB._isBetterInvoiceRep(invByNum[key], inv)) invByNum[key] = inv;
   });
 
   const filtered = Object.values(invByNum).filter(inv => {
@@ -499,7 +503,11 @@ function renderByPayBehavior(customers, area) {
   const invByNum = {};
   allInvoices.forEach(inv => {
     const key = inv.invoiceNumber + '|' + (inv.customerId || '');
-    if (!invByNum[key] || inv.page === 1) invByNum[key] = inv;
+    // Was `!invByNum[key] || inv.page === 1` — the LAST page-1 record won, so a stale
+    // pre-edit page left behind by a failed delete could take the slot and report the OLD
+    // total. DB._isBetterInvoiceRep prefers page 1 then the highest editCount, matching
+    // getCustomerBalance so the two can't disagree about the same invoice.
+    if (DB._isBetterInvoiceRep(invByNum[key], inv)) invByNum[key] = inv;
   });
 
   // Only customers with maxDays > 0
