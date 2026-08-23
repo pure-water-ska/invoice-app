@@ -702,7 +702,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.215"></script><script src="db.js?v=1.0.215"></script><script src="auth.js?v=1.0.215"></script><script src="nav.js?v=1.0.215"></script><script src="idb.js?v=1.0.215"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.216"></script><script src="db.js?v=1.0.216"></script><script src="auth.js?v=1.0.216"></script><script src="nav.js?v=1.0.216"></script><script src="idb.js?v=1.0.216"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -1119,29 +1119,33 @@ function render() {
   // Build lookup maps once — avoids O(n²) per-row DB reads
   const custMap = Object.fromEntries(DB.getCustomers().map(c => [c.id, c]));
   const allPayments = DB.getPayments();
-  const paidMap = {};
-  // Payment lookup by invoice number (for new filters)
+  // Keyed `invoiceNumber|customerId` and summed via effectivePaymentAmount — see
+  // DB.invoicePaidMap(). This page used to sum raw p.amount keyed by number alone, which
+  // credited one customer's payments to the other's invoice on a collided number and kept
+  // counting overpayments already allocated away to other invoices.
+  const paidMap = DB.invoicePaidMap();
+  const paidFor = inv => DB.paidForInvoice(paidMap, inv);
+  // Payment lookup by invoice number (for the payment-level filters below)
   const paysByInv = {};
   for (const p of allPayments) {
     if (!p.cancelled) {
-      if (!DB.isChequePending(p)) {
-        paidMap[p.invoiceNumber] = (paidMap[p.invoiceNumber] || 0) + (parseFloat(p.amount) || 0);
-      }
       if (!paysByInv[p.invoiceNumber]) paysByInv[p.invoiceNumber] = [];
       paysByInv[p.invoiceNumber].push(p);
     }
   }
 
-  const seen = new Map();
+  // One row per invoice number, preferring the CURRENT record — a stale pre-edit page
+  // whose Firestore delete never landed must not win the row and show the old amount
+  // (reported on 150869-004). Shared with invoices.html; see DB.currentInvoiceRowMap().
+  const seen = DB.currentInvoiceRowMap();
   for (const inv of DB.getInvoices()) {
-    if (!seen.has(inv.invoiceNumber)) seen.set(inv.invoiceNumber, inv);
     if (inv.importedFrom === 'pdf' || inv.hasPdfPage) _pdfInvMap[inv.invoiceNumber] = inv;
   }
 
   let list = [...seen.values()].filter(inv => {
     const cust     = custMap[inv.customerId];
     const custName = (cust ? cust.name : '').toLowerCase();
-    const paid     = paidMap[inv.invoiceNumber] || 0;
+    const paid     = paidFor(inv);
     const total    = parseFloat(inv.totalAmount) || 0;
     const status   = inv.cancelled ? 'cancelled' : paid <= 0 ? 'pending' : paid >= total - 0.005 ? 'paid' : 'partial';
     const d = new Date(inv.createdAt);
@@ -1171,8 +1175,8 @@ function render() {
   list.sort((a, b) => {
     const ca  = custMap[a.customerId];
     const cb  = custMap[b.customerId];
-    const pa  = paidMap[a.invoiceNumber] || 0;
-    const pb  = paidMap[b.invoiceNumber] || 0;
+    const pa  = paidFor(a);
+    const pb  = paidFor(b);
     const ta  = parseFloat(a.totalAmount) || 0;
     const tb  = parseFloat(b.totalAmount) || 0;
     const stA = pa <= 0 ? 'pending' : pa >= ta - 0.005 ? 'paid' : 'partial';
@@ -1203,7 +1207,7 @@ function render() {
   tbody.innerHTML = list.map(inv => {
     const cust  = custMap[inv.customerId];
     const total = parseFloat(inv.totalAmount) || 0;
-    const paid  = paidMap[inv.invoiceNumber] || 0;
+    const paid  = paidFor(inv);
     let rem     = total - paid;
     if (Math.abs(rem) < 0.005) rem = 0;
     const status    = inv.cancelled ? 'cancelled' : paid <= 0 ? 'pending' : paid >= total - 0.005 ? 'paid' : 'partial';

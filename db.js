@@ -684,6 +684,57 @@ const DB = {
     }
     return [...groups.values()].sort((a, b) => (a.page || 1) - (b.page || 1));
   },
+  // One representative record per invoice NUMBER, for list views that render one row per
+  // number — Map<invoiceNumber, record>. Same intent as getCurrentPagesByNumber() (an edit
+  // writes new page records with new ids and the old ones are supposed to be deleted from
+  // Firestore; that delete has repeatedly failed to land — confirmed on 180769-001,
+  // 220769-007, 070869-001, 150869-004 — leaving both, so picking array-order-first shows
+  // the STALE pre-edit total). Built in ONE pass instead of calling
+  // getCurrentPagesByNumber() per number, which would rescan the whole array each time
+  // (O(n²) — see the pricing.html per-row-scan lesson in CLAUDE.md).
+  //
+  // Replacement requires the SAME customer AND page: on a collided number (one number, two
+  // customers) the first customer's record legitimately holds the row, and the list pages
+  // surface the collision separately. A normal multi-page invoice is unaffected — its pages
+  // differ by page number, so the condition never fires and first-seen still wins, and
+  // every page carries the same totalAmount anyway.
+  //
+  // invoices.html and payments.html must BOTH use this. payments.html having its own
+  // first-seen-wins copy is exactly how it kept showing pre-edit amounts for four releases
+  // after invoices.html was fixed (v1.0.202).
+  currentInvoiceRowMap(invoices) {
+    const seen = new Map();
+    for (const inv of (invoices || this.getInvoices())) {
+      const cur = seen.get(inv.invoiceNumber);
+      if (!cur) { seen.set(inv.invoiceNumber, inv); continue; }
+      if (cur.customerId === inv.customerId && (cur.page || 1) === (inv.page || 1)
+          && (inv.editCount || 0) > (cur.editCount || 0)) {
+        seen.set(inv.invoiceNumber, inv);
+      }
+    }
+    return seen;
+  },
+
+  // Paid-amount lookup for list views: Map keyed `invoiceNumber|customerId` → paid total.
+  // Use with paidForInvoice() below. Two things a hand-rolled sum in a render function
+  // keeps getting wrong, both already fixed once and then re-broken by duplication:
+  //   • keyed WITH customerId (v1.0.198) — on a collided number, summing by number alone
+  //     credits one customer's payments to the other's invoice, reading as settled when
+  //     nothing was paid;
+  //   • effectivePaymentAmount, not raw p.amount — an overpayment already cut to another
+  //     invoice must not still count in full here, or the same money is counted twice.
+  // Cancelled payments and un-cleared cheques are excluded, matching getInvoicePaidAmount.
+  invoicePaidMap() {
+    const map = {};
+    for (const p of this.getPayments()) {
+      if (p.cancelled || this.isChequePending(p)) continue;
+      const key = p.invoiceNumber + '|' + (p.customerId || '');
+      map[key] = (map[key] || 0) + this.effectivePaymentAmount(p);
+    }
+    return map;
+  },
+  paidForInvoice(map, inv) { return map[inv.invoiceNumber + '|' + (inv.customerId || '')] || 0; },
+
   addInvoice(v) { const a = this.getInvoices(); a.unshift(v); this.saveInvoices(a); },
   updateInvoice(id, patch) {
     const a = this.getInvoices();

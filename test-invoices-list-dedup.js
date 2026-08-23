@@ -19,37 +19,44 @@
 //      showed the STALE pre-edit total, not the corrected one. Fix: prefer the higher
 //      editCount when two records share the same customer AND page.
 //
-// Extracts the ACTUAL code from invoices.html — not a reimplementation — and runs it
-// against synthetic fixtures covering both bugs plus the cases that must NOT regress.
+// Both fixes now live in db.js as DB.currentInvoiceRowMap() / DB.invoicePaidMap() +
+// DB.paidForInvoice(), shared by invoices.html AND payments.html. They were previously
+// inline in invoices.html only, which is exactly how payments.html kept showing pre-edit
+// amounts for four releases after invoices.html was fixed (reported on 150869-004).
+//
+// Loads the REAL DB object out of db.js — not a reimplementation — and runs it against
+// synthetic fixtures covering both bugs plus the cases that must NOT regress. The final
+// section asserts both pages actually call the helpers, so the duplication can't return.
 
 const fs = require('fs');
 const path = require('path');
 const DIR = __dirname;
 
-const src = fs.readFileSync(path.join(DIR, 'invoices.html'), 'utf8');
-const paidBlockStart = src.indexOf('  const paidMap = {};');
-const paidBlockEnd   = src.indexOf('for (const inv of allInvoices) pageCountMap');
-const seenBlockStart = src.indexOf('  const seen = new Map();');
-const seenBlockEnd   = src.indexOf('  let list = [...seen.values()];');
-if (paidBlockStart < 0 || seenBlockStart < 0) throw new Error('invoices.html structure changed — update this test\'s extraction markers');
-const paidBlock = src.slice(paidBlockStart, paidBlockEnd);
-const seenBlock = src.slice(seenBlockStart, seenBlockEnd);
+function loadDB(invoices, payments) {
+  const src = fs.readFileSync(path.join(DIR, 'db.js'), 'utf8');
+  const start = src.indexOf('const DB = {');
+  if (start < 0) throw new Error('DB literal not found — update extraction marker');
+  let depth = 0, i = src.indexOf('{', start), end = -1;
+  for (; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}') { depth--; if (depth === 0) { end = i + 1; break; } }
+  }
+  const DB = new Function('Utils', 'window', 'localStorage', 'sessionStorage', 'console',
+    `return ${src.slice(src.indexOf('{', start), end)};`)(
+    { uuid: () => 'x' }, {}, { getItem: () => null, setItem: () => {} },
+    { getItem: () => null, setItem: () => {} }, { log(){}, warn(){}, error(){} });
+  DB.getInvoices = () => invoices;
+  DB.getPayments = () => payments;
+  return DB;
+}
 
-// Minimal DB stub: only what the extracted blocks call.
 function run(invoices, payments) {
-  const DB = {
-    getInvoices: () => invoices,
-    getPayments: () => payments,
-    isChequePending: p => p.method === 'เช็ค' && p.chequeCleared === false,
-    effectivePaymentAmount: p => Math.max(0, (parseFloat(p.amount) || 0) - (parseFloat(p.allocatedOut) || 0)),
+  const DB = loadDB(invoices, payments);
+  const paidMap = DB.invoicePaidMap();
+  return {
+    seen: DB.currentInvoiceRowMap(invoices),
+    paidFor: inv => DB.paidForInvoice(paidMap, inv),
   };
-  const fn = new Function('DB', `
-    const allInvoices = DB.getInvoices();
-    ${paidBlock}
-    ${seenBlock}
-    return { paidFor, seen };
-  `);
-  return fn(DB);
 }
 
 const CUST_A = 'A', CUST_B = 'B';
@@ -132,6 +139,44 @@ console.log('\nseen map: equal editCount (plain re-import duplicate, no edit inv
   ];
   const { seen } = run(invoices, []);
   t('keeps array-first when editCount is tied (no signal to prefer either)', seen.get('NUM-7').id === 'x');
+}
+
+console.log('\npaidFor(): an overpayment already cut to another invoice stops counting in full');
+{
+  // payments.html summed raw p.amount, so an allocated-away overpayment still showed as
+  // paid here — the same money counted on both the source and the target invoice.
+  const invoices = [{ id: 'i1', invoiceNumber: 'NUM-8', page: 1, customerId: CUST_A, totalAmount: 500 }];
+  const payments = [{ invoiceNumber: 'NUM-8', customerId: CUST_A, amount: 800, allocatedOut: 300 }];
+  const { paidFor } = run(invoices, payments);
+  t('counts 500 (800 − 300 allocated away), not 800', paidFor(invoices[0]) === 500, String(paidFor(invoices[0])));
+}
+
+console.log('\npaidFor(): cancelled payments and un-cleared cheques are excluded');
+{
+  const invoices = [{ id: 'i1', invoiceNumber: 'NUM-9', page: 1, customerId: CUST_A, totalAmount: 500 }];
+  const payments = [
+    { invoiceNumber: 'NUM-9', customerId: CUST_A, amount: 100 },
+    { invoiceNumber: 'NUM-9', customerId: CUST_A, amount: 200, cancelled: true },
+    { invoiceNumber: 'NUM-9', customerId: CUST_A, amount: 300, method: 'เช็ค', chequeCleared: false },
+    { invoiceNumber: 'NUM-9', customerId: CUST_A, amount: 400, method: 'เช็ค', chequeCleared: true },
+  ];
+  const { paidFor } = run(invoices, payments);
+  t('counts only the 100 cash + 400 cleared cheque', paidFor(invoices[0]) === 500, String(paidFor(invoices[0])));
+}
+
+console.log('\nBoth list pages actually call the shared helpers (guards against re-duplication)');
+{
+  const invSrc  = fs.readFileSync(path.join(DIR, 'invoices.html'), 'utf8');
+  const paySrc  = fs.readFileSync(path.join(DIR, 'payments.html'), 'utf8');
+  t('invoices.html uses DB.currentInvoiceRowMap', invSrc.includes('DB.currentInvoiceRowMap('));
+  t('payments.html uses DB.currentInvoiceRowMap', paySrc.includes('DB.currentInvoiceRowMap('));
+  t('invoices.html uses DB.invoicePaidMap', invSrc.includes('DB.invoicePaidMap('));
+  t('payments.html uses DB.invoicePaidMap', paySrc.includes('DB.invoicePaidMap('));
+  // The exact shapes that caused the bug must not reappear on either page.
+  t('payments.html no longer keys paid by invoiceNumber alone',
+    !/paidMap\[p\.invoiceNumber\]/.test(paySrc));
+  t('payments.html no longer has its own first-seen-wins seen map',
+    !/if \(!seen\.has\(inv\.invoiceNumber\)\) seen\.set/.test(paySrc));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

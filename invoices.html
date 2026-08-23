@@ -169,7 +169,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.215"></script><script src="db.js?v=1.0.215"></script><script src="auth.js?v=1.0.215"></script><script src="nav.js?v=1.0.215"></script><script src="idb.js?v=1.0.215"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.216"></script><script src="db.js?v=1.0.216"></script><script src="auth.js?v=1.0.216"></script><script src="nav.js?v=1.0.216"></script><script src="idb.js?v=1.0.216"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -471,14 +471,9 @@ function render() {
   // This is the same class of bug v1.0.198 fixed via DB.getInvoicePaidAmount(num, custId)
   // — invoices.html's list view built its own sum here instead of going through that
   // helper, so it kept the bug. Payments always carry customerId (verified 1,274/1,274).
-  const paidMap = {};
-  for (const p of DB.getPayments()) {
-    if (!p.cancelled && !DB.isChequePending(p)) {
-      const key = p.invoiceNumber + '|' + (p.customerId || '');
-      paidMap[key] = (paidMap[key] || 0) + DB.effectivePaymentAmount(p);
-    }
-  }
-  const paidFor = inv => paidMap[inv.invoiceNumber + '|' + (inv.customerId || '')] || 0;
+  // Shared with payments.html so the two lists can't diverge again — see DB.invoicePaidMap().
+  const paidMap = DB.invoicePaidMap();
+  const paidFor = inv => DB.paidForInvoice(paidMap, inv);
   // page count map: invoiceNumber → number of pages
   const pageCountMap = {};
   for (const inv of allInvoices) pageCountMap[inv.invoiceNumber] = (pageCountMap[inv.invoiceNumber] || 0) + 1;
@@ -500,15 +495,7 @@ function render() {
   // A normal multi-page invoice is unaffected: its pages differ by page number, so this
   // condition never triggers and the first-seen page (any of them; every page carries the
   // same totalAmount) still wins exactly as before.
-  const seen = new Map();
-  for (const inv of allInvoices) {
-    const cur = seen.get(inv.invoiceNumber);
-    if (!cur) { seen.set(inv.invoiceNumber, inv); continue; }
-    if (cur.customerId === inv.customerId && (cur.page || 1) === (inv.page || 1)
-        && (inv.editCount || 0) > (cur.editCount || 0)) {
-      seen.set(inv.invoiceNumber, inv);
-    }
-  }
+  const seen = DB.currentInvoiceRowMap(allInvoices);
 
   let list = [...seen.values()];
   list = list.filter(inv => {
