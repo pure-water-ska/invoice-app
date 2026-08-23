@@ -521,6 +521,28 @@
     </div>
   </div>
 
+  <!-- ── Invoice-number server lookup ──────────────────────────────────── -->
+  <!-- Shown to: Admin | invoice_edit -->
+  <div class="card mb-4" id="invLookupCard" style="display:none">
+    <div class="card-header bg-primary text-white fw-semibold py-2">
+      <i class="bi bi-broadcast-pin me-1"></i>ตรวจสอบเลขที่ใบกำกับบนเซิร์ฟเวอร์
+    </div>
+    <div class="card-body">
+      <div class="text-muted small mb-3" style="line-height:1.7">
+        ถามเซิร์ฟเวอร์ตรงๆ ว่ามีใบกำกับเลขนี้กี่รายการ (ไม่กรองวันที่) แล้วเทียบกับข้อมูลในเครื่องนี้ —
+        ใช้เมื่อค้นในรายการไม่เจอ แต่ตอนนำเข้าบอกว่ามีอยู่บนเซิร์ฟเวอร์แล้ว
+      </div>
+      <div class="d-flex gap-2 flex-wrap mb-3">
+        <input type="text" id="invLookupNum" class="form-control form-control-sm" style="max-width:220px"
+               placeholder="เช่น 300669-209" onkeydown="if(event.key==='Enter')lookupInvoiceNumber()">
+        <button class="btn btn-primary btn-sm" id="invLookupBtn" onclick="lookupInvoiceNumber()">
+          <i class="bi bi-search me-1"></i>ค้นหา
+        </button>
+      </div>
+      <div id="invLookupResult"></div>
+    </div>
+  </div>
+
   <!-- ── Stale folded-balance cleanup ──────────────────────────────────── -->
   <!-- Shown to: Admin | payment_edit -->
   <div class="card mb-4" id="staleBalCard" style="display:none">
@@ -968,10 +990,10 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-<script src="utils.js?v=1.0.214"></script><script src="db.js?v=1.0.214"></script><script src="auth.js?v=1.0.214"></script><script src="nav.js?v=1.0.214"></script><script src="idb.js?v=1.0.214"></script><script src="image-store.js?v=1.0.163"></script>
+<script src="utils.js?v=1.0.215"></script><script src="db.js?v=1.0.215"></script><script src="auth.js?v=1.0.215"></script><script src="nav.js?v=1.0.215"></script><script src="idb.js?v=1.0.215"></script><script src="image-store.js?v=1.0.163"></script>
 <script src="drive-config.js" onerror="window.GOOGLE_CLIENT_ID=''"></script>
 <script src="drive-store.js"></script>
-<script src="settings.js?v=1.0.214"></script>
+<script src="settings.js?v=1.0.215"></script>
 <script>Nav.render('settings');</script>
 </body>
 </html>

@@ -993,6 +993,12 @@ async function initZipSections() {
     if (_sb) _sb.style.display = '';
   }
 
+  // Invoice-number server lookup — can pull/delete invoice docs, so gate on invoice_edit
+  if (isAdmin || Auth.can('invoice_edit')) {
+    const _il = document.getElementById('invLookupCard');
+    if (_il) _il.style.display = '';
+  }
+
   // ── Unified Backup card ──────────────────────────────────────────────────
   if (canExpBackup || canExpZip) {
     document.getElementById('backupCard').style.display = '';
@@ -3410,4 +3416,150 @@ async function settleStaleSelected() {
     failed.length ? 'warning' : 'success'
   );
   scanStaleBalances();   // re-scan so the list reflects reality, not our assumption
+}
+
+// ─── Invoice-number server lookup ────────────────────────────────────────────
+// For the case "the invoice isn't in the list and search can't find it, but importing it
+// says it already exists on the server". Every path that PULLS invoices down (_pullAll,
+// the real-time listener, loadArchive) filters on createdAt, so a doc with a missing or
+// malformed date is invisible to all of them while still occupying the number; and with
+// more than one device in play, a device holding a stale copy can re-upload records
+// deleted here. Sync.invoiceNumberServerDetail() runs a date-unfiltered query and returns
+// _by/_ts, which is what tells those two causes apart. See sync.js for the details.
+let _invLookupDocs = [];
+let _invLookupNum  = '';
+
+async function lookupInvoiceNumber() {
+  const num = (document.getElementById('invLookupNum').value || '').trim();
+  const box = document.getElementById('invLookupResult');
+  if (!num) { box.innerHTML = '<div class="alert alert-secondary p-2 mb-0 small">ใส่เลขที่ใบกำกับก่อน</div>'; return; }
+  box.innerHTML = '<div class="text-muted small"><span class="spinner-border spinner-border-sm me-2"></span>กำลังถามเซิร์ฟเวอร์…</div>';
+
+  let docs;
+  try {
+    docs = await Sync.invoiceNumberServerDetail(num);
+  } catch (e) {
+    box.innerHTML = `<div class="alert alert-danger p-2 mb-0 small">ค้นหาไม่สำเร็จ: ${esc(e && e.message ? e.message : e)}</div>`;
+    return;
+  }
+  if (docs === null) {
+    box.innerHTML = '<div class="alert alert-warning p-2 mb-0 small">ยังไม่ได้เชื่อมต่อเซิร์ฟเวอร์ — ตรวจสอบไม่ได้</div>';
+    return;
+  }
+  _invLookupDocs = docs;
+  _invLookupNum  = num;
+
+  const localRecs = DB.getInvoices().filter(i => i.invoiceNumber === num);
+  const localIds  = new Set(localRecs.map(r => r.id));
+  const owners    = [...new Set(docs.map(d => d.rec.customerId).filter(Boolean))];
+  const missing   = docs.filter(d => !localIds.has(d.id));
+  // Local records the server doesn't have — the reverse problem (never pushed, or the
+  // server copy was deleted elsewhere); worth naming rather than leaving invisible.
+  const serverIds = new Set(docs.map(d => d.id));
+  const localOnly = localRecs.filter(r => !serverIds.has(r.id));
+
+  if (!docs.length && !localRecs.length) {
+    box.innerHTML = `<div class="alert alert-secondary p-2 mb-0 small">
+      <i class="bi bi-question-circle me-1"></i>ไม่พบเลขที่ <strong>${esc(num)}</strong> ทั้งบนเซิร์ฟเวอร์และในเครื่องนี้ — เลขนี้ว่าง</div>`;
+    return;
+  }
+
+  const cls = (!docs.length) ? 'warning'
+            : (missing.length || localOnly.length || owners.length > 1) ? 'danger' : 'success';
+  const verdict = !docs.length
+    ? `เซิร์ฟเวอร์ไม่มีเลขนี้ แต่เครื่องนี้มี <strong>${localRecs.length}</strong> รายการ — ยังไม่ถูกอัปโหลด หรือถูกลบจากอีกเครื่อง`
+    : `<strong>เซิร์ฟเวอร์มี ${docs.length} รายการ · เครื่องนี้มี ${localRecs.length}</strong>`
+      + (owners.length > 1 ? ` — เลขนี้ยังชนกันอยู่บนเซิร์ฟเวอร์ (${owners.length} ลูกค้า)` : '')
+      + (missing.length ? ` — เครื่องนี้ดึงลงมาไม่ได้ ${missing.length} รายการ` : '')
+      + (localOnly.length ? ` — มีในเครื่องแต่ไม่มีบนเซิร์ฟเวอร์ ${localOnly.length} รายการ` : '');
+
+  const rows = docs.map(d => {
+    const c = DB.getCustomerById(d.rec.customerId);
+    const inLocal = localIds.has(d.id);
+    const dt = d.rec.createdAt ? String(d.rec.createdAt).slice(0, 10) : '<span class="text-danger">(ไม่มีวันที่)</span>';
+    return `<tr>
+      <td>${esc(c ? c.name : (d.rec.customerId || '?'))}</td>
+      <td>${d.rec.page || 1}</td>
+      <td class="text-end">${Utils.formatNumber(parseFloat(d.rec.totalAmount) || 0)}</td>
+      <td>${dt}</td>
+      <td><code style="font-size:10.5px">${esc(d.by || '?')}</code></td>
+      <td>${d.ts ? new Date(d.ts).toLocaleString('th-TH') : '-'}</td>
+      <td class="text-center">${inLocal ? '<span class="text-success">&#10003;</span>' : '<span class="text-danger fw-bold">&#10007;</span>'}</td>
+    </tr>`;
+  }).join('');
+
+  // A doc written by another device AFTER it went missing here is resurrection, not a
+  // failed delete — and re-deleting from this device alone would just start a ping-pong.
+  const otherDevices = [...new Set(docs.map(d => d.by).filter(b => b && b !== Sync._deviceId))];
+  const note = (missing.length && otherDevices.length)
+    ? `<div class="small mt-2 p-2 rounded" style="background:#fff3cd;color:#664d03;line-height:1.55">
+         <i class="bi bi-info-circle me-1"></i>บางรายการถูกเขียนโดยเครื่องอื่น
+         (<code style="font-size:10.5px">${esc(otherDevices.join(', '))}</code>) —
+         ถ้าเขียนหลังจากที่ลบไปจากเครื่องนี้ แปลว่าอีกเครื่องอัปโหลดกลับขึ้นไป
+         <strong>ต้องเปิดแอปบนเครื่องนั้นให้ซิงค์ก่อน</strong> มิฉะนั้นลบแล้วจะกลับมาอีก
+       </div>` : '';
+
+  box.innerHTML = `
+    <div class="alert alert-${cls} p-2 mb-2 small"><i class="bi bi-hdd-network me-1"></i>${verdict}</div>
+    ${docs.length ? `<div class="fw-semibold small mb-1">บนเซิร์ฟเวอร์</div>
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered mb-0" style="font-size:11.5px">
+        <thead class="table-light"><tr>
+          <th>ลูกค้า</th><th>หน้า</th><th class="text-end">ยอด</th><th>วันที่</th>
+          <th>เขียนโดยเครื่อง</th><th>เมื่อ</th><th class="text-center">ในเครื่องนี้</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>` : ''}
+    ${localOnly.length ? `<div class="small mt-2 p-2 rounded" style="background:#fdece9;color:#842029;line-height:1.55">
+      <i class="bi bi-exclamation-triangle me-1"></i>มีในเครื่องนี้แต่ไม่มีบนเซิร์ฟเวอร์ ${localOnly.length} รายการ
+      (${esc(localOnly.map(r => (DB.getCustomerById(r.customerId)||{}).name || r.customerId || '?').join(', '))})
+      — จะถูกอัปโหลดเองเมื่อบันทึกครั้งถัดไป</div>` : ''}
+    ${note}
+    <div class="d-flex gap-2 mt-3 flex-wrap">
+      ${missing.length ? `<button class="btn btn-success btn-sm" onclick="pullInvoiceNumberDown()">
+        <i class="bi bi-download me-1"></i>ดึงลงเครื่องนี้ (${missing.length})</button>` : ''}
+      ${docs.length ? `<button class="btn btn-outline-danger btn-sm" onclick="deleteInvoiceNumberOnServer()">
+        <i class="bi bi-trash me-1"></i>ลบออกจากเซิร์ฟเวอร์…</button>` : ''}
+    </div>
+    ${missing.length ? '<div class="text-muted mt-2" style="font-size:11px">ปุ่ม “ดึงลงเครื่องนี้” เขียนลงเครื่องอย่างเดียว ไม่แตะเซิร์ฟเวอร์ — ปลอดภัยเสมอ</div>' : ''}`;
+}
+
+async function pullInvoiceNumberDown() {
+  try {
+    const r = await Sync.pullInvoiceNumberToLocal(_invLookupNum);
+    Utils.showAlert(r.added
+      ? `ดึงลงเครื่องนี้แล้ว ${r.added} รายการ — ดูได้ที่หน้าใบกำกับสินค้า`
+      : 'ไม่มีรายการใหม่ที่ต้องดึง', r.added ? 'success' : 'info');
+    DB.logActivity(session.userId, session.username, 'ดึงใบกำกับจากเซิร์ฟเวอร์', {
+      invoiceNumber: _invLookupNum, count: r.added });
+    lookupInvoiceNumber();
+  } catch (e) {
+    Utils.showAlert('ดึงไม่สำเร็จ: ' + (e && e.message ? e.message : e), 'danger');
+  }
+}
+
+async function deleteInvoiceNumberOnServer() {
+  const ids = _invLookupDocs.map(d => d.id);
+  if (!ids.length) return;
+  // Utils.confirm, not window.confirm — see CLAUDE.md (Tauri returns a Promise, always truthy).
+  const ok = await Utils.confirm(
+    `ลบใบกำกับ ${_invLookupNum} ออกจากเซิร์ฟเวอร์ทั้ง ${ids.length} รายการ?\n\n` +
+    `ใช้เมื่อยืนยันแล้วว่าเป็นข้อมูลค้าง/ผิดพลาด — ถ้ามีเครื่องอื่นที่ยังเก็บสำเนาเก่าไว้ ` +
+    `รายการอาจถูกอัปโหลดกลับขึ้นไปอีก`, 'ยืนยันการลบจากเซิร์ฟเวอร์');
+  if (!ok) return;
+  try {
+    const n = await Sync.deleteInvoiceDocsFromServer(ids);
+    DB.logActivity(session.userId, session.username, 'ลบใบกำกับออกจากเซิร์ฟเวอร์', {
+      invoiceNumber: _invLookupNum, count: n });
+    Utils.showAlert(`ลบออกจากเซิร์ฟเวอร์แล้ว ${n} รายการ`, 'success');
+    lookupInvoiceNumber();
+  } catch (e) {
+    try {
+      DB.logError('SERVER-DELETE-FAILED',
+        `ลบ ${_invLookupNum} ออกจากเซิร์ฟเวอร์ล้มเหลว: ${e && e.message ? e.message : e}`,
+        { invoiceNumber: _invLookupNum, ids });
+    } catch (e2) {}
+    Utils.showAlert('ลบไม่สำเร็จ: ' + (e && e.message ? e.message : e), 'danger');
+  }
 }

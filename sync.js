@@ -2389,6 +2389,76 @@ var Sync = {
     }
   },
 
+  // Full server-side detail for one invoice number, for the Settings lookup tool.
+  // Deliberately has NO .where('createdAt') clause, unlike _pullAll / the listener /
+  // loadArchive — that is the whole point: it can see docs those date-ranged queries
+  // cannot (a doc missing or holding a malformed createdAt is silently excluded from a
+  // range query by Firestore, making it invisible on every device while still occupying
+  // the number). Also returns `_by` (which DEVICE last wrote the doc) and `_ts` (when),
+  // which is what distinguishes "my delete never landed" from "another device re-uploaded
+  // it after I deleted it" — the two causes are indistinguishable from local state alone.
+  // One indexed equality query, so it is cheap enough to run on demand.
+  async invoiceNumberServerDetail(invoiceNumber) {
+    if (!invoiceNumber) return [];
+    if (!this.ready || !this._db) return null;      // unknown, NOT "empty"
+    const snap = await this._orgRef().collection('invoices')
+      .where('invoiceNumber', '==', invoiceNumber).get();
+    return snap.docs.map(d => {
+      const v = d.data() || {};
+      const { _by, _ts, ...rec } = v;
+      return { id: d.id, by: _by || '', ts: _ts || 0, rec };
+    });
+  },
+
+  // Copy the server's docs for one invoice number into LOCAL storage only — never writes
+  // to Firestore. Safe to run whatever the underlying cause is: it can only add records
+  // this device is missing. Clears any tombstone on those ids first, otherwise a tombstone
+  // written by the delete that caused this would filter them straight back out again, and
+  // registers the ids in _serverIds/_pullIds so _writeKey's deletion inference doesn't
+  // immediately read them as "locally deleted" and remove them from the server.
+  async pullInvoiceNumberToLocal(invoiceNumber) {
+    const docs = await this.invoiceNumberServerDetail(invoiceNumber);
+    if (docs === null) throw new Error('ยังไม่ได้เชื่อมต่อเซิร์ฟเวอร์');
+    if (!docs.length) return { added: 0, already: 0 };
+
+    const lsKey = 'wt_invoices';
+    const local = JSON.parse(this._localRead(lsKey) || '[]');
+    const have  = new Set(local.filter(r => r.id).map(r => r.id));
+    const missing = docs.filter(d => !have.has(d.id));
+    if (!missing.length) return { added: 0, already: docs.length };
+
+    this._clearTombstones('invoices', missing.map(d => d.id));
+    if (!this._serverIds.invoices) this._serverIds.invoices = new Set();
+    if (!this._pullIds.invoices)   this._pullIds.invoices   = new Set();
+    missing.forEach(d => { this._serverIds.invoices.add(d.id); this._pullIds.invoices.add(d.id); });
+    this._saveServerIds('invoices');
+    this._savePullIds('invoices');
+
+    const merged = [...local, ...missing.map(d => d.rec)];
+    this._lsWrite(lsKey, merged);
+    if (typeof DB !== 'undefined') DB.invalidate(lsKey);
+    // Keep the write-path fingerprint in step so the next save doesn't re-push these.
+    if (!this._lastSyncedRecs.invoices) this._lastSyncedRecs.invoices = new Map();
+    missing.forEach(d => this._lastSyncedRecs.invoices.set(d.id, JSON.stringify(d.rec)));
+    return { added: missing.length, already: docs.length - missing.length };
+  },
+
+  // Delete specific invoice docs from Firestore by id, tombstoning first so the deletion
+  // propagates to other devices instead of being re-uploaded by one holding a stale copy.
+  // Used by the Settings lookup tool; the caller confirms.
+  async deleteInvoiceDocsFromServer(ids) {
+    if (!this.ready || !this._db) throw new Error('ยังไม่ได้เชื่อมต่อเซิร์ฟเวอร์');
+    if (!ids || !ids.length) return 0;
+    this._addTombstones('invoices', ids);
+    const col = this._orgRef().collection('invoices');
+    const batch = this._db.batch();
+    ids.forEach(id => batch.delete(col.doc(id)));
+    await batch.commit();          // awaited, NOT fire-and-forget — the caller reports failure
+    ids.forEach(id => { if (this._serverIds.invoices) this._serverIds.invoices.delete(id); });
+    this._saveServerIds('invoices');
+    return ids.length;
+  },
+
   // Advance past any number the server already holds — by ANY customer, not just a
   // different one. A new invoice's number is chosen from local data, which is guaranteed
   // to exceed every LOCAL number, so the server reporting that number as already used can
