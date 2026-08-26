@@ -55,6 +55,10 @@
     </div>
   </div>
 
+  <!-- Customers with no price rules at all — they bill at ราคากลาง. Populated by
+       renderNoPriceBanner(); hidden entirely when every customer has at least one rule. -->
+  <div id="noPriceBanner" class="mb-3" style="display:none"></div>
+
   <div class="card">
     <div class="table-responsive">
       <table class="table table-hover mb-0">
@@ -182,7 +186,7 @@
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.218"></script><script src="db.js?v=1.0.218"></script><script src="auth.js?v=1.0.218"></script><script src="nav.js?v=1.0.218"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.219"></script><script src="db.js?v=1.0.219"></script><script src="auth.js?v=1.0.219"></script><script src="nav.js?v=1.0.219"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -380,10 +384,28 @@ function render() {
   const tbody = document.getElementById('pricingTable');
   const pg    = document.getElementById('pricePagination');
   if (list.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">ไม่พบข้อมูลราคา</td></tr>';
+    // Distinguish "this customer exists but has no rules" from "nothing matched at all".
+    // A customer with no rules is legitimate — they just bill at ราคากลาง — but the bare
+    // "ไม่พบข้อมูลราคา" read as though the CUSTOMER was missing (reported for
+    // เขากลอยการค้า, who is present in DB.getCustomers() and in the picker, with 0 of the
+    // 3,277 rules). Only fires when the typed text resolves to a real customer; an
+    // unmatched string still gets the plain message.
+    const hit = fc ? customers.filter(c => (c.name || '').toLowerCase().includes(fc)) : [];
+    tbody.innerHTML = (hit.length === 1)
+      ? `<tr><td colspan="7" class="text-center py-4">
+           <i class="bi bi-tag text-muted d-block mb-2" style="font-size:26px"></i>
+           <div style="font-size:13.5px">ลูกค้า <strong>${esc(hit[0].name)}</strong> ยังไม่มีราคาเฉพาะ</div>
+           <div class="small text-muted mb-3">ตอนนี้ใช้ราคากลางอยู่ — เพิ่มราคาเฉพาะได้ถ้าต้องการ</div>
+           <button class="btn btn-primary btn-sm" onclick="openPriceModalFor('${esc(hit[0].id)}')">
+             <i class="bi bi-plus-lg me-1"></i>เพิ่มราคาให้ลูกค้ารายนี้
+           </button>
+         </td></tr>`
+      : '<tr><td colspan="7" class="text-center text-muted py-4">ไม่พบข้อมูลราคา</td></tr>';
     pg.style.display = 'none';
+    renderNoPriceBanner(customers);
     return;
   }
+  renderNoPriceBanner(customers);
 
   // Pagination — the full list can be 3,000+ rules; rendering (and lazily-binding
   // date pickers for) all of them on every keystroke was the other half of the
@@ -487,6 +509,59 @@ function setNotifiedDate(priceId, isoDate) {
   list[idx].notifiedAt = isoDate;
   DB.savePricing(list);
   Utils.showAlert('<i class="bi bi-check-circle me-1"></i>บันทึกวันที่แจ้งลูกค้าแล้ว');
+}
+
+// Customers holding NO pricing rule at all — they fall back to ราคากลาง when invoiced,
+// which is legitimate but easy to miss: nothing anywhere else in the app points it out,
+// and a customer with no rules looks identical to one whose rules failed to sync. Three
+// were found in production (เขากลอยการค้า, น้ำดื่มทวีสุข, มัสยิดกลาง ปริก) only because
+// one of them was reported as "cannot be found" on this page.
+//
+// Built from a Set of rule-owning ids in ONE pass — a per-customer .some() over 3,277
+// rules would be O(customers × rules) on every render, the per-row-scan mistake this page
+// was already fixed for once (see the pagination/orderMap comments above).
+function customersWithoutPrices(customers) {
+  const withRules = new Set(DB.getPricing().map(p => p.customerId).filter(Boolean));
+  return customers.filter(c => c && c.id && !withRules.has(c.id));
+}
+
+let _npExpanded = false;
+function toggleNoPriceList() {
+  _npExpanded = !_npExpanded;
+  const el = document.getElementById('noPriceList');
+  const btn = document.getElementById('noPriceToggle');
+  if (el)  el.style.display = _npExpanded ? 'block' : 'none';
+  if (btn) btn.textContent  = _npExpanded ? 'ซ่อน' : 'ดูรายชื่อ';
+}
+
+function renderNoPriceBanner(customers) {
+  const box = document.getElementById('noPriceBanner');
+  if (!box) return;
+  const none = customersWithoutPrices(customers || DB.getCustomers());
+  if (!none.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  box.style.display = '';
+  box.innerHTML = `
+    <div class="alert alert-warning py-2 px-3 mb-0">
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <i class="bi bi-exclamation-circle"></i>
+        <span class="small">มีลูกค้า <strong>${none.length} ราย</strong> ที่ยังไม่มีราคาเฉพาะ (ใช้ราคากลาง)</span>
+        <button id="noPriceToggle" class="btn btn-sm btn-outline-warning ms-auto" onclick="toggleNoPriceList()">${_npExpanded ? 'ซ่อน' : 'ดูรายชื่อ'}</button>
+      </div>
+      <div id="noPriceList" style="display:${_npExpanded ? 'block' : 'none'}" class="mt-2 pt-2 border-top">
+        <div class="d-flex gap-1 flex-wrap">
+          ${none.map(c => `<span class="badge rounded-pill" role="button" style="background:#fff;border:1px solid #ffe69c;color:#664d03;font-weight:normal"
+              onclick="openPriceModalFor('${esc(c.id)}')">${esc(c.name || '(ไม่มีชื่อ)')}</span>`).join('')}
+        </div>
+        <div class="text-muted mt-2" style="font-size:11px">คลิกชื่อเพื่อเพิ่มราคาให้ลูกค้ารายนั้น</div>
+      </div>
+    </div>`;
+}
+
+// Open the add-price dialog pre-set to one customer — used by the banner chips and the
+// empty-state button, so the user doesn't have to re-find the customer in the picker.
+function openPriceModalFor(custId) {
+  openModal();
+  _pcSetById(custId || '');
 }
 
 function openModal(id) {
