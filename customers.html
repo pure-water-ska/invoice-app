@@ -125,6 +125,17 @@
     </div>
   </div>
 
+  <!-- Status tabs — ทั้งหมด is the default so a suspended customer's outstanding balance
+       is never hidden from the everyday view (suspension usually FOLLOWS unpaid debt, so
+       defaulting to active-only would hide exactly the accounts worth chasing). Within
+       ทั้งหมด suspended sort last. Counts are of the current search result, not the whole
+       book, so they agree with what's on screen. -->
+  <ul class="nav nav-tabs mb-3" id="custStatusTabs">
+    <li class="nav-item"><button class="nav-link active" data-status="all"    onclick="setCustStatus('all', this)">ทั้งหมด <span class="badge bg-secondary ms-1" id="cntAll">0</span></button></li>
+    <li class="nav-item"><button class="nav-link"        data-status="active" onclick="setCustStatus('active', this)">ใช้งาน <span class="badge bg-secondary ms-1" id="cntActive">0</span></button></li>
+    <li class="nav-item"><button class="nav-link"        data-status="susp"   onclick="setCustStatus('susp', this)">ระงับ <span class="badge bg-danger ms-1" id="cntSusp">0</span></button></li>
+  </ul>
+
   <!-- Customer Cards -->
   <div id="customerList" class="row g-3"></div>
   <div id="custPagination" class="d-flex justify-content-between align-items-center px-1 py-2 mt-2 small text-muted" style="display:none!important"></div>
@@ -409,7 +420,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="./vendor/html2canvas.min.js"></script>
-<script src="utils.js?v=1.0.219"></script><script src="db.js?v=1.0.219"></script><script src="auth.js?v=1.0.219"></script><script src="nav.js?v=1.0.219"></script>
+<script src="utils.js?v=1.0.220"></script><script src="db.js?v=1.0.220"></script><script src="auth.js?v=1.0.220"></script><script src="nav.js?v=1.0.220"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -422,6 +433,27 @@ let _suspendCustId = null, _suspendAction = null;
 
 // ── Pagination ───────────────────────────────────────────────────────────────
 const CUST_PAGE_SIZE = 24;
+
+// 'all' | 'active' | 'susp' — which status tab is showing. Defaults to 'all' on purpose;
+// see the tab markup for why suspended customers must stay visible by default.
+let _custStatus = 'all';
+function setCustStatus(s, btn) {
+  _custStatus = s;
+  document.querySelectorAll('#custStatusTabs .nav-link').forEach(b => b.classList.toggle('active', b === btn));
+  _custPage = 1;               // a filtered list is shorter; page 3 of the old list may not exist
+  render();
+}
+
+// Customer ids whose unpaid-invoice chips are expanded past the first UNPAID_CHIP_LIMIT.
+// Held outside render() so an expansion survives a re-render (search keystroke, sync
+// event) instead of silently snapping shut mid-read.
+const UNPAID_CHIP_LIMIT = 5;
+let _unpaidExpanded = new Set();
+function toggleUnpaidChips(custId) {
+  if (_unpaidExpanded.has(custId)) _unpaidExpanded.delete(custId);
+  else _unpaidExpanded.add(custId);
+  render();
+}
 let _custPage = 1;
 
 // ── Selection state ──────────────────────────────────────────────────────────
@@ -597,8 +629,23 @@ function render() {
       return s + Math.max(0, t - DB.getInvoicePaidAmount(n, c.id));
     }, 0);
   };
+  // Tab counts reflect the CURRENT search result, so they always match what's on screen.
+  // Computed before the status filter is applied, otherwise each tab would report its own
+  // count as the total.
+  const _nSusp = list.filter(c => c.suspended).length;
+  const _setCnt = (id, n) => { const e = document.getElementById(id); if (e) e.textContent = n; };
+  _setCnt('cntAll', list.length);
+  _setCnt('cntActive', list.length - _nSusp);
+  _setCnt('cntSusp', _nSusp);
+  if (_custStatus === 'active')    list = list.filter(c => !c.suspended);
+  else if (_custStatus === 'susp') list = list.filter(c =>  c.suspended);
+
   const _nm = c => (c && c.name != null ? String(c.name) : '');
   list.sort((a, b) => {
+    // Suspended last in the combined view, whatever the chosen sort — they're exceptions,
+    // and burying them mid-list is what made them hard to find. Within each group the
+    // user's sort applies normally. No effect on the single-status tabs.
+    if (_custStatus === 'all' && !!a.suspended !== !!b.suspended) return a.suspended ? 1 : -1;
     switch (sortMode) {
       case 'name_asc':  return _nm(a).localeCompare(_nm(b), 'th');
       case 'name_desc': return _nm(b).localeCompare(_nm(a), 'th');
@@ -768,14 +815,40 @@ function render() {
                 })
                 .filter(Boolean)
                 .sort((a, b) => b.rem - a.rem);
+              // Cap the chips. Every unpaid invoice used to render, so a customer with
+              // 20 outstanding produced a card tall enough to stretch its whole grid row
+              // (the cards are h-100 inside a `row g-3`). The list is already sorted by
+              // remaining amount descending, so the first few are the largest debts.
+              //
+              // The toggle carries the hidden COUNT AND TOTAL rather than a bare "see
+              // more": without it a customer with 6 unpaid looks identical to one with
+              // 30, which quietly moves real debt out of sight — the same trap as the
+              // cancelled-invoice and stale-record cases.
+              const expanded = _unpaidExpanded.has(c.id);
+              const shown    = expanded ? unpaidList : unpaidList.slice(0, UNPAID_CHIP_LIMIT);
+              const hidden   = unpaidList.slice(shown.length);
+              const hiddenSum = hidden.reduce((s, r) => s + r.rem, 0);
               return `<div class="mt-2 d-flex flex-wrap gap-1" onclick="event.stopPropagation()">
-                ${unpaidList.map(r => `
+                ${shown.map(r => `
                   <a href="payments.html?inv=${encodeURIComponent(r.num)}"
                      class="badge text-decoration-none"
                      style="background:#fdecea;color:#c0392b;border:1px solid #f5c6cb;font-weight:400;font-size:11px;padding:3px 7px"
                      title="เปิดหน้าชำระเงิน ${r.num}">
                     <i class="bi bi-file-earmark-text me-1"></i>${r.num} · ฿${Utils.formatNumber(r.rem)}
                   </a>`).join('')}
+                ${hidden.length ? `
+                  <button type="button" class="badge border-0"
+                          style="background:#f1efe8;color:#5f5e5a;font-weight:400;font-size:11px;padding:3px 7px;cursor:pointer"
+                          title="แสดงใบกำกับที่ค้างทั้งหมด"
+                          onclick="toggleUnpaidChips('${c.id}')">
+                    <i class="bi bi-chevron-down me-1"></i>อีก ${hidden.length} ใบ · ฿${Utils.formatNumber(hiddenSum)}
+                  </button>` : ''}
+                ${expanded && unpaidList.length > UNPAID_CHIP_LIMIT ? `
+                  <button type="button" class="badge border-0"
+                          style="background:#f1efe8;color:#5f5e5a;font-weight:400;font-size:11px;padding:3px 7px;cursor:pointer"
+                          onclick="toggleUnpaidChips('${c.id}')">
+                    <i class="bi bi-chevron-up me-1"></i>ย่อ
+                  </button>` : ''}
               </div>`;
             })()}
           </div>
