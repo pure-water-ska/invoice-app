@@ -702,7 +702,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.220"></script><script src="db.js?v=1.0.220"></script><script src="auth.js?v=1.0.220"></script><script src="nav.js?v=1.0.220"></script><script src="idb.js?v=1.0.220"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.221"></script><script src="db.js?v=1.0.221"></script><script src="auth.js?v=1.0.221"></script><script src="nav.js?v=1.0.221"></script><script src="idb.js?v=1.0.221"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -2580,12 +2580,28 @@ function printPaymentSummary(invNum) {
       return [bank, num, pending].filter(Boolean).join(' · ');
     }
     if (p.method === 'เงินสด') return p.cashCollector || '';
-    return p.notes || '';
+    // NOT p.notes — the caller appends notes separately, so returning them here printed
+    // them twice for any method outside the three above. Only carry-forward rows
+    // (ยกยอดไปใบใหม่) take this branch, so the duplication showed up exactly on them:
+    // "ยกยอดค้างชำระไปใบกำกับ X | ยกยอดค้างชำระไปใบกำกับ X".
+    return '';
   };
 
   const rows = payments.map((p, i) => {
     const detail  = [methodDetail(p), p.notes].filter(Boolean).join(' | ');
     const methodEn = _methodEn[p.method] || p.method;
+    // Name where any excess went, per allocation, so the customer can trace their money
+    // rather than just seeing a smaller total than the row above. allocations[] is the
+    // audit trail recordOverpayAllocation() appends to (the raw amount is never rewritten).
+    const allocLines = (p.allocations || [])
+      .filter(a => (parseFloat(a.amount) || 0) > 0.005)
+      .map(a => `<div style="color:#8a6d00;font-size:7.5pt;margin-top:1px">↳ ตัดไปใบ ${a.invoiceNumber} ฿${Utils.formatNumber(a.amount)}</div>`)
+      .join('');
+    // A carry-forward row is the customer's own debt moved to a new invoice, not a
+    // receipt — say so on the row itself, not only in the totals.
+    const cfLine = DB.isCarryForwardPayment(p)
+      ? '<div style="color:#666;font-size:7.5pt;margin-top:1px">↳ ไม่ใช่การรับเงิน</div>' : '';
+    const dim = DB.isCarryForwardPayment(p) ? 'color:#666;' : '';
     // A cheque isn't real money until it clears, so the receipt shouldn't print the
     // date it was merely recorded (createdAt) as if that were the payment date. Show
     // the cleared date once available (mirrored into payDate by markChequeCleared),
@@ -2598,12 +2614,35 @@ function printPaymentSummary(invNum) {
     return `<tr>
       <td style="padding:3px 5px;border:1px solid #ccc;text-align:center">${i+1}</td>
       <td style="padding:3px 5px;border:1px solid #ccc;text-align:center;white-space:nowrap">${dateCell}</td>
-      <td style="padding:3px 5px;border:1px solid #ccc;text-align:center">${methodEn}</td>
-      <td style="padding:3px 5px;border:1px solid #ccc">${detail}</td>
+      <td style="padding:3px 5px;border:1px solid #ccc;text-align:center;${dim}">${methodEn}</td>
+      <td style="padding:3px 5px;border:1px solid #ccc;${dim}">${detail}${allocLines}${cfLine}</td>
       <td style="padding:3px 5px;border:1px solid #ccc;text-align:center">${p.createdBy || '-'}</td>
-      <td style="padding:3px 5px;border:1px solid #ccc;text-align:right">${Utils.formatNumber(p.amount)}</td>
+      <td style="padding:3px 5px;border:1px solid #ccc;text-align:right;${dim}">${Utils.formatNumber(p.amount)}</td>
     </tr>`;
   }).join('');
+
+  // ── Reconciliation breakdown ────────────────────────────────────────────────
+  // The rows print each payment's RAW amount while `paid` is the EFFECTIVE total
+  // (getInvoicePaidAmount → effectivePaymentAmount, minus whatever was allocated to other
+  // invoices, and excluding un-cleared cheques). On any invoice where an overpayment was
+  // cut elsewhere the sheet therefore didn't add up — a ฿10,000 row above a ฿8,000
+  // "ชำระแล้ว" with the ฿2,000 unexplained — on a document handed to the customer.
+  //
+  // Three things separate the rows from the net figure; each gets its own line, and each
+  // line only prints when it applies, so an ordinary invoice looks exactly as before:
+  //   • allocated away to other invoices  (subtracts)
+  //   • carry-forward — the customer's own old debt moved onto a NEW invoice, not money
+  //     they handed over, so it must not be counted as "รับเงิน" (adds, but labelled)
+  //   • un-cleared cheques — printed in the rows but deliberately not yet counted as paid
+  // By construction cash + carryForward − allocated = paid, so the column reconciles.
+  let cashReceived = 0, carryForwardTotal = 0, allocatedTotal = 0, pendingCheque = 0;
+  for (const p of payments) {
+    const amt = parseFloat(p.amount) || 0;
+    if (DB.isChequePending(p)) { pendingCheque += amt; continue; }
+    allocatedTotal += parseFloat(p.allocatedOut) || 0;
+    if (DB.isCarryForwardPayment(p)) carryForwardTotal += amt;
+    else                             cashReceived      += amt;
+  }
 
   const isOverpaid    = remaining < -0.005;
   const isOutstanding = remaining > 0.005;
@@ -2660,9 +2699,29 @@ function printPaymentSummary(invNum) {
                 <td style="padding:3px 6px;border-bottom:1px solid #ccc;text-align:right">${Utils.formatNumber(total)}</td>
               </tr>
               <tr>
-                <td style="padding:3px 6px;border-bottom:1px solid #ccc;color:#1a7a4a">ชำระแล้วทั้งสิ้น</td>
-                <td style="padding:3px 6px;border-bottom:1px solid #ccc;text-align:right;color:#1a7a4a;font-weight:700">${Utils.formatNumber(paid)}</td>
+                <td style="padding:3px 6px;border-bottom:1px solid #ccc">${(allocatedTotal > 0.005 || carryForwardTotal > 0.005) ? 'รวมรับเงินจริง' : 'ชำระแล้วทั้งสิ้น'}</td>
+                <td style="padding:3px 6px;border-bottom:1px solid #ccc;text-align:right">${Utils.formatNumber((allocatedTotal > 0.005 || carryForwardTotal > 0.005) ? cashReceived : paid)}</td>
               </tr>
+              ${allocatedTotal > 0.005 ? `
+              <tr>
+                <td style="padding:3px 6px;border-bottom:1px solid #ccc;color:#8a6d00">หัก ตัดไปใบอื่น</td>
+                <td style="padding:3px 6px;border-bottom:1px solid #ccc;text-align:right;color:#8a6d00">−${Utils.formatNumber(allocatedTotal)}</td>
+              </tr>` : ''}
+              ${carryForwardTotal > 0.005 ? `
+              <tr>
+                <td style="padding:3px 6px;border-bottom:1px solid #ccc;color:#666">ยกยอดไปใบใหม่ (ไม่ใช่เงินสด)</td>
+                <td style="padding:3px 6px;border-bottom:1px solid #ccc;text-align:right;color:#666">${Utils.formatNumber(carryForwardTotal)}</td>
+              </tr>` : ''}
+              ${pendingCheque > 0.005 ? `
+              <tr>
+                <td style="padding:3px 6px;border-bottom:1px solid #ccc;color:#666">เช็ครอขึ้นเงิน (ยังไม่นับ)</td>
+                <td style="padding:3px 6px;border-bottom:1px solid #ccc;text-align:right;color:#666">${Utils.formatNumber(pendingCheque)}</td>
+              </tr>` : ''}
+              ${(allocatedTotal > 0.005 || carryForwardTotal > 0.005) ? `
+              <tr>
+                <td style="padding:3px 6px;border-bottom:1px solid #ccc;color:#1a7a4a;font-weight:700">ชำระแล้ว (สุทธิ)</td>
+                <td style="padding:3px 6px;border-bottom:1px solid #ccc;text-align:right;color:#1a7a4a;font-weight:700">${Utils.formatNumber(paid)}</td>
+              </tr>` : ''}
               <tr style="background:${summaryBg}">
                 <td style="padding:3px 6px;font-weight:700;color:${summaryColor}">${summaryLabel}</td>
                 <td style="padding:3px 6px;text-align:right;font-weight:700;color:${summaryColor}">${summaryValue}</td>
