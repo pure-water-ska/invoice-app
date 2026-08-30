@@ -162,8 +162,15 @@ console.log('\nDashboard is settlement-only, so must be UNCHANGED');
 console.log('\nUI wiring');
 {
   const src = fs.readFileSync(path.join(DIR, 'payments.html'), 'utf8');
-  t('round-down button appears only when under-paid', /\(total - paid\) > 0\.005/.test(src));
+  // Rounding is for an invoice that HAS been paid but doesn't match — partial or over.
+  // `total - paid > 0.005` alone is also true of a WHOLLY UNPAID invoice, so the first
+  // cut offered to write off a ฿28,477 pending bill in full. With no threshold cap that
+  // is the worst thing the button could do, hence the paid > 0 requirement.
+  t('round-down requires money actually paid, not just a shortfall',
+    /paid > 0\.005 && \(total - paid\) > 0\.005/.test(src));
   t('round-up button appears only when over-paid', /\(paid - total\) > 0\.005/.test(src));
+  t('the modal re-checks it too (defense in depth)',
+    /dir === 'down' && !\(paid > 0\.005\)/.test(src));
   t('permission gated on payment_edit', src.includes("Auth.can('payment_edit')"));
   t('confirm button disabled on click (no double-round)', src.includes('btn.disabled = true;   // re-entrancy'));
   t('write-off path calls the DB helper', src.includes('DB.writeOffRemainder('));

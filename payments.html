@@ -727,7 +727,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.223"></script><script src="db.js?v=1.0.223"></script><script src="auth.js?v=1.0.223"></script><script src="nav.js?v=1.0.223"></script><script src="idb.js?v=1.0.223"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.224"></script><script src="db.js?v=1.0.224"></script><script src="auth.js?v=1.0.224"></script><script src="nav.js?v=1.0.224"></script><script src="idb.js?v=1.0.224"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -1264,7 +1264,7 @@ function render() {
                   onclick="viewPdfInvoice('${inv.invoiceNumber}')" title="ดูไฟล์ PDF">
             <i class="bi bi-file-earmark-pdf"></i>
           </button>` : ''}
-          ${(!inv.cancelled && (total - paid) > 0.005) ? `<button class="btn btn-sm btn-outline-danger"
+          ${(!inv.cancelled && paid > 0.005 && (total - paid) > 0.005) ? `<button class="btn btn-sm btn-outline-danger"
                   onclick="openRoundModal('${inv.invoiceNumber}','${inv.customerId}','down')"
                   title="ตัดเศษที่ค้าง — ปิดยอดโดยไม่นับเป็นรายได้">
             <i class="bi bi-arrow-down-right"></i>
@@ -3163,6 +3163,13 @@ function openRoundModal(invNum, custId, dir) {
   const paid  = DB.getInvoicePaidAmount(invNum, inv.customerId);
   const amount = dir === 'down' ? (total - paid) : (paid - total);
   if (!(amount > 0.005)) { Utils.showAlert('ยอดนี้ตรงกันอยู่แล้ว', 'info'); return; }
+  // Rounding is for an invoice that HAS been paid but doesn't match — partial or over.
+  // A wholly unpaid invoice is not a rounding case: total - paid is its full value, so
+  // without this an untouched ฿28,477 bill would offer to write off ฿28,477.
+  if (dir === 'down' && !(paid > 0.005)) {
+    Utils.showAlert('ใบกำกับนี้ยังไม่มีการชำระ — ตัดเศษใช้กับใบที่ชำระแล้วแต่ยอดไม่ตรงเท่านั้น', 'warning');
+    return;
+  }
 
   const cust = DB.getCustomerById(custId);
   _roundCtx = { invNum, custId, dir, amount };
