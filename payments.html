@@ -303,6 +303,31 @@
 </div>
 
 <!-- ── Date Confirm Modal ──────────────────────────────────────────────────── -->
+<!-- ── Rounding (ตัดเศษ / ปัดขึ้น) ─────────────────────────────────────────────
+     Down = forgive a shortfall that was never received → non-cash, NOT income.
+     Up   = the excess WAS received and is already income → only the invoice total
+            rises to meet it; no payment record is written. See db.js. -->
+<div class="modal fade" id="roundModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header py-2" id="roundHeader">
+        <h6 class="modal-title fw-bold" id="roundTitle"></h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="roundLead" class="mb-2"></div>
+        <div id="roundEffects" class="small rounded p-2 mb-3" style="background:#f8f9fa;line-height:1.7"></div>
+        <label class="form-label small fw-semibold mb-1">เหตุผล <span class="text-muted fw-normal">(ไม่บังคับ)</span></label>
+        <input type="text" id="roundReason" class="form-control form-control-sm" placeholder="เช่น ลูกค้าไม่ชำระเศษสตางค์">
+      </div>
+      <div class="modal-footer py-2">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">ยกเลิก</button>
+        <button class="btn btn-sm" id="roundConfirmBtn" onclick="doRound()"></button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal fade" id="dateConfirmModal" tabindex="-1" data-bs-backdrop="static">
   <div class="modal-dialog">
     <div class="modal-content border-warning">
@@ -702,7 +727,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.222"></script><script src="db.js?v=1.0.222"></script><script src="auth.js?v=1.0.222"></script><script src="nav.js?v=1.0.222"></script><script src="idb.js?v=1.0.222"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.223"></script><script src="db.js?v=1.0.223"></script><script src="auth.js?v=1.0.223"></script><script src="nav.js?v=1.0.223"></script><script src="idb.js?v=1.0.223"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -1238,6 +1263,16 @@ function render() {
           ${(inv.importedFrom === 'pdf' || inv.hasPdfPage) ? `<button class="btn btn-sm btn-outline-danger"
                   onclick="viewPdfInvoice('${inv.invoiceNumber}')" title="ดูไฟล์ PDF">
             <i class="bi bi-file-earmark-pdf"></i>
+          </button>` : ''}
+          ${(!inv.cancelled && (total - paid) > 0.005) ? `<button class="btn btn-sm btn-outline-danger"
+                  onclick="openRoundModal('${inv.invoiceNumber}','${inv.customerId}','down')"
+                  title="ตัดเศษที่ค้าง — ปิดยอดโดยไม่นับเป็นรายได้">
+            <i class="bi bi-arrow-down-right"></i>
+          </button>` : ''}
+          ${(!inv.cancelled && (paid - total) > 0.005) ? `<button class="btn btn-sm btn-outline-success"
+                  onclick="openRoundModal('${inv.invoiceNumber}','${inv.customerId}','up')"
+                  title="ปัดขึ้นให้ตรงยอดที่รับจริง — นับเป็นรายได้">
+            <i class="bi bi-arrow-up-right"></i>
           </button>` : ''}
         </div>
       </td>
@@ -3103,6 +3138,87 @@ async function saveMultiPay() {
   Utils.showAlert(`บันทึกชำระ ${allocations.length} บิลสำเร็จ`, 'success');
   render();
 }
+
+// ── Rounding: ตัดเศษ (down) / ปัดขึ้น (up) ───────────────────────────────────
+// Deliberately asymmetric, because the two remainders are different kinds of money:
+//   down — the shortfall was NEVER received. Forgiving it must not create income, so it
+//          writes a non-cash payment (DB.writeOffRemainder) that settles the invoice and
+//          is excluded from every revenue figure via DB.isNonCashPayment.
+//   up   — the excess WAS received and is already recorded as a real payment, so it stays
+//          income. Nothing is written to payments; the invoice total rises to meet what
+//          was actually paid (DB.roundUpInvoice), which closes the balance.
+// No threshold cap by explicit user decision — the confirm names the exact amount and
+// every action is logged instead.
+let _roundCtx = null, _roundModal = null;
+
+function openRoundModal(invNum, custId, dir) {
+  if (!Auth.isAdmin() && !Auth.can('payment_edit')) {
+    Utils.showAlert('ไม่มีสิทธิ์แก้ไขการชำระเงิน', 'danger'); return;
+  }
+  const inv = DB.getCurrentPagesByNumber(invNum)[0];
+  if (!inv) { Utils.showAlert('ไม่พบใบกำกับ ' + invNum, 'danger'); return; }
+  if (inv.cancelled) { Utils.showAlert('ใบกำกับนี้ถูกยกเลิกแล้ว', 'warning'); return; }
+
+  const total = parseFloat(inv.totalAmount) || 0;
+  const paid  = DB.getInvoicePaidAmount(invNum, inv.customerId);
+  const amount = dir === 'down' ? (total - paid) : (paid - total);
+  if (!(amount > 0.005)) { Utils.showAlert('ยอดนี้ตรงกันอยู่แล้ว', 'info'); return; }
+
+  const cust = DB.getCustomerById(custId);
+  _roundCtx = { invNum, custId, dir, amount };
+
+  const down = dir === 'down';
+  document.getElementById('roundHeader').className = 'modal-header py-2 ' + (down ? 'bg-danger' : 'bg-success') + ' text-white';
+  document.getElementById('roundTitle').textContent = down ? 'ยืนยันตัดเศษ' : 'ยืนยันปัดขึ้น';
+  document.getElementById('roundLead').innerHTML =
+    `${down ? 'ตัดเศษ' : 'ปัดขึ้น'} <strong style="font-size:17px">฿${Utils.formatNumber(amount)}</strong>
+     ของใบกำกับ <strong>${invNum}</strong><br>
+     <span class="text-muted small">ลูกค้า: ${cust ? cust.name : custId}</span>`;
+  document.getElementById('roundEffects').innerHTML = down
+    ? `• ใบกำกับจะปิดยอดทันที<br>• <strong>ไม่</strong>นับเป็นรายได้ในรายงาน<br>• บันทึกลงประวัติพร้อมชื่อผู้ทำรายการ`
+    : `• ยอดรวมใบกำกับจะเพิ่มเป็น <strong>฿${Utils.formatNumber(total + amount)}</strong> ให้ตรงกับที่รับจริง<br>
+       • <strong>นับ</strong>เป็นรายได้ (เงินเข้าจริงอยู่แล้ว)<br>
+       • ใบกำกับที่พิมพ์ใหม่จะแสดงยอดที่ปรับแล้ว`;
+  const btn = document.getElementById('roundConfirmBtn');
+  btn.className = 'btn btn-sm ' + (down ? 'btn-danger' : 'btn-success');
+  btn.textContent = down ? 'ยืนยันตัดเศษ' : 'ยืนยันปัดขึ้น';
+  btn.disabled = false;
+  document.getElementById('roundReason').value = '';
+
+  if (!_roundModal) _roundModal = new bootstrap.Modal(document.getElementById('roundModal'));
+  _roundModal.show();
+}
+
+function doRound() {
+  if (!_roundCtx) return;
+  const { invNum, custId, dir, amount } = _roundCtx;
+  const reason = (document.getElementById('roundReason').value || '').trim();
+  const btn = document.getElementById('roundConfirmBtn');
+  btn.disabled = true;   // re-entrancy: a double-click would otherwise round twice
+  try {
+    if (dir === 'down') {
+      DB.writeOffRemainder(invNum, custId, amount, { by: session.name, byUser: session.username, reason });
+    } else {
+      DB.roundUpInvoice(invNum, custId, amount, { by: session.name, byUser: session.username, reason });
+    }
+    DB.logActivity(session.userId, session.username,
+      dir === 'down' ? 'ตัดเศษใบกำกับ' : 'ปัดขึ้นใบกำกับ',
+      { invoiceNumber: invNum, amount, reason: reason || '-' });
+    if (_roundModal) _roundModal.hide();
+    Utils.showAlert(
+      `${dir === 'down' ? 'ตัดเศษ' : 'ปัดขึ้น'} ฿${Utils.formatNumber(amount)} ของ ${invNum} เรียบร้อย`, 'success');
+    _roundCtx = null;
+    render();
+  } catch (e) {
+    btn.disabled = false;
+    try {
+      DB.logError('ROUND-FAILED', `${dir} ${invNum} ฿${amount} ล้มเหลว: ${e && e.message ? e.message : e}`,
+        { invoiceNumber: invNum, dir, amount });
+    } catch (e2) {}
+    Utils.showAlert('ไม่สำเร็จ: ' + (e && e.message ? e.message : e), 'danger');
+  }
+}
+
 </script>
 </body>
 </html>

@@ -1057,6 +1057,79 @@ const DB = {
   // a DIFFERENT invoice's total instead. See carryForwardOwedBalance() below.
   isCarryForwardPayment(p) { return !!p.carryForward; },
 
+  // A remainder the customer will never pay, forgiven. Like carryForward it settles the
+  // invoice without money changing hands — see isNonCashPayment.
+  isWriteOffPayment(p) { return !!p.writeOff; },
+
+  // Settles an invoice but is NOT money received. Both kinds must count toward
+  // getInvoicePaidAmount (the invoice really is closed) and must NOT count toward income.
+  // Before this existed nothing outside db.js/invoice-create.html knew about carryForward
+  // at all, so every carry-forward was silently reported as revenue.
+  isNonCashPayment(p) { return !!p.carryForward || !!p.writeOff; },
+
+  // Cash actually received against an invoice — getInvoicePaidAmount minus the non-cash
+  // entries. Use THIS for revenue/income figures and getInvoicePaidAmount for settlement;
+  // conflating them is what made write-offs and carry-forwards look like takings.
+  getInvoiceCashReceived(invoiceNumber, customerId) {
+    let ps = this.getPaymentsByInvoice(invoiceNumber)
+      .filter(p => !p.cancelled && !this.isChequePending(p) && !this.isNonCashPayment(p));
+    if (customerId && ps.length && this._numberHasMultipleOwners(invoiceNumber)) {
+      ps = ps.filter(p => p.customerId === customerId);
+    }
+    return ps.reduce((s, p) => s + this.effectivePaymentAmount(p), 0);
+  },
+
+  // ── Rounding ────────────────────────────────────────────────────────────────
+  // The two directions are deliberately asymmetric, because the money is:
+  //   under-paid → the shortfall was NEVER received, so forgiving it must not create
+  //                income. A non-cash payment closes the invoice. (writeOffRemainder)
+  //   over-paid  → the excess WAS received and is already recorded as a real payment,
+  //                so it stays income; only the invoice total needs to rise to meet it.
+  //                (roundUpInvoice — writes no payment at all)
+  writeOffRemainder(invNum, custId, amount, { by, byUser, reason } = {}) {
+    if (!(amount > 0.005)) return null;
+    const p = {
+      id: Utils.uuid(),
+      invoiceNumber: invNum,
+      customerId: custId,
+      method: 'ตัดเศษ',
+      amount,
+      writeOff: true,
+      writeOffReason: reason || '',
+      notes: reason ? `ตัดเศษ: ${reason}` : 'ตัดเศษ (ไม่นับเป็นรายได้)',
+      payDate: new Date().toISOString().slice(0, 10),
+      createdAt: new Date().toISOString(),
+      createdBy: by,
+      createdByUser: byUser,
+      imageHistory: [],
+    };
+    this.addPayment(p);
+    return p;
+  },
+
+  // Raises the invoice total to meet what was actually paid. Applied to EVERY current
+  // page: each page of a multi-page invoice carries the same whole-invoice totalAmount,
+  // so updating only page 1 would leave the pages disagreeing. Stale duplicate records
+  // are excluded via getCurrentPagesByNumber so a failed-delete leftover isn't touched.
+  roundUpInvoice(invNum, custId, amount, { by, byUser, reason } = {}) {
+    if (!(amount > 0.005)) return null;
+    const pages = this.getCurrentPagesByNumber(invNum)
+      .filter(p => !custId || p.customerId === custId);
+    if (!pages.length) return null;
+    const at = new Date().toISOString();
+    let updated = null;
+    for (const pg of pages) {
+      updated = this.updateInvoice(pg.id, {
+        totalAmount:   (parseFloat(pg.totalAmount) || 0) + amount,
+        roundUpAdjust: (parseFloat(pg.roundUpAdjust) || 0) + amount,
+        roundUpAt:     at,
+        roundUpBy:     byUser,
+        roundUpReason: reason || '',
+      }) || updated;
+    }
+    return updated;
+  },
+
   // Mirror of allocateOverpayCredit(), for the OWED side. Adding a ค้างชำระ balance
   // onto a new invoice via invoice-create.html's "เพิ่มที่เลือกลงใบใหม่" button folds
   // the old debt into the NEW invoice's total as a memo line (billing the customer

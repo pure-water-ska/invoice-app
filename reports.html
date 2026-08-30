@@ -133,7 +133,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.222"></script><script src="db.js?v=1.0.222"></script><script src="auth.js?v=1.0.222"></script><script src="nav.js?v=1.0.222"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.223"></script><script src="db.js?v=1.0.223"></script><script src="auth.js?v=1.0.223"></script><script src="nav.js?v=1.0.223"></script><script src="bedate.js"></script>
 <script>
 Auth.require();
 DB.init();
@@ -221,7 +221,9 @@ function runReport() {
   // elsewhere (getInvoicePaidAmount/effectivePaymentAmount), and a cancelled payment
   // was counted as received money outright.
   const paymentsInRange = allPayments.filter(p => {
-    if (p.cancelled || DB.isChequePending(p)) return false;
+    // Non-cash entries (write-off, carry-forward) settle an invoice without money
+    // changing hands, so they must never appear in a report of what was received.
+    if (p.cancelled || DB.isChequePending(p) || DB.isNonCashPayment(p)) return false;
     const d = new Date(p.createdAt);
     return d >= from && d <= to;
   });
@@ -229,7 +231,9 @@ function runReport() {
   let totalInvoiced=0, totalPaid=0;
   filtered.forEach(inv => {
     totalInvoiced += parseFloat(inv.totalAmount)||0;
-    totalPaid     += DB.getInvoicePaidAmount(inv.invoiceNumber, inv.customerId);
+    // getInvoiceCashReceived, NOT getInvoicePaidAmount — this figure is presented as
+    // money received next to totalInvoiced, so it must exclude non-cash settlements.
+    totalPaid     += DB.getInvoiceCashReceived(inv.invoiceNumber, inv.customerId);
   });
 
   renderSummary(filtered.length, totalInvoiced, totalPaid, totalInvoiced-totalPaid);
@@ -286,7 +290,7 @@ function groupInvoices(filtered, keyFn) {
     if (!map[k]) map[k] = { count:0, invoiced:0, paid:0 };
     map[k].count++;
     map[k].invoiced += parseFloat(inv.totalAmount)||0;
-    map[k].paid     += DB.getInvoicePaidAmount(inv.invoiceNumber, inv.customerId);
+    map[k].paid     += DB.getInvoiceCashReceived(inv.invoiceNumber, inv.customerId);
   });
   return map;
 }
@@ -656,15 +660,26 @@ function renderDetailInvoices(group) {
   const customers = reportData.customers;
   const sorted = [...invoices].sort((a,b) => new Date(a.createdAt)-new Date(b.createdAt));
 
-  let totalInv=0, totalPaid=0;
-  sorted.forEach(inv => { totalInv+=parseFloat(inv.totalAmount)||0; totalPaid+=DB.getInvoicePaidAmount(inv.invoiceNumber, inv.customerId); });
-  const unpaid = totalInv-totalPaid;
+  // This view drills into INVOICES, and its per-row badges are settlement-based ("is this
+  // invoice closed?"), so the summary must use settlement too or the badges and the totals
+  // would contradict each other. The non-cash portion is broken out as its own badge
+  // instead, so a write-off/carry-forward is never presented as money received while the
+  // figures still reconcile: cash + non-cash = ชำระแล้ว.
+  let totalInv=0, totalPaid=0, totalCash=0;
+  sorted.forEach(inv => {
+    totalInv  += parseFloat(inv.totalAmount)||0;
+    totalPaid += DB.getInvoicePaidAmount(inv.invoiceNumber, inv.customerId);
+    totalCash += DB.getInvoiceCashReceived(inv.invoiceNumber, inv.customerId);
+  });
+  const unpaid  = totalInv-totalPaid;
+  const nonCash = totalPaid-totalCash;
 
   document.getElementById('detailSubtitle').textContent = `${sorted.length} ใบกำกับ`;
   document.getElementById('detailSummary').innerHTML = `
     <span class="badge bg-primary fs-6 px-3 py-2">${sorted.length} ใบ</span>
     <span class="badge bg-purple fs-6 px-3 py-2" style="background:#6f42c1">ยอดขาย ฿${fmt(totalInv)}</span>
     <span class="badge bg-success fs-6 px-3 py-2">ชำระแล้ว ฿${fmt(totalPaid)}</span>
+    ${nonCash>0.005 ? `<span class="badge fs-6 px-3 py-2" style="background:#6c757d" title="ตัดเศษ/ยกยอด — ไม่ใช่เงินที่รับจริง">ในนี้ไม่ใช่เงินสด ฿${fmt(nonCash)}</span>` : ''}
     <span class="badge fs-6 px-3 py-2" style="background:${unpaid>0?'#dc3545':'#20c997'}">ค้างชำระ ฿${fmt(unpaid)}</span>`;
 
   const rows = sorted.map(inv => {

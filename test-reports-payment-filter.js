@@ -23,7 +23,12 @@ if (start < 0 || end < start) throw new Error('reports.html structure changed �
 const block = src.slice(start, end);
 
 function filterWith(allPayments, from, to) {
-  const DB = { isChequePending: p => p.method === 'เช็ค' && p.chequeCleared === false };
+  const DB = {
+    isChequePending: p => p.method === 'เช็ค' && p.chequeCleared === false,
+    // Added when write-offs landed: a non-cash entry settles an invoice without money
+    // changing hands, so it must never appear in a report of what was received.
+    isNonCashPayment: p => !!p.carryForward || !!p.writeOff,
+  };
   const fn = new Function('DB', 'allPayments', 'from', 'to', `${block}\nreturn paymentsInRange;`);
   return fn(DB, allPayments, from, to);
 }
@@ -102,6 +107,23 @@ console.log('\nlegacy cheque payments (predates chequeCleared field entirely) ar
   ];
   const out = filterWith(payments, FROM, TO);
   t('legacy cheque (no chequeCleared field) is included', out.length === 1);
+}
+
+console.log('excludes non-cash settlements (write-off / carry-forward)');
+{
+  // These settle an invoice but no money was received, so a report of takings must not
+  // list them. Before write-offs existed, `carryForward` appeared only in db.js and
+  // invoice-create.html — nothing in reports excluded it, so every carry-forward was
+  // silently counted as revenue.
+  const payments = [
+    { id: 'w', writeOff: true, amount: 0.45, createdAt: '2026-06-01T00:00:00' },
+    { id: 'c', carryForward: true, amount: 0.5, createdAt: '2026-06-02T00:00:00' },
+    { id: 'r', method: 'โอน', amount: 900, createdAt: '2026-06-03T00:00:00' },
+  ];
+  const out = filterWith(payments, FROM, TO);
+  t('write-off excluded', !out.some(p => p.id === 'w'));
+  t('carry-forward excluded', !out.some(p => p.id === 'c'));
+  t('the real transfer is kept', out.length === 1 && out[0].id === 'r', JSON.stringify(out.map(p => p.id)));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
