@@ -851,6 +851,25 @@
         </div>
       </div>
 
+      <!-- Device identity. The id is what stamps _by/_byName on every record this machine
+           writes, i.e. how you tell later WHICH machine produced something. It used to be
+           mirrored to the Local Folder Sync folder by DB._set, so a shared folder or a
+           restore made several machines report the same id — hence the collision check. -->
+      <div class="mb-3 p-2 rounded" style="background:#f8f9fa;max-width:560px">
+        <div class="small">
+          <span class="text-muted">รหัสเครื่อง:</span>
+          <code id="devIdText" style="font-size:11.5px">—</code>
+          <span id="devWriteCount" class="text-muted ms-2"></span>
+        </div>
+        <div id="devCollisionWarn" class="mt-2" style="display:none"></div>
+        <div class="d-flex gap-2 flex-wrap align-items-center mt-2">
+          <button class="btn btn-outline-dark btn-sm" onclick="regenerateDeviceId()">
+            <i class="bi bi-arrow-repeat me-1"></i>สร้างรหัสใหม่ให้เครื่องนี้
+          </button>
+          <span class="text-muted" style="font-size:11px">ไม่กระทบข้อมูลที่มีอยู่ — เปลี่ยนเฉพาะการระบุตัวเครื่องนับจากนี้</span>
+        </div>
+      </div>
+
       <p class="text-muted small mb-3">
         กด <strong>Push All → Firestore</strong> เพื่ออัปโหลดข้อมูลจากเครื่องนี้ไปยัง Firestore
         ทำครั้งเดียวหลังตั้งค่าครั้งแรก — หลังจากนั้นซิงค์อัตโนมัติทุกการเขียน
@@ -990,10 +1009,10 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-<script src="utils.js?v=1.0.225"></script><script src="db.js?v=1.0.225"></script><script src="auth.js?v=1.0.225"></script><script src="nav.js?v=1.0.225"></script><script src="idb.js?v=1.0.225"></script><script src="image-store.js?v=1.0.163"></script>
+<script src="utils.js?v=1.0.226"></script><script src="db.js?v=1.0.226"></script><script src="auth.js?v=1.0.226"></script><script src="nav.js?v=1.0.226"></script><script src="idb.js?v=1.0.226"></script><script src="image-store.js?v=1.0.163"></script>
 <script src="drive-config.js" onerror="window.GOOGLE_CLIENT_ID=''"></script>
 <script src="drive-store.js"></script>
-<script src="settings.js?v=1.0.225"></script>
+<script src="settings.js?v=1.0.226"></script>
 <script>Nav.render('settings');</script>
 </body>
 </html>

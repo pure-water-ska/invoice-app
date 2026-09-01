@@ -1057,6 +1057,24 @@ const DB = {
   // a DIFFERENT invoice's total instead. See carryForwardOwedBalance() below.
   isCarryForwardPayment(p) { return !!p.carryForward; },
 
+  // Which MACHINE created a record, stamped at creation as ordinary app data alongside
+  // createdBy (the user). Sync's own _by/_byName metadata cannot answer this: it records
+  // the last device to WRITE a doc, so any later re-push overwrites it — and worse, the
+  // device id itself used to travel between machines through the Local Folder Sync mirror,
+  // which left three users across several devices all reporting as one id / "ASUS".
+  // Stamped here it is immutable, survives re-pushes, and is queryable afterwards.
+  creatorDeviceFields() {
+    let id = '', name = '';
+    // window.Sync throughout, not a bare `Sync` — consistent with the guard, and it keeps
+    // this callable from anywhere without depending on the global being in scope.
+    try { id = (window.Sync && window.Sync._deviceId) || ''; } catch (e) {}
+    try {
+      name = (window.Sync && typeof window.Sync._deviceName === 'function')
+        ? (window.Sync._deviceName() || '') : '';
+    } catch (e) { name = ''; }
+    return { createdDevice: id, createdDeviceName: name };
+  },
+
   // A remainder the customer will never pay, forgiven. Like carryForward it settles the
   // invoice without money changing hands — see isNonCashPayment.
   isWriteOffPayment(p) { return !!p.writeOff; },

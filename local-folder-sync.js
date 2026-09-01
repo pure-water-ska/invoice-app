@@ -25,6 +25,20 @@
 if (!window.LocalFolderSync) {
   window.LocalFolderSync = (function () {
 
+    // Keys that identify THIS MACHINE and must never be mirrored to the folder or read
+    // back from it. DB._set() mirrors every key it is given, so before this list the
+    // device id and name travelled with the data: point two machines at the same synced
+    // folder (or restore one machine's folder onto another) and both then reported the
+    // SAME _by/_byName on every record they wrote. Observed in production — three users
+    // across multiple devices all writing as dev_kb2b12k711mmqg47oj7 / "ASUS", which made
+    // it impossible to tell which machine produced a record.
+    // See also sync.js: a device id that keeps changing breaks echo-suppression, so these
+    // are excluded rather than regenerated automatically.
+    // wt_device_id goes through DB._set (so it WAS being mirrored — the actual leak).
+    // wt_device_label is written straight to localStorage by settings.js and never reaches
+    // DB._set, so it cannot leak this way; it is listed for safety in case that changes.
+    var DEVICE_LOCAL_KEYS = ['wt_device_id', 'wt_device_label'];
+
     var IDB_HANDLE_KEY = 'local_folder_handle';
     var DEBOUNCE_MS    = 3000;
 
@@ -182,6 +196,7 @@ if (!window.LocalFolderSync) {
       // Called from DB._set() after every data save.
       queueWrite(key, val) {
         if (!_handle || !_permOk) return;
+        if (DEVICE_LOCAL_KEYS.indexOf(key) !== -1) return;   // never let identity travel
         _queue[key] = val;
         if (_timer) clearTimeout(_timer);
         _timer = setTimeout(function () { _flush(); }, DEBOUNCE_MS);
@@ -190,7 +205,8 @@ if (!window.LocalFolderSync) {
       // Write every DB key to the folder immediately.
       async writeAll() {
         if (!_handle || !_permOk) return;
-        var keys    = (typeof DB !== 'undefined') ? Object.values(DB.K) : [];
+        var keys    = ((typeof DB !== 'undefined') ? Object.values(DB.K) : [])
+                        .filter(function (k) { return DEVICE_LOCAL_KEYS.indexOf(k) === -1; });
         var written = 0;
         for (var i = 0; i < keys.length; i++) {
           var val = _readFromDB(keys[i]);
@@ -258,6 +274,7 @@ if (!window.LocalFolderSync) {
           if (fEntry.kind !== 'file' || !name.endsWith('.json')) continue;
           var key = name.slice(0, -5);
           try {
+            if (DEVICE_LOCAL_KEYS.indexOf(key) !== -1) continue;  // never restore identity
             var f    = await fEntry.getFile();
             var text = await f.text();
             result[key] = JSON.parse(text);

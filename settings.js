@@ -3606,3 +3606,87 @@ async function deleteInvoiceNumberOnServer() {
     Utils.showAlert('ลบไม่สำเร็จ: ' + (e && e.message ? e.message : e), 'danger');
   }
 }
+
+// ─── Device identity ─────────────────────────────────────────────────────────
+// Sync stamps _by (device id) and _byName on every record a machine writes; that is how
+// you tell afterwards WHICH machine produced something. It only works if the id is unique
+// per machine — and it wasn't: DB._set mirrors every key it is given to the Local Folder
+// Sync folder, wt_device_id included, so a folder shared between machines (or a restore
+// from one onto another) handed them all the same identity. Observed in production: three
+// users across several devices all writing as dev_kb2b12k711mmqg47oj7 / "ASUS".
+// local-folder-sync.js now excludes the identity keys, which stops it recurring; this card
+// reports the current state and repairs machines that already collided.
+function renderDeviceIdentity() {
+  const idEl = document.getElementById('devIdText');
+  if (!idEl) return;
+  const id = (window.Sync && Sync._deviceId) || '';
+  idEl.textContent = id || '(ยังไม่พร้อม)';
+
+  // How much this machine claims to have written recently — a rough sanity figure, and the
+  // input to the collision check below.
+  const since = Date.now() - 7 * 24 * 3600 * 1000;
+  let mine = 0, users = new Set();
+  try {
+    for (const inv of DB.getInvoices()) {
+      if (!inv.createdAt || new Date(inv.createdAt).getTime() < since) continue;
+      if (inv.createdDevice && inv.createdDevice !== id) continue;
+      mine++;
+      if (inv.createdByUser) users.add(inv.createdByUser);
+    }
+  } catch (e) {}
+  const cntEl = document.getElementById('devWriteCount');
+  if (cntEl) cntEl.textContent = mine ? `· ${mine} ใบกำกับใน 7 วันล่าสุด` : '';
+
+  // Collision heuristic: records this device is credited with, created by users who are not
+  // the person sitting here. One shared PC with several logins is legitimate, so this is
+  // phrased as "check", not "fault" — the reliable signal is createdDevice, which only
+  // newly-created records carry.
+  const warn = document.getElementById('devCollisionWarn');
+  if (!warn) return;
+  const me = (session && session.username) || '';
+  const others = [...users].filter(u => u && u !== me);
+  if (others.length) {
+    warn.style.display = '';
+    warn.innerHTML = `<div class="alert alert-warning py-2 px-2 mb-0 small" style="line-height:1.6">
+      <i class="bi bi-exclamation-triangle me-1"></i>
+      <strong>เครื่องนี้ถูกบันทึกว่าเป็นผู้เขียนข้อมูลของผู้ใช้: ${[...others].map(esc).join(', ')}</strong><br>
+      ถ้าเป็นเครื่องที่ใช้ร่วมกันหลายคน ถือว่าปกติ — แต่ถ้าคนเหล่านี้ใช้คนละเครื่อง
+      แปลว่ารหัสเครื่องถูกคัดลอกข้ามเครื่อง (ผ่านโฟลเดอร์สำรองข้อมูลที่ใช้ร่วมกัน)
+      ทำให้แยกไม่ออกว่าข้อมูลมาจากเครื่องไหน<br>
+      วิธีแก้: กด “สร้างรหัสใหม่” <u>ทีละเครื่อง</u> แล้วตั้งชื่อเครื่องให้ต่างกัน
+    </div>`;
+  } else {
+    warn.style.display = 'none';
+    warn.innerHTML = '';
+  }
+}
+
+async function regenerateDeviceId() {
+  const cur = (window.Sync && Sync._deviceId) || '(ไม่ทราบ)';
+  // Utils.confirm, not window.confirm — in Tauri the native one returns a Promise (truthy).
+  const ok = await Utils.confirm(
+    `สร้างรหัสประจำเครื่องใหม่?\n\nรหัสเดิม: ${cur}\n\n` +
+    `• ข้อมูลที่มีอยู่ไม่เปลี่ยนแปลง\n` +
+    `• ข้อมูลที่บันทึกหลังจากนี้จะระบุว่ามาจากเครื่องนี้อย่างถูกต้อง\n` +
+    `• ทำทีละเครื่อง แล้วตั้งชื่อเครื่องให้ต่างกัน มิฉะนั้นจะยังแยกไม่ออก`,
+    'สร้างรหัสเครื่องใหม่');
+  if (!ok) return;
+  const fresh = 'dev_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  try {
+    DB._set('wt_device_id', fresh);
+    // IDB/localStorage copies exist on the web path — clear them so the new id is the one
+    // that survives, rather than an old copy winning on next start (see sync.js).
+    try { localStorage.setItem('wt_device_id', fresh); } catch (e) {}
+    try { if (typeof IDB !== 'undefined' && IDB.set) await IDB.set('wt_device_id', fresh); } catch (e) {}
+    if (window.Sync) Sync._deviceId = fresh;
+    DB.logActivity(session.userId, session.username, 'สร้างรหัสประจำเครื่องใหม่', { from: cur, to: fresh });
+    Utils.showAlert(`สร้างรหัสใหม่แล้ว: <code>${esc(fresh)}</code> — อย่าลืมตั้งชื่อเครื่องให้ต่างจากเครื่องอื่น`, 'success');
+    renderDeviceIdentity();
+  } catch (e) {
+    try { DB.logError('DEVICE-ID-REGEN-FAILED', `สร้างรหัสเครื่องใหม่ล้มเหลว: ${(e && e.message) || e}`, { from: cur }); } catch (e2) {}
+    Utils.showAlert('ไม่สำเร็จ: ' + ((e && e.message) || e), 'danger');
+  }
+}
+
+window.addEventListener('DOMContentLoaded', () => { try { renderDeviceIdentity(); } catch (e) {} });
+window.addEventListener('sync:ready', () => { try { renderDeviceIdentity(); } catch (e) {} });
