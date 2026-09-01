@@ -160,7 +160,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.224"></script><script src="db.js?v=1.0.224"></script><script src="auth.js?v=1.0.224"></script><script src="nav.js?v=1.0.224"></script><script src="idb.js?v=1.0.224"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.225"></script><script src="db.js?v=1.0.225"></script><script src="auth.js?v=1.0.225"></script><script src="nav.js?v=1.0.225"></script><script src="idb.js?v=1.0.225"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -1516,24 +1516,54 @@ async function saveInvoice(shouldPrint = false) {
   const _parts    = DB._invNumParts(_dateISO);
   let invNumber   = _firstNum;
   let _numSource  = 'local';
+  // Why each tier was skipped, so an unverified number is explainable afterwards. Both
+  // reservations return null the moment Sync isn't connected, and both catch blocks used
+  // to only console.warn — invisible in the desktop build. A number that could NOT be
+  // verified was therefore indistinguishable from one that was. Confirmed in production:
+  // 310869-003 was issued at 16:24 when 003 and 004 had existed on the server since 06:39
+  // and 08:45 the same day, with nothing recorded about why the checks did not catch it.
+  const _numWhy = [];
+  if (!window.Sync) _numWhy.push('Sync not loaded');
+  else if (!Sync.ready) _numWhy.push('Sync not connected yet (saved before sync finished)');
   if (window.Sync && typeof Sync.reserveInvoiceNumberAtomic === 'function') {
     try {
       const _atomic = await Sync.reserveInvoiceNumberAtomic(
         _parts.dateKey, _parts.prefix, DB.localFloorRunForDate(_dateISO));
       if (_atomic && _atomic.number) { invNumber = _atomic.number; _numSource = 'atomic'; }
+      else _numWhy.push('atomic returned null');
     } catch (e) {
       console.warn('[saveInvoice] atomic number reservation failed', e);
+      _numWhy.push('atomic threw: ' + ((e && e.message) || e));
     }
-  }
+  } else _numWhy.push('atomic unavailable');
   if (_numSource === 'local' && window.Sync && typeof Sync.reserveFreeInvoiceNumber === 'function') {
     try {
       const _res = await Sync.reserveFreeInvoiceNumber(
         _firstNum, customerId, n => DB.invoiceNumberCandidate(_dateISO, n));
       invNumber = _res.number || _firstNum;
       if (_res.verified) _numSource = 'checked';
+      else _numWhy.push('server check could not verify');
     } catch (e) {
       console.warn('[saveInvoice] invoice-number server check failed, using local number', e);
+      _numWhy.push('server check threw: ' + ((e && e.message) || e));
     }
+  }
+  // An unverified number is the one case that can silently duplicate. Say so at save time
+  // and record it, rather than letting it surface as a collision days later.
+  if (_numSource === 'local') {
+    const _reason = _numWhy.join('; ') || 'unknown';
+    try {
+      DB.logError('INV-NUMBER-UNVERIFIED',
+        `เลขที่ ${invNumber} ออกโดยไม่ได้ตรวจกับเซิร์ฟเวอร์: ${_reason}`,
+        { invoiceNumber: invNumber, date: _dateISO, reason: _reason,
+          localFloor: DB.localFloorRunForDate(_dateISO) });
+    } catch (e) {}
+    DB.logActivity(session.userId, session.username, 'ออกเลขที่แบบไม่ยืนยันกับเซิร์ฟเวอร์',
+      { invoiceNumber: invNumber, reason: _reason });
+    Utils.showAlert(
+      `⚠️ เลขที่ <strong>${invNumber}</strong> ออกจากข้อมูลในเครื่องเท่านั้น ` +
+      `— ยังไม่ได้ตรวจกับเซิร์ฟเวอร์ อาจซ้ำกับเครื่องอื่น ` +
+      `กรุณาตรวจสอบเมื่อออนไลน์ (${_reason})`, 'warning');
   }
   if (invNumber !== _firstNum) {
     DB.logActivity(session.userId, session.username, 'เลื่อนเลขที่ใบกำกับ (เลขซ้ำบนเซิร์ฟเวอร์)',
