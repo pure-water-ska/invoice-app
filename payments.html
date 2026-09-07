@@ -727,7 +727,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.226"></script><script src="db.js?v=1.0.226"></script><script src="auth.js?v=1.0.226"></script><script src="nav.js?v=1.0.226"></script><script src="idb.js?v=1.0.226"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.227"></script><script src="db.js?v=1.0.227"></script><script src="auth.js?v=1.0.227"></script><script src="nav.js?v=1.0.227"></script><script src="idb.js?v=1.0.227"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -2615,7 +2615,10 @@ function printPaymentSummary(invNum) {
       return [bank, num, pending].filter(Boolean).join(' · ');
     }
     if (p.method === 'เงินสด') return p.cashCollector || '';
-    return p.notes || '';
+    // Any other method (ตัดเศษ, ยกยอดไปใบใหม่, anything added later) carries no
+    // method-specific detail of its own. Returning p.notes here printed the note TWICE,
+    // because the caller already appends p.notes to whatever this returns.
+    return '';
   };
 
   const rows = payments.map((p, i) => {
