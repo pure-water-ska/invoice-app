@@ -420,7 +420,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="./vendor/html2canvas.min.js"></script>
-<script src="utils.js?v=1.0.227"></script><script src="db.js?v=1.0.227"></script><script src="auth.js?v=1.0.227"></script><script src="nav.js?v=1.0.227"></script>
+<script src="utils.js?v=1.0.228"></script><script src="db.js?v=1.0.228"></script><script src="auth.js?v=1.0.228"></script><script src="nav.js?v=1.0.228"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -1009,7 +1009,8 @@ function showOutstandingPreview(id) {
       </div>
       <div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:12px;margin-bottom:12px">
         <div style="font-size:15px;font-weight:700">${c.name}</div>
-        ${c.phone ? `<div style="font-size:12px;color:#555">${c.phone}</div>` : ''}
+        ${c.address ? `<div style="font-size:12px;color:#555;white-space:pre-line">${c.address}</div>` : ''}
+        ${c.phone ? `<div style="font-size:12px;color:#555">โทร. ${c.phone}</div>` : ''}
       </div>
       <table style="width:100%;border-collapse:collapse;font-size:13px">
         <thead>
@@ -1025,7 +1026,7 @@ function showOutstandingPreview(id) {
           ${unpaidRows.map((r,i) => `
           <tr style="background:${i%2?'#fef2f2':'#fff'}">
             <td style="padding:5px 8px;font-weight:600">${r.num}</td>
-            <td style="padding:5px 8px;text-align:center;color:#666">${r.date?r.date.slice(0,10):'-'}</td>
+            <td style="padding:5px 8px;text-align:center;color:#666">${Utils.formatDateTH(r.date)}</td>
             <td style="padding:5px 8px;text-align:right">${r.total.toLocaleString('th-TH',{minimumFractionDigits:2})}</td>
             <td style="padding:5px 8px;text-align:right;color:#16a34a">${r.paid.toLocaleString('th-TH',{minimumFractionDigits:2})}</td>
             <td style="padding:5px 8px;text-align:right;font-weight:700;color:#dc2626">${r.rem.toLocaleString('th-TH',{minimumFractionDigits:2})}</td>
