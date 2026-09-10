@@ -61,9 +61,9 @@
 </div>
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
-<script src="utils.js?v=1.0.229"></script>
-<script src="db.js?v=1.0.229"></script>
-<script src="auth.js?v=1.0.229"></script>
+<script src="utils.js?v=1.0.230"></script>
+<script src="db.js?v=1.0.230"></script>
+<script src="auth.js?v=1.0.230"></script>
 <script>
   // ── Tauri: unregister any old service worker immediately ─────────────────
   // An old SW from a pre-fix build could serve outdated JS (without Tauri guards).
@@ -246,8 +246,16 @@
             FIREBASE_CONFIG.apiKey &&
             !FIREBASE_CONFIG.apiKey.startsWith('AIzaSy...')) {
           const userRecord = DB.getUserByUsername(u);
-          const fbEmail    = userRecord?.firebaseEmail    || FIREBASE_CONFIG.teamEmail;
-          const fbPass     = userRecord?.firebasePassword || FIREBASE_CONFIG.teamPassword;
+          // Use the user's OWN Firebase account only when BOTH halves are stored, and it
+          // hasn't already failed this session. Picking email and password independently
+          // paired a user's own email with the TEAM password whenever the record had
+          // firebaseEmail but no firebasePassword (users.html _createFirebaseAccount's
+          // email-already-in-use branch) → "invalid login credentials". Same rule as sync.js.
+          let ownFailed = false;
+          try { ownFailed = sessionStorage.getItem('wt_fb_own_failed:' + u) === '1'; } catch (e) {}
+          const ownCreds   = !!(userRecord?.firebaseEmail && userRecord?.firebasePassword) && !ownFailed;
+          const fbEmail    = ownCreds ? userRecord.firebaseEmail    : FIREBASE_CONFIG.teamEmail;
+          const fbPass     = ownCreds ? userRecord.firebasePassword : FIREBASE_CONFIG.teamPassword;
           const current    = firebase.auth().currentUser;
           if (fbEmail && fbPass && (!current || current.email !== fbEmail)) {
             if (current) await firebase.auth().signOut();

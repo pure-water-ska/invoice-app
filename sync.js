@@ -623,8 +623,37 @@ var Sync = {
       // always fall through to the shared teamEmail even for provisioned users.
       const _appSession = (typeof Auth !== 'undefined' && Auth.session) ? Auth.session() : null;
       const _appUser    = (_appSession && (typeof DB !== 'undefined')) ? DB.getUserById(_appSession.userId) : null;
-      const _fbEmail    = _appUser?.firebaseEmail    || FIREBASE_CONFIG.teamEmail;
-      const _fbPass     = _appUser?.firebasePassword || FIREBASE_CONFIG.teamPassword;
+      const _ownFailKey = _appSession ? 'wt_fb_own_failed:' + _appSession.username : '';
+      let   _ownFailed  = false;
+      try { _ownFailed = !!_ownFailKey && sessionStorage.getItem(_ownFailKey) === '1'; } catch {}
+      const _creds      = this._pickFirebaseCreds(_appUser, FIREBASE_CONFIG, _ownFailed);
+      const _fbEmail    = _creds.email;
+      const _fbPass     = _creds.pass;
+
+      // One sign-in routine for all three paths (browser fresh, browser account switch,
+      // Tauri). Self-repair: if the user's OWN account is rejected as bad credentials,
+      // fall back to the team account so sync still starts; remember that for the rest of
+      // the session (no doomed retry on every page load); and log it to Troubleshoot —
+      // DB.logError stamps the username — so an admin can see who needs repair. The
+      // password is never logged. See _shouldFallbackToTeam for what does NOT fall back.
+      const _signIn = async () => {
+        if (!(_fbEmail && _fbPass)) return firebase.auth().signInAnonymously();
+        try {
+          return await firebase.auth().signInWithEmailAndPassword(_fbEmail, _fbPass);
+        } catch (e) {
+          if (!this._shouldFallbackToTeam(e, _creds, FIREBASE_CONFIG)) throw e;
+          try { if (_ownFailKey) sessionStorage.setItem(_ownFailKey, '1'); } catch {}
+          console.warn('[Sync] own Firebase account rejected (' + (e.code || e.message) + ') — using team account');
+          try {
+            if (typeof DB !== 'undefined' && DB.logError) {
+              DB.logError('SYNC-AUTH-FALLBACK',
+                `บัญชี Firebase ของ ${(_appSession && _appSession.username) || '?'} ใช้ไม่ได้ (${e.code || e.message}) — ใช้บัญชีทีมแทน`,
+                { firebaseEmail: _fbEmail, code: e.code || '' });
+            }
+          } catch {}
+          return firebase.auth().signInWithEmailAndPassword(FIREBASE_CONFIG.teamEmail, FIREBASE_CONFIG.teamPassword);
+        }
+      };
 
       if (!window.IS_TAURI) {
         // ── Browser: full Auth with IndexedDB session persistence ──────────────
@@ -647,11 +676,7 @@ var Sync = {
         if (!restoredUser) {
           // No cached session — need a real network sign-in
           console.log('[Sync] Step 4b: signIn (network) →', _fbEmail || 'anonymous');
-          if (_fbEmail && _fbPass) {
-            await firebase.auth().signInWithEmailAndPassword(_fbEmail, _fbPass);
-          } else {
-            await firebase.auth().signInAnonymously();
-          }
+          await _signIn();
         } else if (_fbEmail && restoredUser.email !== _fbEmail) {
           // Cached session belongs to a different Firebase account — this happens
           // when a different app user logs in, or when a user's account was just
@@ -659,11 +684,7 @@ var Sync = {
           // Sign out of the stale session and authenticate with the correct account.
           console.log('[Sync] Step 4c: auth switch', restoredUser.email, '→', _fbEmail);
           await firebase.auth().signOut();
-          if (_fbEmail && _fbPass) {
-            await firebase.auth().signInWithEmailAndPassword(_fbEmail, _fbPass);
-          } else {
-            await firebase.auth().signInAnonymously();
-          }
+          await _signIn();
         }
         this._uid = firebase.auth().currentUser?.uid || 'anon';
         console.log('[Sync] Step 5a: signIn OK, uid=', this._uid);
@@ -681,11 +702,7 @@ var Sync = {
         } catch (e) {
           console.warn('[Sync] Tauri setPersistence failed (non-fatal):', e.message);
         }
-        if (_fbEmail && _fbPass) {
-          await firebase.auth().signInWithEmailAndPassword(_fbEmail, _fbPass);
-        } else {
-          await firebase.auth().signInAnonymously();
-        }
+        await _signIn();
         this._uid = firebase.auth().currentUser?.uid || 'anon-tauri';
         console.log('[Sync] Tauri auth OK, uid=', this._uid);
       }
@@ -898,6 +915,36 @@ var Sync = {
   },
 
   // ── Called by db._set() ────────────────────────────────────────────────────
+  // ── Firebase credential choice (used by init) ─────────────────────────────────
+  // A user's OWN Firebase account is used only when BOTH halves are stored and it hasn't
+  // already failed this session; otherwise the team account, BOTH halves. Choosing
+  // email and password independently paired a user's own email with the TEAM password
+  // whenever their record had firebaseEmail but no firebasePassword (users.html
+  // _createFirebaseAccount, email-already-in-use branch) → Firebase "invalid login
+  // credentials" → init failed → no sync for the whole session, red badge. Seen live on
+  // two accounts. index.html's login-time switch applies the same rule.
+  _pickFirebaseCreds(appUser, cfg, ownFailed) {
+    const own = !!(appUser && appUser.firebaseEmail && appUser.firebasePassword) && !ownFailed;
+    return own
+      ? { email: appUser.firebaseEmail, pass: appUser.firebasePassword, own: true }
+      : { email: cfg.teamEmail, pass: cfg.teamPassword, own: false };
+  },
+
+  // Rejections meaning "this user's own stored credentials don't work". auth/user-disabled
+  // is deliberately ABSENT: disabling an account in Firebase Console is an intentional
+  // block and must not be bypassed through the team account. Network errors are absent
+  // too, so init's offline handling still applies to them.
+  _AUTH_FALLBACK_CODES: ['auth/invalid-credential', 'auth/invalid-login-credentials',
+                         'auth/wrong-password', 'auth/user-not-found', 'auth/invalid-email'],
+
+  _shouldFallbackToTeam(err, creds, cfg) {
+    if (!creds || !creds.own) return false;             // already the team account — nowhere to fall back to
+    if (!(cfg && cfg.teamEmail && cfg.teamPassword)) return false;
+    const code = (err && err.code) || '';
+    return this._AUTH_FALLBACK_CODES.includes(code) ||
+           /INVALID_LOGIN_CREDENTIALS/i.test((err && err.message) || '');
+  },
+
   push(key, val) {
     if (!this.COLLECTIONS[key] && !this.DOCUMENTS[key]) return; // key not synced
     if (this.NO_SYNC.has(key)) return; // explicitly excluded from Firestore sync

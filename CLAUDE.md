@@ -722,6 +722,7 @@ not yet understand the bug — gather more evidence instead of shipping.
 | `wt_sync_pull_ids` | JSON map of `colName → [id, …]`; persisted `_pullIds` for listener guard |
 | `wt_cust_unacked` / `wt_prod_unacked` / `wt_price_unacked` / `wt_user_unacked` | Per-module set of record ids written locally but not yet server-acknowledged (see Single-Source-of-Truth Sync Modules) |
 | `wt_cs_trust_<col>` / `wt_cs_fp_<col>` | Per-collection trust-window attach timestamp + cached server fingerprint map (v1.0.183 — see "Time-boxed trust window") for `customers_v2` / `products_v2` / `pricing_byproduct` / `users_v2` |
+| `wt_fb_own_failed:<username>` | `'1'` once that user's OWN Firebase account was rejected as bad credentials this session. `sync.js` `_signIn` then falls back to the team account and logs `SYNC-AUTH-FALLBACK` (never the password); later page loads and `index.html`'s login switch skip the own account for the rest of the session (v1.0.230). Own credentials are only used when BOTH `firebaseEmail` and `firebasePassword` are stored — see `Sync._pickFirebaseCreds` |
 
 > Per-module bootstrap flags `wt_*_v2_migrated` are stored via `DB` (HDD-backed in Tauri), not sessionStorage.
 

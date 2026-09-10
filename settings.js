@@ -1178,7 +1178,8 @@ function renderFsStatus() {
         • <code>permission-denied</code> →
           Firestore Security Rules ไม่อนุญาต<br>
         • <code>auth/invalid-credential</code> →
-          password ใน Netlify env var ไม่ตรงกับที่สร้างใน Firebase Auth<br><br>
+          รหัสผ่านบัญชีทีม (GitHub Secret <code>FIREBASE_TEAM_PASSWORD</code>) ไม่ตรงกับบัญชี team ใน Firebase Auth
+          — ถ้าเป็นบัญชี Firebase รายผู้ใช้ ระบบจะสลับไปใช้บัญชีทีมเองอัตโนมัติ และบันทึกไว้ใน Troubleshoot (<code>SYNC-AUTH-FALLBACK</code>)<br><br>
         <button class="btn btn-sm btn-outline-danger" onclick="fsRetry()">
           <i class="bi bi-arrow-clockwise me-1"></i>ลองเชื่อมต่อใหม่
         </button>`;
