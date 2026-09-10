@@ -212,10 +212,10 @@
             <input type="text" id="payDate" class="form-control" placeholder="DD/MM/YYYY">
           </div>
 
-          <!-- ผู้รับเงิน (เงินสดเท่านั้น — ผู้ล็อกอินอยู่เท่านั้น) -->
+          <!-- ผู้รับเงิน (เงินสดเท่านั้น — เลือกจากผู้ใช้ที่เปิดใช้งาน, ค่าเริ่มต้นคือผู้ล็อกอิน) -->
           <div class="col-12 col-md-6 pay-cash" style="display:none">
             <label class="form-label fw-semibold">ผู้รับเงิน</label>
-            <input type="text" id="payCashCollector" class="form-control" readonly>
+            <select id="payCashCollector" class="form-select"></select>
           </div>
 
           <!-- โอน -->
@@ -656,7 +656,7 @@
           <div class="row g-3 mb-3">
             <div class="col-12 col-md-6">
               <label class="form-label fw-semibold">ผู้รับเงิน</label>
-              <input type="text" id="multiCashCollector" class="form-control" readonly>
+              <select id="multiCashCollector" class="form-select"></select>
             </div>
             <div class="col-12 col-md-6">
               <label class="form-label fw-semibold">ยอดเงินสดรับ <span class="text-danger">*</span></label>
@@ -727,7 +727,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.228"></script><script src="db.js?v=1.0.228"></script><script src="auth.js?v=1.0.228"></script><script src="nav.js?v=1.0.228"></script><script src="idb.js?v=1.0.228"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.229"></script><script src="db.js?v=1.0.229"></script><script src="auth.js?v=1.0.229"></script><script src="nav.js?v=1.0.229"></script><script src="idb.js?v=1.0.229"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -1307,6 +1307,10 @@ function openPayModal(invNum, custId) {
   document.getElementById('payChequeBank').value        = '';
   if (_fpCheqDate) _fpCheqDate.clear(); else document.getElementById('payChequeDate').value = '';
   document.getElementById('payAmount').value            = '';
+  // Cleared so buildCashCollectorSelect() below falls back to the LOGGED-IN user. It keeps
+  // the box's current value on purpose (for switching method inside one window), so
+  // without this a receiver picked on the previous invoice carried into the next one.
+  document.getElementById('payCashCollector').value     = '';
   if (_fpPayDate) _fpPayDate.setDate(new Date()); else document.getElementById('payDate').value = Utils.todayBE();
   document.getElementById('payDateAlert').style.display = 'none';
   _pendingPayments = [];
@@ -1381,9 +1385,67 @@ function buildMethodSelect(selected) {
     methods.map(m => `<option value="${m}" ${m===selected?'selected':''}>${m}</option>`).join('');
 }
 
-// ── Cash collector — always the currently logged-in user (read-only) ──────────
+// ── Cash collector — who may be named as the receiver ─────────────────────────
+// Stores the USERNAME, as every existing payment record does, so history, print and
+// reports keep reading one consistent value. Who actually ENTERED the payment is still
+// recorded separately in createdBy/createdByUser, so naming someone else as the
+// receiver never hides the recorder.
+//
+// Each user carries a cashReceiver flag, switched by an admin in users.html. Absent
+// counts as shown, so nothing changed for existing users. A HIDDEN user
+// (cashReceiver === false):
+//   - is not offered to ordinary users
+//   - is offered to admins, labelled "· ซ่อน"
+//   - if not an admin themselves, is locked to recording only themselves
+// The logged-in user is always in their own list, and is the default.
+function _cashCollectorIsAdmin() {
+  return typeof Auth !== 'undefined' && !!Auth.isAdmin();   // bare Auth — window.Auth is undefined
+}
+function _cashCollectorLocked() {
+  if (!session || _cashCollectorIsAdmin()) return false;
+  const me = DB.getUsers().find(u => u.username === session.username);
+  return !!me && me.cashReceiver === false;
+}
+function _cashCollectorOptions(selected) {
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const me     = session ? session.username : '';
+  const admin  = _cashCollectorIsAdmin();
+  const all    = DB.getUsers();
+  const active = all.filter(u => u.active !== false);
+  const hiddenFromViewer = u => !admin && u.cashReceiver === false && u.username !== me;
+  let users;
+  if (_cashCollectorLocked()) {
+    users = active.filter(u => u.username === me);
+    selected = me;
+  } else {
+    users = active.filter(u => !hiddenFromViewer(u));
+    // The logged-in user is always choosable — also when users haven't synced to this
+    // device yet — because they are the default.
+    if (me && !users.some(u => u.username === me)) users.unshift({ username: me, name: (session && session.name) || '' });
+    // A selected username outside the list (e.g. suspended since) stays listed, so the
+    // value is never silently swapped for the first name — but never one this viewer
+    // isn't allowed to see.
+    const rec = all.find(u => u.username === selected);
+    if (selected && !users.some(u => u.username === selected) && !(rec && hiddenFromViewer(rec))) {
+      users.push({ username: selected, name: '' });
+    }
+  }
+  return users.map(u => {
+    const base  = u.name && u.name !== u.username ? `${u.name} (${u.username})` : u.username;
+    const label = admin && u.cashReceiver === false ? `${base} · ซ่อน` : base;
+    return `<option value="${esc(u.username)}"${u.username === selected ? ' selected' : ''}>${esc(label)}</option>`;
+  }).join('');
+}
+
+// Rebuilt by onMethodChange() every time cash is chosen, so it KEEPS the current pick —
+// switching to โอน and back must not reset a receiver the user already selected. An
+// empty value (fresh modal, or the per-entry reset) falls back to the logged-in user.
+// Disabled for a hidden ordinary user; a disabled select's .value still reads normally.
 function buildCashCollectorSelect() {
-  document.getElementById('payCashCollector').value = session ? session.username : '';
+  const sel = document.getElementById('payCashCollector');
+  sel.innerHTML = _cashCollectorOptions(sel.value || (session ? session.username : ''));
+  sel.disabled  = _cashCollectorLocked();
 }
 
 // ── Transfer account manager ───────────────────────────────────────────────────
@@ -2802,8 +2864,10 @@ function openMultiPayModal() {
   document.getElementById('multiTransferTime').value =
     String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
 
-  // Cash collector
-  document.getElementById('multiCashCollector').value = session ? session.username : '';
+  // Cash collector — same list and same lock as the single-invoice modal
+  const multiCollector = document.getElementById('multiCashCollector');
+  multiCollector.innerHTML = _cashCollectorOptions(session ? session.username : '');
+  multiCollector.disabled  = _cashCollectorLocked();
 
   // Build account selects
   const accounts = DB.getTransferAccounts();
@@ -3084,7 +3148,8 @@ async function saveMultiPay() {
       customerId:    inv.custId,
       method,
       amount:        inv.alloc,
-      cashCollector: _multiCurTab === 'cash' ? session.username : '',
+      cashCollector: _multiCurTab === 'cash'
+        ? (document.getElementById('multiCashCollector').value || session.username) : '',
       sourceBank:    document.getElementById('multiSourceBank').value || '',
       destBank:      _multiDestBank,
       accountName:   _multiAcctName,

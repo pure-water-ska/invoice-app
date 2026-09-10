@@ -43,10 +43,10 @@
       <table class="table table-hover mb-0">
         <thead><tr>
           <th>#</th><th>ชื่อผู้ใช้</th><th>ชื่อ-นามสกุล</th>
-          <th class="text-center">สิทธิ์</th><th class="text-center">สถานะ</th>
+          <th class="text-center">สิทธิ์</th><th class="text-center">สถานะ</th><th class="text-center">รับเงินสด</th>
           <th>วันที่สร้าง</th><th>เข้าสู่ระบบล่าสุด</th><th class="text-center">จัดการ</th>
         </tr></thead>
-        <tbody id="userTable"><tr><td colspan="8" class="text-center text-muted py-3">ยังไม่มีผู้ใช้</td></tr></tbody>
+        <tbody id="userTable"><tr><td colspan="9" class="text-center text-muted py-3">ยังไม่มีผู้ใช้</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -97,6 +97,13 @@
           <label class="form-check-label fw-semibold" for="uMobileViewOnly">
             ดูอย่างเดียวเมื่อใช้บนมือถือ
             <span class="text-muted fw-normal small ms-1">(บนโทรศัพท์จะแก้ไข/บันทึก/ลบไม่ได้)</span>
+          </label>
+        </div>
+        <div class="form-check form-switch mb-3">
+          <input class="form-check-input" type="checkbox" id="uCashReceiver" checked>
+          <label class="form-check-label fw-semibold" for="uCashReceiver">
+            แสดงในรายชื่อผู้รับเงินสด
+            <div class="text-muted fw-normal small">ปิด = ผู้ใช้ทั่วไปจะไม่เห็นชื่อนี้ในรายชื่อผู้รับเงิน (ผู้ดูแลระบบยังเห็น) และถ้าผู้ใช้นี้ไม่ใช่ผู้ดูแลระบบ จะบันทึกผู้รับเงินได้เฉพาะตัวเอง</div>
           </label>
         </div>
       </div>
@@ -197,7 +204,7 @@
 </div>
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
-<script src="utils.js?v=1.0.228"></script><script src="db.js?v=1.0.228"></script><script src="auth.js?v=1.0.228"></script><script src="nav.js?v=1.0.228"></script>
+<script src="utils.js?v=1.0.229"></script><script src="db.js?v=1.0.229"></script><script src="auth.js?v=1.0.229"></script><script src="nav.js?v=1.0.229"></script>
 <script>
 const session = Auth.require();
 if (!Auth.isAdmin()) { alert('เฉพาะผู้ดูแลระบบเท่านั้น'); location.href='dashboard.html'; }
@@ -232,6 +239,9 @@ function render() {
       <td class="text-center">
         <span class="badge ${u.active?'bg-success':'bg-secondary'}">${u.active?'ใช้งาน':'ระงับ'}</span>
       </td>
+      <td class="text-center">${u.cashReceiver === false
+        ? '<i class="bi bi-eye-slash text-muted" title="ซ่อนจากรายชื่อผู้รับเงินสด (ผู้ดูแลระบบยังเห็น)"></i>'
+        : '<i class="bi bi-cash-coin text-success" title="แสดงในรายชื่อผู้รับเงินสด"></i>'}</td>
       <td>${Utils.formatDateTH(u.createdAt)}</td>
       <td>${lastLogin ? Utils.formatDateTimeTH(lastLogin.timestamp) : '<span class="text-muted">-</span>'}</td>
       <td class="text-center">
@@ -263,11 +273,14 @@ function openModal(id) {
     document.getElementById('uRole').value = u.role;
     document.getElementById('uActive').checked = u.active;
     document.getElementById('uMobileViewOnly').checked = u.mobileViewOnly === true;
+    // absent = shown, so every user created before this switch existed stays in the list
+    document.getElementById('uCashReceiver').checked = u.cashReceiver !== false;
   } else {
     ['uUsername','uName','uPassword'].forEach(f => document.getElementById(f).value='');
     document.getElementById('uRole').value = 'user';
     document.getElementById('uActive').checked = true;
     document.getElementById('uMobileViewOnly').checked = false;
+    document.getElementById('uCashReceiver').checked = true;
   }
   modal.show();
 }
@@ -328,6 +341,7 @@ async function saveUser() {
   const role = document.getElementById('uRole').value;
   const active = document.getElementById('uActive').checked;
   const mobileViewOnly = document.getElementById('uMobileViewOnly').checked;
+  const cashReceiver = document.getElementById('uCashReceiver').checked;
 
   if (!username) { Utils.showAlert('กรุณากรอกชื่อผู้ใช้', 'warning', 'modalAlert'); return; }
   if (!name) { Utils.showAlert('กรุณากรอกชื่อ-นามสกุล', 'warning', 'modalAlert'); return; }
@@ -343,7 +357,7 @@ async function saveUser() {
   if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลังสร้างบัญชี...'; }
 
   try {
-    const data = { username, name, role, active, mobileViewOnly };
+    const data = { username, name, role, active, mobileViewOnly, cashReceiver };
     if (password) data.password = Utils.hashPassword(password);
 
     if (id) {
