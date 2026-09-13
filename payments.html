@@ -232,7 +232,7 @@
           </div>
           <div class="col-12 col-md-6 pay-transfer" style="display:none">
             <label class="form-label fw-semibold">ธนาคารต้นทาง</label>
-            <input type="text" id="paySourceBank" class="form-control" list="bankDatalist" placeholder="พิมพ์ชื่อธนาคาร..." autocomplete="off">
+            <select id="paySourceBank" class="form-select"></select>
           </div>
           <!-- payDestBank / payAccountName hidden — auto-filled by account select -->
           <input type="hidden" id="payDestBank">
@@ -269,7 +269,7 @@
           </div>
           <div class="col-12 col-md-6 pay-cheque" style="display:none">
             <label class="form-label fw-semibold">ธนาคารต้นทาง (ออกเช็ค)</label>
-            <input type="text" id="payChequeBank" class="form-control" list="bankDatalist" placeholder="พิมพ์ชื่อธนาคาร..." autocomplete="off">
+            <select id="payChequeBank" class="form-select"></select>
           </div>
           <div class="col-12 col-md-6 pay-cheque" style="display:none">
             <label class="form-label fw-semibold">วันที่บนเช็ค</label>
@@ -589,7 +589,7 @@
             </div>
             <div class="col-12 col-md-6">
               <label class="form-label fw-semibold">ธนาคารต้นทาง</label>
-              <input type="text" id="multiSourceBank" class="form-control" list="bankDatalist" placeholder="พิมพ์ชื่อธนาคาร..." autocomplete="off">
+              <select id="multiSourceBank" class="form-select"></select>
             </div>
             <div class="col-6 col-md-4">
               <label class="form-label fw-semibold">วันที่โอน (พ.ศ.) <span class="text-danger">*</span></label>
@@ -626,7 +626,7 @@
             </div>
             <div class="col-12 col-md-6">
               <label class="form-label fw-semibold">ธนาคารออกเช็ค</label>
-              <input type="text" id="multiChequeBank" class="form-control" list="bankDatalist" placeholder="พิมพ์ชื่อธนาคาร..." autocomplete="off">
+              <select id="multiChequeBank" class="form-select"></select>
             </div>
             <div class="col-6 col-md-4">
               <label class="form-label fw-semibold">เลขที่เช็ค</label>
@@ -727,7 +727,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.231"></script><script src="db.js?v=1.0.231"></script><script src="auth.js?v=1.0.231"></script><script src="nav.js?v=1.0.231"></script><script src="idb.js?v=1.0.231"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.232"></script><script src="db.js?v=1.0.232"></script><script src="auth.js?v=1.0.232"></script><script src="nav.js?v=1.0.232"></script><script src="idb.js?v=1.0.232"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -923,6 +923,7 @@ window.addEventListener('DOMContentLoaded', () => {
   DB.ready.then(() => {
     document.getElementById('bankDatalist').innerHTML = Utils.bankDatalistOptions();
     _initBankCombos();
+    _initBankSelects();
 
     // Build the searchable customer list for the custom filter dropdown
     _fcList = DB.getCustomers()
@@ -1012,7 +1013,12 @@ document.addEventListener('mousedown', (e) => {
 // Replaces the native <datalist> on all bank inputs so the popup matches the rest
 // of the app (and is dark-mode aware). Body-anchored + position:fixed so it works
 // inside input-groups and modals.
-const _BANK_IDS = ['paySourceBank','payChequeBank','editAcctBank','newAcctBank','multiSourceBank','multiChequeBank'];
+// The four PAYMENT bank fields (customer's bank on a transfer, the cheque's bank) are
+// pick-only <select>s since v1.0.232 — see _initBankSelects. Free typing let "กสิกร" /
+// "kbank" be saved beside "กสิกรไทย (KBANK)", each showing as a separate bank in the
+// ธนาคารต้นทาง filter (exact match). Only the transfer-account manager's own fields
+// still use this searchable text picker.
+const _BANK_IDS = ['editAcctBank','newAcctBank'];
 let _bankDD = null, _bankActiveInput = null, _bankHi = -1;
 function _bankDDEl() {
   if (!_bankDD) {
@@ -1051,6 +1057,22 @@ function _bankKey(e) {
   else if (e.key === 'ArrowUp') { e.preventDefault(); _bankHi = Math.max(_bankHi - 1, 0); items.forEach((el, i) => el.classList.toggle('hi', i === _bankHi)); items[_bankHi]?.scrollIntoView({ block: 'nearest' }); }
   else if (e.key === 'Enter') { const hi = _bankDD.querySelector('.copt.hi') || _bankDD.querySelector('.copt'); if (hi && hi.dataset.name) { e.preventDefault(); _bankPick(hi.dataset.name); } }
   else if (e.key === 'Escape') { _bankClose(); }
+}
+// Fills the four payment bank <select>s from Utils.BANKS. The option VALUE is the full
+// name — exactly what the old text picker saved (_bankPick) — so new payments match old
+// ones in the ธนาคารต้นทาง filter (exact match), the detail view and the print.
+// '' is a real first option because every reset sets .value = ''.
+const _BANK_SELECT_IDS = ['paySourceBank','payChequeBank','multiSourceBank','multiChequeBank'];
+function _bankSelectOptions() {
+  return '<option value="">— เลือกธนาคาร —</option>' +
+    Utils.BANKS.map(b => `<option value="${esc(b.name)}">${esc(b.name)}</option>`).join('');
+}
+function _initBankSelects() {
+  const html = _bankSelectOptions();
+  _BANK_SELECT_IDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el.tagName === 'SELECT') el.innerHTML = html;
+  });
 }
 function _initBankCombos() {
   _BANK_IDS.forEach(id => {
@@ -1697,6 +1719,9 @@ function _toPngBlob(blob) {
 function _payDetailHtml(p) {
   const rows = [];
   const add = (label, val) => { if (val !== undefined && val !== null && val !== '') rows.push([label, val]); };
+  // The record stores only customerId — look the name up, as reports.html does.
+  const _cust = p.customerId ? DB.getCustomerById(p.customerId) : null;
+  add('ลูกค้า',            _cust ? _cust.name : '');
   add('วันที่ชำระ',        p.payDate ? Utils.formatDateTH(p.payDate) : '');
   add('วิธีชำระ',          p.method);
   add('จำนวนเงิน',         '฿' + Utils.formatNumber(p.amount));
