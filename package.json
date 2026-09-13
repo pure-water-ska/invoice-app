@@ -1,6 +1,6 @@
 {
   "name": "wt-invoice",
-  "version": "1.0.230",
+  "version": "1.0.231",
   "description": "ระบบใบกำกับสินค้า — Water Tank Invoice PWA",
   "scripts": {
     "tauri": "tauri",

@@ -782,7 +782,7 @@ var Sync = {
           delete this._pushDebounce[key];
           const val = ((typeof DB !== 'undefined') && DB._cache[key] !== undefined) ? DB._cache[key] : null;
           if (val !== null && val !== undefined) {
-            this._enqueue(key, val);
+            this._enqueue(key, val, { kind: 'unload' });
           }
         }
       }
@@ -793,7 +793,7 @@ var Sync = {
           delete this._docDebounce[key];
           const val = ((typeof DB !== 'undefined') && DB._cache[key] !== undefined) ? DB._cache[key] : null;
           if (val !== null && val !== undefined) {
-            this._enqueue(key, val);
+            this._enqueue(key, val, { kind: 'unload' });
           }
         }
       }
@@ -889,6 +889,7 @@ var Sync = {
           '<span style="width:16px;height:16px;border:2px solid #664d03;border-right-color:transparent;border-radius:50%;display:inline-block;animation:wtspin .7s linear infinite"></span>' +
           '<span><strong>กำลังอัปโหลดข้อมูล…</strong> อย่าเพิ่งปิดหรือรีเฟรชหน้านี้' +
           (activeN > 1 ? ' <span style="opacity:.7">(เหลือ ' + activeN + ' รายการ)</span>' : '') + '</span>';
+        this._renderUploadInfo(false);   // details panel only belongs to the waiting (blue) state
       } else if (queuedN > 0 || stuck || (!this._online && activeN > 0)) {
         // Writes are deferred (quota out / offline). They persist on disk and flush
         // on the next launch — calm blue bar, NOT alarming, safe to close.
@@ -897,15 +898,25 @@ var Sync = {
         bar.style.background = '#cfe2ff'; bar.style.color = '#084298';
         bar.style.borderBottom = '1px solid #b6d4fe';
         const _defN = queuedN || activeN;
+        // The bar's wording is unchanged. The รายละเอียด button (v1.0.231) opens the reason,
+        // what is waiting, and a retry — see _renderUploadInfo / retryPendingUploads.
         bar.innerHTML =
           '<i class="bi bi-clock-history" style="font-size:16px"></i>' +
-          '<span><strong>ค้างอัปโหลด ' + _defN + ' รายการ</strong> — จะอัปโหลดเองเมื่อเน็ต/โควต้ากลับมา · ' +
-          '<strong>ปิดได้</strong> ข้อมูลบันทึกในเครื่องแล้ว</span>';
+          '<span style="flex:1;min-width:0"><strong>ค้างอัปโหลด ' + _defN + ' รายการ</strong> — จะอัปโหลดเองเมื่อเน็ต/โควต้ากลับมา · ' +
+          '<strong>ปิดได้</strong> ข้อมูลบันทึกในเครื่องแล้ว</span>' +
+          '<button type="button" id="wtUploadInfoBtn" style="flex-shrink:0;font-size:13px;padding:3px 10px;border-radius:6px;' +
+          'border:1px solid #084298;background:#fff;color:#084298;cursor:pointer;white-space:nowrap">รายละเอียด ' +
+          '<i class="bi bi-chevron-' + (this._uploadInfoOpen ? 'up' : 'down') + '"></i></button>';
+        const _infoBtn = bar.querySelector('#wtUploadInfoBtn');
+        if (_infoBtn) _infoBtn.onclick = () => { this._uploadInfoOpen = !this._uploadInfoOpen; this._emitUploadState(); };
+        this._renderUploadInfo(true, { activeN, queuedN, stuck });
       } else if (bar.style.display === 'flex') {
         // Flash "done" then auto-hide — only when the bar was actually showing.
         bar.style.background = '#d1e7dd'; bar.style.color = '#0f5132';
         bar.style.borderBottom = '1px solid #badbcc';
         bar.innerHTML = '<i class="bi bi-check-circle-fill me-1"></i><strong>อัปโหลดข้อมูลครบแล้ว</strong> — ทำงานต่อได้เลย';
+        this._uploadInfoOpen = false; this._retryMsg = null;
+        this._renderUploadInfo(false);
         if (hideTimer) clearTimeout(hideTimer);
         hideTimer = setTimeout(() => { bar.style.display = 'none'; }, 2500);
       }
@@ -951,7 +962,7 @@ var Sync = {
     // Reset the ignore window for THIS key only so the listener won't echo our own write
     this._ignoreUntil[key] = Date.now() + this._skipInitialMs;
     if (!this.ready || !this._online) {
-      this._enqueue(key, val);
+      this._enqueue(key, val, { kind: this._online ? 'not-ready' : 'offline' });
       return;
     }
     // ── Debounce collection writes (invoices, payments) ───────────────────────
@@ -1007,7 +1018,7 @@ var Sync = {
             this._pendingWrite[key] = false;
             console.warn('[Sync] push failed, queuing:', key, e.message);
             try { if (typeof DB!=='undefined'&&DB.logError) DB.logError('SYNC-PUSH-FAIL', '['+((typeof APP_VERSION!=='undefined'&&APP_VERSION.version)||'?')+'] '+key+': '+(e.code||'')+' '+(e.message||e)); } catch(_e){}
-            this._enqueue(key, fresh);
+            this._enqueue(key, fresh, this._reasonFromError(e));
             this._badge('pending');
             this._emitUploadState();
           });
@@ -1037,7 +1048,7 @@ var Sync = {
         .catch(e => {
           console.warn('[Sync] push failed, queuing:', key, e.message);
             try { if (typeof DB!=='undefined'&&DB.logError) DB.logError('SYNC-PUSH-FAIL', '['+((typeof APP_VERSION!=='undefined'&&APP_VERSION.version)||'?')+'] '+key+': '+(e.code||'')+' '+(e.message||e)); } catch(_e){}
-          this._enqueue(key, fresh);
+          this._enqueue(key, fresh, this._reasonFromError(e));
           this._badge('pending');
           this._emitUploadState();
         });
@@ -2256,10 +2267,23 @@ var Sync = {
   },
 
   // ── Offline queue ──────────────────────────────────────────────────────────
-  _enqueue(key, val) {
+  // `reason` = why this couldn't upload now: { kind: 'unload' | 'offline' | 'not-ready' }
+  // or an error from _reasonFromError(). Shown by the bar's รายละเอียด panel.
+  _enqueue(key, val, reason) {
     const q = this._getQueue();
     const i = q.findIndex(e => e.key === key);
-    const entry = { key, val, ts: Date.now() };
+    const prev = i >= 0 ? q[i] : null;
+    const now = Date.now();
+    let why = reason ? Object.assign({ at: new Date(now).toISOString() }, reason) : (prev ? prev.reason || null : null);
+    // "Page closed before upload" says nothing about WHY it hadn't uploaded — keep an
+    // earlier real error (e.g. quota) rather than hiding it behind that.
+    if (reason && reason.kind === 'unload' && prev && prev.reason && prev.reason.kind === 'error') why = prev.reason;
+    const entry = { key, val, ts: now,
+      // Re-queuing the same key replaces its entry; keep when it FIRST started waiting,
+      // or the panel would say "since 10:15" for data waiting since 09:42.
+      since: (prev && (prev.since || prev.ts)) || now,
+      reason: why,
+      attempts: (prev && prev.attempts) || 0 };
     if (i >= 0) q[i] = entry; else q.push(entry);
     try { localStorage.setItem(this._pendingLsKey, JSON.stringify(q)); } catch {}
     this._badge('pending');
@@ -2279,6 +2303,214 @@ var Sync = {
     try { return JSON.parse(localStorage.getItem(this._pendingLsKey)) || []; } catch { return []; }
   },
 
+  // ── Pending-upload details (the blue bar's รายละเอียด button, v1.0.231) ──────────
+  // Users saw "ค้างอัปโหลด N รายการ" with no way to learn what was waiting or why. Every
+  // queued entry now carries its reason; these helpers explain it in Thai and offer a
+  // retry. Errors from Firebase are HTML-escaped before display.
+  _reasonFromError(e) {
+    return { kind: 'error',
+      code: String((e && e.code) || '').slice(0, 80),
+      message: String((e && e.message) || e || '').slice(0, 300),
+      // Date.now(), as in _enqueue — one clock, so reasons order correctly against each
+      // other (and a test that pins Date.now pins this too; `new Date()` ignores it).
+      at: new Date(Date.now()).toISOString() };
+  },
+
+  // A retry of the queue failed: record it on that entry (the queue is otherwise left
+  // exactly as it was, so the data still uploads later).
+  _noteQueueFailure(key, e) {
+    try {
+      const q = this._getQueue();
+      const it = q.find(x => x && x.key === key);
+      if (!it) return;
+      it.reason = this._reasonFromError(e);
+      it.attempts = (it.attempts || 0) + 1;
+      localStorage.setItem(this._pendingLsKey, JSON.stringify(q));
+    } catch {}
+  },
+
+  _escHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g,
+      c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  },
+
+  _UPLOAD_KEY_NAMES: {
+    wt_invoices: 'ใบกำกับ', wt_payments: 'การชำระเงิน', wt_settings: 'ตั้งค่า',
+    wt_transfer_accounts: 'บัญชีรับโอน', wt_returns: 'รายการคืน', wt_versions: 'บันทึกเวอร์ชัน',
+    wt_pay_methods: 'วิธีชำระเงิน', wt_cap_colors: 'สีฝาขวด', wt_cap_receipts: 'รับฝาขวด',
+    wt_cap_deductions: 'ตัดฝาขวด', wt_price_history: 'ประวัติราคา', wt_inv_counter: 'เลขที่ใบกำกับ',
+  },
+  _uploadKeyName(k) { return this._UPLOAD_KEY_NAMES[k] || String(k || '').replace(/^wt_/, ''); },
+
+  _fmtTime(ms, now) {
+    const d = new Date(ms);
+    if (!ms || isNaN(d.getTime())) return '-';
+    let t;
+    try { t = d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }); } catch { t = d.toTimeString().slice(0, 5); }
+    const sameDay = new Date(now || Date.now()).toDateString() === d.toDateString();
+    const datePart = sameDay ? '' : ((typeof Utils !== 'undefined' && Utils.formatDateTH) ? Utils.formatDateTH(d.toISOString()) + ' ' : '');
+    return datePart + t + ' น.';
+  },
+
+  // Firestore's free daily quota resets at midnight Pacific time. Worked out from the
+  // zone rather than hard-coded, so it follows daylight saving (≈14:00 Thai in summer,
+  // ≈15:00 in winter). Returns epoch ms, or null if the zone isn't available.
+  _quotaResetAt(nowMs) {
+    try {
+      const now = new Date(nowMs);
+      const f = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hourCycle: 'h23',
+        year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const p = {};
+      f.formatToParts(now).forEach(x => { p[x.type] = x.value; });
+      const wallAsUtc = Date.UTC(+p.year, +p.month - 1, +p.day, (+p.hour) % 24, +p.minute, +p.second);
+      const offset = wallAsUtc - Math.floor(now.getTime() / 1000) * 1000;   // LA − UTC, e.g. −7 h
+      return Date.UTC(+p.year, +p.month - 1, +p.day + 1, 0, 0, 0) - offset;
+    } catch { return null; }
+  },
+
+  // Returns HTML (static text plus escaped error details).
+  _describeReason(r, ctx) {
+    const c = ctx || {};
+    const esc = s => this._escHtml(s);
+    if (!r) return 'ไม่มีข้อมูลสาเหตุ (บันทึกไว้ก่อนเวอร์ชันนี้) — จะลองอัปโหลดใหม่เอง';
+    if (r.kind === 'unload') return 'ปิดหรือรีเฟรชหน้าก่อนอัปโหลดเสร็จ — จะอัปโหลดเองเมื่อเปิดหน้าถัดไป';
+    if (r.kind === 'offline') return 'เครื่องนี้ออฟไลน์ — จะอัปโหลดเองเมื่อต่อเน็ตได้';
+    if (r.kind === 'not-ready') {
+      return 'ยังเชื่อมต่อ Firebase ไม่สำเร็จ' + (c.initError ? ': <code>' + esc(c.initError) + '</code>' : ' (กำลังเชื่อมต่อ…)') +
+             ' — จะอัปโหลดเองเมื่อเชื่อมต่อได้';
+    }
+    const code = String(r.code || '').replace(/^firestore\//, '').toLowerCase();
+    const msg  = String(r.message || '');
+    if (code === 'resource-exhausted' || /quota/i.test(msg)) {
+      return 'Firestore ปฏิเสธการเขียน: <code>resource-exhausted</code> — โควต้าฟรีของวันนี้หมด' +
+             (c.quotaTime ? ' จะกลับมาประมาณ ' + esc(c.quotaTime) + ' น.' : '') + ' แล้วอัปโหลดเอง';
+    }
+    if (code === 'permission-denied') return 'Firestore ไม่อนุญาตให้เขียน: <code>permission-denied</code> — แจ้งผู้ดูแลระบบ (ตั้งค่า → Troubleshoot)';
+    if (code === 'unauthenticated') return 'ยังไม่ได้เข้าสู่ระบบ Firebase: <code>unauthenticated</code> — ลองออกจากระบบแล้วเข้าใหม่';
+    if (code === 'unavailable' || code === 'deadline-exceeded' || /network|offline|timeout/i.test(msg)) {
+      return 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้' + (code ? ' (<code>' + esc(code) + '</code>)' : '') + ' — เน็ตหลุดหรือช้า จะลองใหม่เอง';
+    }
+    if (code === 'invalid-argument' && /size|payload|exceed|too large/i.test(msg)) {
+      return 'ข้อมูลใหญ่เกินกว่าที่ Firestore รับได้ในครั้งเดียว (<code>invalid-argument</code>) — แจ้งผู้ดูแลระบบ';
+    }
+    return 'อัปโหลดไม่สำเร็จ: <code>' + esc(code || msg.slice(0, 140) || 'unknown') + '</code> — จะลองใหม่เอง';
+  },
+
+  // The one-line "สาเหตุ" for the panel: the CURRENT blocker first (offline, not
+  // connected), then the newest recorded error, then "server not acknowledging".
+  _uploadHeadline(ctx) {
+    let initError = '';
+    try { const le = JSON.parse(localStorage.getItem('wt_sync_last_error') || 'null'); initError = (le && le.msg) || ''; } catch {}
+    let quotaTime = '';
+    try { const at = this._quotaResetAt(Date.now()); if (at) quotaTime = new Date(at).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }); } catch {}
+    const c = { initError, quotaTime };
+    if (!this._online) return this._describeReason({ kind: 'offline' }, c);
+    if (!this.ready)   return this._describeReason({ kind: 'not-ready' }, c);
+    const when = e => (e.reason && Date.parse(e.reason.at)) || e.ts || 0;
+    // A real Firebase error explains far more than "page closed" or "was offline", so the
+    // newest ERROR wins even when a page-close entry is newer (seen live: quota error on
+    // invoices hidden behind a later page-close on payments).
+    const isErr = e => (e.reason && e.reason.kind === 'error') ? 1 : 0;
+    const withReason = this._getQueue().filter(e => e && e.reason)
+      .sort((a, b) => (isErr(b) - isErr(a)) || (when(b) - when(a)));
+    if (withReason.length) return this._describeReason(withReason[0].reason, c);
+    if (ctx && ctx.stuck) return 'ส่งแล้วแต่เซิร์ฟเวอร์ไม่ยืนยันเกิน 12 วินาที — มักเกิดจากโควต้าหมดหรือเน็ตช้า · จะอัปโหลดเองเมื่อพร้อม';
+    return this._describeReason(null, c);
+  },
+
+  // One row per waiting data type: queued entries first, then writes still in flight.
+  _uploadInfoRows(now) {
+    const rows = [], seen = new Set();
+    for (const e of this._getQueue()) {
+      if (!e || !e.key) continue;
+      seen.add(e.key);
+      const r = e.reason || null;
+      let detail = 'ค้างตั้งแต่ ' + this._fmtTime(e.since || e.ts, now);
+      if (r && r.kind === 'error')          detail += ' · ลองล่าสุด ' + this._fmtTime(Date.parse(r.at), now) + ' ไม่สำเร็จ';
+      else if (r && r.kind === 'unload')    detail += ' · ปิดหน้าก่อนอัปโหลดเสร็จ';
+      else if (r && r.kind === 'offline')   detail += ' · ออฟไลน์ขณะบันทึก';
+      else if (r && r.kind === 'not-ready') detail += ' · ยังไม่ได้เชื่อมต่อ';
+      rows.push({ key: e.key, name: this._uploadKeyName(e.key), detail });
+    }
+    const inFlight = Object.keys(this._pendingWrite || {}).filter(k => this._pendingWrite[k])
+      .concat(Object.keys(this._docDebounce || {}).filter(k => this._docDebounce[k] != null));
+    for (const k of inFlight) {
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const secs = this._activeSince ? Math.max(0, Math.round((now - this._activeSince) / 1000)) : 0;
+      rows.push({ key: k, name: this._uploadKeyName(k), detail: 'กำลังส่ง · รอยืนยันมา ' + secs + ' วินาที' });
+    }
+    return rows;
+  },
+
+  _renderUploadInfo(show, ctx) {
+    let el = document.getElementById('wtUploadInfo');
+    if (!show || !this._uploadInfoOpen) { if (el) el.style.display = 'none'; return; }
+    if (!el) {
+      if (!document.body) return;
+      el = document.createElement('div');
+      el.id = 'wtUploadInfo';
+      el.style.cssText = 'position:fixed;right:12px;z-index:1101;width:min(560px,calc(100vw - 24px));max-height:65vh;overflow:auto;' +
+        'background:var(--bs-body-bg,#fff);color:var(--bs-body-color,#212529);border:1px solid var(--bs-border-color,#dee2e6);' +
+        'border-radius:12px;padding:12px 14px;box-shadow:0 6px 18px rgba(0,0,0,.15);font-family:Sarabun,sans-serif;font-size:14px';
+      document.body.appendChild(el);
+    }
+    const bar = document.getElementById('wtUploadBar');
+    el.style.top = ((bar && bar.getBoundingClientRect ? bar.getBoundingClientRect().bottom : 100) + 4) + 'px';
+    const esc = s => this._escHtml(s);
+    const rows = this._uploadInfoRows(Date.now());
+    const m = this._retryMsg;
+    const msgHtml = m
+      ? '<span class="' + (m.state === 'ok' ? 'text-success' : m.state === 'bad' ? 'text-danger' : 'text-muted') + '">' + m.text + '</span>'
+      : (!this._online ? '<span class="text-muted">ต่ออินเทอร์เน็ตก่อน แล้วจะอัปโหลดเอง</span>' : '');
+    const canRetry = this._online && !this._retrying;
+    el.innerHTML =
+      '<div class="small text-muted mb-1">สาเหตุ</div>' +
+      '<div class="alert alert-warning py-2 px-2 small mb-2">' + this._uploadHeadline(ctx || {}) + '</div>' +
+      '<div class="small text-muted mb-1">ข้อมูลที่รออัปโหลด</div>' +
+      (rows.length
+        ? '<table class="table table-sm small mb-2"><tbody>' + rows.map(r =>
+            '<tr><td>' + esc(r.name) + '</td><td class="text-end text-muted">' + esc(r.detail) + '</td></tr>').join('') + '</tbody></table>'
+        : '<div class="small text-muted mb-2">—</div>') +
+      '<div class="small text-muted mb-1">ข้อมูลปลอดภัยไหม</div>' +
+      '<div class="alert alert-success py-2 px-2 small mb-2">ข้อมูลบันทึกในเครื่องนี้แล้ว ไม่หาย และจะอัปโหลดเองเมื่อพร้อม · ' +
+        '<strong>ห้ามล้างข้อมูลเบราว์เซอร์/แคช</strong> ของเครื่องนี้จนกว่าจะอัปโหลดครบ</div>' +
+      '<div class="d-flex align-items-center gap-2 flex-wrap">' +
+        '<button type="button" class="btn btn-sm btn-primary" id="wtUploadRetryBtn"' + (canRetry ? '' : ' disabled') + '>' +
+          (this._retrying ? '<span class="spinner-border spinner-border-sm me-1"></span>' : '<i class="bi bi-arrow-repeat me-1"></i>') +
+          'ลองอัปโหลดอีกครั้ง</button>' +
+        '<span class="small">' + msgHtml + '</span>' +
+      '</div>';
+    el.style.display = 'block';
+    const b = el.querySelector('#wtUploadRetryBtn');
+    if (b) b.onclick = () => this.retryPendingUploads();
+  },
+
+  // "ลองอัปโหลดอีกครั้ง". Reuses flushNow() — the same routine Settings' อัปโหลดที่ค้าง
+  // and logout use — then reports success or the new reason. Guarded against a
+  // double-click; does nothing useful offline or before sync is connected, and says so.
+  async retryPendingUploads() {
+    if (this._retrying) return;
+    this._retrying = true;
+    this._retryMsg = { state: 'busy', text: 'กำลังลองอัปโหลด…' };
+    this._emitUploadState();
+    try {
+      if (!this._online) { this._retryMsg = { state: 'bad', text: 'เครื่องนี้ออฟไลน์ — ต่ออินเทอร์เน็ตก่อน แล้วจะอัปโหลดเอง' }; return; }
+      if (!this.ready)   { this._retryMsg = { state: 'bad', text: 'ยังเชื่อมต่อ Firebase ไม่ได้ — ลองออกจากระบบแล้วเข้าใหม่ หรือแจ้งผู้ดูแลระบบ' }; return; }
+      await this.flushNow();
+      if (!this._getQueue().length && !this._uploadActiveCount()) {
+        this._retryMsg = { state: 'ok', text: 'อัปโหลดสำเร็จ ✓ — ข้อมูลครบแล้ว' };
+      } else {
+        this._retryMsg = { state: 'bad', text: 'ยังไม่สำเร็จ — ' + this._uploadHeadline({}) };
+      }
+    } catch (e) {
+      this._retryMsg = { state: 'bad', text: 'ยังไม่สำเร็จ — ' + this._describeReason(this._reasonFromError(e), {}) };
+    } finally {
+      this._retrying = false;
+      this._emitUploadState();
+    }
+  },
+
   // Flush queue without requiring this.ready — used during init before ready is set
   async _flushQueueNow() {
     if (!this._online) return;
@@ -2295,6 +2527,7 @@ var Sync = {
         this._lsWrite(key, val);
       } catch (e) {
         console.warn('[Sync] pre-flush error:', key, e.message);
+        this._noteQueueFailure(key, e);
         return; // stop on error, queue stays intact for _flushQueue()
       }
     }
@@ -2313,6 +2546,8 @@ var Sync = {
         await this._writeKey(key, val);
       } catch (e) {
         console.warn('[Sync] flush error:', key, e.message);
+        this._noteQueueFailure(key, e);
+        this._emitUploadState();
         try { if (typeof DB!=='undefined'&&DB.logError) DB.logError('SYNC-FLUSH-FAIL', '['+((typeof APP_VERSION!=='undefined'&&APP_VERSION.version)||'?')+'] '+key+': '+(e.code||'')+' '+(e.message||e)); } catch(_e){}
         return; // stop on error, retry next time
       }
@@ -2338,7 +2573,7 @@ var Sync = {
           this._pendingWrite[key] = true;
           writes.push(this._writeKey(key, fresh)
             .then(() => { this._pendingWrite[key] = false; })
-            .catch(() => { this._pendingWrite[key] = false; this._enqueue(key, fresh); }));
+            .catch(e => { this._pendingWrite[key] = false; this._enqueue(key, fresh, this._reasonFromError(e)); }));
         }
       }
     }
@@ -2346,7 +2581,7 @@ var Sync = {
       if (this._docDebounce[key] != null) {
         clearTimeout(this._docDebounce[key]); this._docDebounce[key] = null;
         const fresh = grab(key);
-        if (fresh != null) writes.push(this._writeKey(key, fresh).catch(() => this._enqueue(key, fresh)));
+        if (fresh != null) writes.push(this._writeKey(key, fresh).catch(e => this._enqueue(key, fresh, this._reasonFromError(e))));
       }
     }
     this._emitUploadState();
