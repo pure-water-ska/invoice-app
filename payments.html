@@ -156,7 +156,10 @@
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">บันทึกชำระเงิน — <span id="payInvNum"></span></h5>
+        <div>
+          <h5 class="modal-title">บันทึกชำระเงิน — <span id="payInvNum"></span></h5>
+          <div id="payCustName" class="small text-muted mt-1" style="display:none"><i class="bi bi-person me-1"></i><span id="payCustNameText"></span></div>
+        </div>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
@@ -727,7 +730,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.232"></script><script src="db.js?v=1.0.232"></script><script src="auth.js?v=1.0.232"></script><script src="nav.js?v=1.0.232"></script><script src="idb.js?v=1.0.232"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.233"></script><script src="db.js?v=1.0.233"></script><script src="auth.js?v=1.0.233"></script><script src="nav.js?v=1.0.233"></script><script src="idb.js?v=1.0.233"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -1316,6 +1319,11 @@ function openPayModal(invNum, custId) {
   document.getElementById('payInvNum').textContent     = invNum;
   document.getElementById('payInvNumHidden').value     = invNum;
   document.getElementById('payCustIdHidden').value     = custId;
+  // Customer under the title. Set as TEXT so any name renders safely, and cleared +
+  // hidden when unknown — the modal is reused, so a previous invoice's name must not stay.
+  const _pcName = (DB.getCustomerById(custId) || {}).name || '';
+  document.getElementById('payCustNameText').textContent = _pcName;
+  document.getElementById('payCustName').style.display = _pcName ? '' : 'none';
   document.getElementById('modalAlert').innerHTML      = '';
   document.getElementById('payNote').value             = '';
   (function(){ const n=new Date();

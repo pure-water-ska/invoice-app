@@ -89,5 +89,36 @@ console.log('\nlooked up the same way as elsewhere');
   t('and is added through the same add() as every other row', /add\('ลูกค้า',\s+_cust \? _cust\.name : ''\);/.test(fnSrc));
 }
 
+// Follow-up request: "in payment record pane, it should have customer name under
+// บันทึกชำระเงิน - ddmmyy-000" — a second line in the payment window's header.
+console.log('\nthe payment window header names the customer');
+{
+  t('the header has a customer line under the title',
+    /<h5 class="modal-title">บันทึกชำระเงิน — <span id="payInvNum"><\/span><\/h5>\s*\r?\n\s*<div id="payCustName"[^>]*>/.test(html));
+  t('it starts hidden, so an empty line never shows', /<div id="payCustName"[^>]*style="display:none"/.test(html));
+  const openSrc = sliceBalanced(html, 'function openPayModal(invNum, custId) {');
+  const lines = (openSrc.match(/const _pcName[\s\S]*?payCustName'\)\.style\.display = [^;]+;/) || [])[0];
+  t('openPayModal fills it', !!lines);
+  t('after the invoice number and customer id are set',
+    openSrc.indexOf("payCustIdHidden').value") >= 0 && openSrc.indexOf("payCustIdHidden').value") < openSrc.indexOf('const _pcName'));
+  const run = (custId, customers, els) => {
+    els = els || { payCustNameText: { textContent: '', innerHTML: '' }, payCustName: { style: { display: 'none' } } };
+    new Function('DB', 'document', 'custId', lines)(
+      { getCustomerById: id => customers.find(c => c.id === id) || null }, { getElementById: id => els[id] }, custId);
+    return els;
+  };
+  const a = run('c1', CUSTS);
+  t("shows the customer's name", a.payCustNameText.textContent === 'บจก.โกลด์สตาร์วอเตอร์', a.payCustNameText.textContent);
+  t('and makes the line visible', a.payCustName.style.display === '');
+  const b = run('c2', CUSTS);
+  t('the name is set as text, never as HTML', b.payCustNameText.textContent === CUSTS[1].name && b.payCustNameText.innerHTML === '');
+  const c = run('gone', CUSTS);
+  t('unknown customer: the line stays hidden and empty', c.payCustName.style.display === 'none' && c.payCustNameText.textContent === '');
+  const same = run('c1', CUSTS);
+  run('gone', CUSTS, same);             // the modal is reused for the next invoice
+  t("reopening for an unknown customer clears the previous invoice's name",
+    same.payCustNameText.textContent === '' && same.payCustName.style.display === 'none');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
