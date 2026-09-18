@@ -37,7 +37,10 @@ if (!window.LocalFolderSync) {
     // wt_device_id goes through DB._set (so it WAS being mirrored — the actual leak).
     // wt_device_label is written straight to localStorage by settings.js and never reaches
     // DB._set, so it cannot leak this way; it is listed for safety in case that changes.
-    var DEVICE_LOCAL_KEYS = ['wt_device_id', 'wt_device_label'];
+    // wt_price_pending / wt_price_baseline (v1.0.234) are this device's own unsent price
+    // changes and its view of the server — restoring another device's (or an old) copy
+    // would resend stale prices or hide real differences.
+    var DEVICE_LOCAL_KEYS = ['wt_device_id', 'wt_device_label', 'wt_price_pending', 'wt_price_baseline'];
 
     var IDB_HANDLE_KEY = 'local_folder_handle';
     var DEBOUNCE_MS    = 3000;

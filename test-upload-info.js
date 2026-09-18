@@ -41,6 +41,7 @@ const MARKERS = [
   '_escHtml(s) {', '_UPLOAD_KEY_NAMES: {', '_uploadKeyName(k) {', '_fmtTime(ms, now) {',
   '_quotaResetAt(nowMs) {', '_describeReason(r, ctx) {', '_uploadHeadline(ctx) {', '_uploadInfoRows(now) {',
   '_renderUploadInfo(show, ctx) {', 'async retryPendingUploads() {', 'async _flushQueue() {',
+  '_extraPending() {',
 ];
 const methodSrc = MARKERS.map(m => sliceBalanced(src, m)).join(',\n');
 

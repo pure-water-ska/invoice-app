@@ -235,6 +235,24 @@ these files — **not** `sync.js`:
 > flattens on read. Same interface as the old module (`init`/`onLocalChange`/
 > `diagnose`); db.js hook + nav wiring unchanged. Round-trip is covered by
 > `test-pricing-roundtrip.js` (run `node test-pricing-roundtrip.js`).
+>
+> **Durable per-rule writes (v1.0.234).** Measured live: 67 prices no longer matched
+> the last value saved on pricing.html (41 saves never reached the server, 26 were
+> overwritten). Causes: changes made while sync wasn't ready waited in memory and a
+> rejected commit was only logged (lost on leaving the page); a server snapshot
+> replaced local wholesale (unsent price flipped back); every write was
+> `set({rules: ALL rules of the product}, {merge:false})` (a stale device reverted
+> every other customer's newer price for that product). Now: `onLocalChange` diffs
+> local against a per-rule **baseline** of the server as last seen
+> (`wt_price_baseline`, ruleId → [productId, hash]) — never against db's "prev" — and
+> persists the differences to a durable queue (`wt_price_pending`, both via
+> `DB.setLocalOnly`, so HDD-backed on desktop; excluded from LocalFolderSync). Ops are
+> sent as field-level merges (`{rules:{<id>: rule | FieldValue.delete()}}, {merge:true}`)
+> and retired only on server ack; queued ops are overlaid on every snapshot; retried on
+> init / `online` / snapshot / the pending bar's retry / logout (`Sync.flushNow`). The
+> pending bar lists them as "ราคาสินค้า (N รายการ)" via `Sync._extraPending()`.
+> First run on a device initialises the baseline from local (never empty — that would
+> re-upload everything from a stale device). Covered by `test-pricing-durable.js`.
 
 **The model (one rule): the Firestore collection is the single source of truth.**
 - A live `onSnapshot` listener turns each **server** snapshot into the local array
@@ -280,6 +298,8 @@ these files — **not** `sync.js`:
   correctly against it). Implemented in THREE files — `collection-sync.js`,
   `customer-sync.js`, AND `pricing-grouped-sync.js` (the last is hand-written, NOT
   a CollectionSync instance; it's easy to forget and was missed on the first pass).
+  Since v1.0.234 pricing only skips the re-attach — it no longer caches a
+  fingerprint, because its write diffs use the durable `wt_price_baseline` instead.
   Tradeoff: cross-device updates for these collections can be up to 60 s stale on
   a page that skipped attaching. `diagnose()` prints "listener attached: false
   (trust window active)" so this state is visible on-screen.

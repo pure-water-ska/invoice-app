@@ -820,6 +820,7 @@ var Sync = {
     for (const k in this._pushDebounce)  if (this._pushDebounce[k] != null) n++;
     for (const k in this._docDebounce)   if (this._docDebounce[k] != null) n++;
     try { n += this._getQueue().length; } catch {}
+    n += this._extraPending().length;
     return n;
   },
   isUploading() { return this._uploadBusyCount() > 0; },
@@ -833,9 +834,24 @@ var Sync = {
     for (const k in this._pendingWrite) if (this._pendingWrite[k]) n++;
     for (const k in this._pushDebounce)  if (this._pushDebounce[k] != null) n++;
     for (const k in this._docDebounce)   if (this._docDebounce[k] != null) n++;
+    if (window.PricingSync && PricingSync._flushing) n++;   // price changes being sent right now
     return n;
   },
-  _queuedCount() { try { return this._getQueue().length; } catch { return 0; } },
+  // Pending uploads kept OUTSIDE wt_sync_pending — price changes queue in their own store
+  // (pricing-grouped-sync.js, v1.0.234). One entry shaped like a queue entry, so the bar
+  // can count, list, explain and retry them alongside everything else.
+  _extraPending() {
+    try {
+      const s = window.PricingSync && typeof PricingSync.pendingSummary === 'function' && PricingSync.pendingSummary();
+      return s ? [s] : [];
+    } catch { return []; }
+  },
+  _queuedCount() {
+    let n = 0;
+    try { n = this._getQueue().length; } catch {}
+    // while being sent it counts as uploading (_uploadActiveCount), not as waiting
+    return n + this._extraPending().filter(e => !e.flushing).length;
+  },
   _emitUploadState() {
     try {
       window.dispatchEvent(new CustomEvent('sync:uploadstate',
@@ -2335,7 +2351,7 @@ var Sync = {
   },
 
   _UPLOAD_KEY_NAMES: {
-    wt_invoices: 'ใบกำกับ', wt_payments: 'การชำระเงิน', wt_settings: 'ตั้งค่า',
+    wt_invoices: 'ใบกำกับ', wt_payments: 'การชำระเงิน', wt_settings: 'ตั้งค่า', wt_pricing: 'ราคาสินค้า',
     wt_transfer_accounts: 'บัญชีรับโอน', wt_returns: 'รายการคืน', wt_versions: 'บันทึกเวอร์ชัน',
     wt_pay_methods: 'วิธีชำระเงิน', wt_cap_colors: 'สีฝาขวด', wt_cap_receipts: 'รับฝาขวด',
     wt_cap_deductions: 'ตัดฝาขวด', wt_price_history: 'ประวัติราคา', wt_inv_counter: 'เลขที่ใบกำกับ',
@@ -2411,7 +2427,7 @@ var Sync = {
     // newest ERROR wins even when a page-close entry is newer (seen live: quota error on
     // invoices hidden behind a later page-close on payments).
     const isErr = e => (e.reason && e.reason.kind === 'error') ? 1 : 0;
-    const withReason = this._getQueue().filter(e => e && e.reason)
+    const withReason = this._getQueue().concat(this._extraPending()).filter(e => e && e.reason)
       .sort((a, b) => (isErr(b) - isErr(a)) || (when(b) - when(a)));
     if (withReason.length) return this._describeReason(withReason[0].reason, c);
     if (ctx && ctx.stuck) return 'ส่งแล้วแต่เซิร์ฟเวอร์ไม่ยืนยันเกิน 12 วินาที — มักเกิดจากโควต้าหมดหรือเน็ตช้า · จะอัปโหลดเองเมื่อพร้อม';
@@ -2421,7 +2437,7 @@ var Sync = {
   // One row per waiting data type: queued entries first, then writes still in flight.
   _uploadInfoRows(now) {
     const rows = [], seen = new Set();
-    for (const e of this._getQueue()) {
+    for (const e of this._getQueue().concat(this._extraPending())) {
       if (!e || !e.key) continue;
       seen.add(e.key);
       const r = e.reason || null;
@@ -2430,7 +2446,8 @@ var Sync = {
       else if (r && r.kind === 'unload')    detail += ' · ปิดหน้าก่อนอัปโหลดเสร็จ';
       else if (r && r.kind === 'offline')   detail += ' · ออฟไลน์ขณะบันทึก';
       else if (r && r.kind === 'not-ready') detail += ' · ยังไม่ได้เชื่อมต่อ';
-      rows.push({ key: e.key, name: this._uploadKeyName(e.key), detail });
+      const name = this._uploadKeyName(e.key) + (e.count ? ' (' + e.count + ' รายการ)' : '');
+      rows.push({ key: e.key, name, detail });
     }
     const inFlight = Object.keys(this._pendingWrite || {}).filter(k => this._pendingWrite[k])
       .concat(Object.keys(this._docDebounce || {}).filter(k => this._docDebounce[k] != null));
@@ -2498,7 +2515,10 @@ var Sync = {
       if (!this._online) { this._retryMsg = { state: 'bad', text: 'เครื่องนี้ออฟไลน์ — ต่ออินเทอร์เน็ตก่อน แล้วจะอัปโหลดเอง' }; return; }
       if (!this.ready)   { this._retryMsg = { state: 'bad', text: 'ยังเชื่อมต่อ Firebase ไม่ได้ — ลองออกจากระบบแล้วเข้าใหม่ หรือแจ้งผู้ดูแลระบบ' }; return; }
       await this.flushNow();
-      if (!this._getQueue().length && !this._uploadActiveCount()) {
+      if (window.PricingSync && typeof PricingSync._flushPending === 'function') {
+        try { await Promise.race([PricingSync._flushPending(), new Promise(r => setTimeout(r, 8000))]); } catch {}
+      }
+      if (!this._getQueue().length && !this._extraPending().length && !this._uploadActiveCount()) {
         this._retryMsg = { state: 'ok', text: 'อัปโหลดสำเร็จ ✓ — ข้อมูลครบแล้ว' };
       } else {
         this._retryMsg = { state: 'bad', text: 'ยังไม่สำเร็จ — ' + this._uploadHeadline({}) };
@@ -2588,6 +2608,8 @@ var Sync = {
     const timeout = (ms) => new Promise(r => setTimeout(r, ms));
     try { await Promise.race([Promise.all(writes), timeout(8000)]); } catch {}
     try { if (this.ready && this._online) await Promise.race([this._flushQueue(), timeout(5000)]); } catch {}
+    // price changes live in their own durable queue (pricing-grouped-sync.js)
+    try { if (window.PricingSync && PricingSync._flushPending) await Promise.race([PricingSync._flushPending(), timeout(5000)]); } catch {}
     this._emitUploadState();
   },
 
