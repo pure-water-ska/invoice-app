@@ -253,6 +253,21 @@ these files — **not** `sync.js`:
 > pending bar lists them as "ราคาสินค้า (N รายการ)" via `Sync._extraPending()`.
 > First run on a device initialises the baseline from local (never empty — that would
 > re-upload everything from a stale device). Covered by `test-pricing-durable.js`.
+>
+> **ราคากลาง (ทุกลูกค้า) retired (v1.0.235).** Rules with no `customerId` are no longer
+> offered on pricing.html (the picker has no ทุกลูกค้า entry; `savePrice` requires a
+> customer). A one-time, admin-only card (`renderStdRetireCard` / `retireStandardPrices`)
+> converts ONLY the customer × product × delivery combinations actually invoiced at a
+> standard price (`_stdConversions`; the user chose this over all 2,769 theoretical
+> fallbacks) into the customer's own rule — same value unless edited, tier fields copied,
+> a price-history entry each — then deletes every standard rule in one `savePricing`.
+> It flags a standard price whose newest history entry disagrees (`_stdLostSave`).
+> `DB.getPriceAsOf` falls back to standard-price HISTORY only while a standard rule for
+> that product still exists, so a retired price is never charged again. `getPrice` /
+> `getPricingRule` keep their chain — with no standard rules it simply finds none.
+> `_seedPricing` (brand-new installs only) still seeds standard rules locally; they are
+> never uploaded (the server snapshot replaces local). Covered by
+> `test-standard-price-retire.js`.
 
 **The model (one rule): the Firestore collection is the single source of truth.**
 - A live `onSnapshot` listener turns each **server** snapshot into the local array

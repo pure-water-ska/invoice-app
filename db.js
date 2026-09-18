@@ -903,8 +903,13 @@ const DB = {
     };
     let p = latestFor(customerId, shippingMethod);
     if (p == null) p = latestFor(customerId, '');
-    if (p == null) p = latestFor('', shippingMethod);
-    if (p == null) p = latestFor('', '');
+    // ราคากลาง (ทุกลูกค้า) was retired in v1.0.235 — the history keeps every old standard
+    // price forever, so falling back to it would keep charging a retired price. Only fall
+    // back while a standard RULE for this product still exists (i.e. before an admin runs
+    // the conversion on pricing.html); afterwards a customer without a price has none.
+    const hasStd = this.getPricing().some(r => r && r.productId === productId && !r.customerId);
+    if (p == null && hasStd) p = latestFor('', shippingMethod);
+    if (p == null && hasStd) p = latestFor('', '');
     return (p != null) ? p : this.getPrice(productId, customerId, shippingMethod);
   },
 

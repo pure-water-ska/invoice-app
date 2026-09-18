@@ -55,8 +55,12 @@
     </div>
   </div>
 
-  <!-- Customers with no price rules at all — they bill at ราคากลาง. Populated by
-       renderNoPriceBanner(); hidden entirely when every customer has at least one rule. -->
+  <!-- One-time, admin only: retire ราคากลาง (ทุกลูกค้า) — see renderStdRetireCard(). -->
+  <div id="stdRetireCard" class="mb-3" style="display:none"></div>
+
+  <!-- Customers with no price rules at all — since ราคากลาง was retired (v1.0.235) they
+       have NO price until one is set. Populated by renderNoPriceBanner(); hidden
+       entirely when every customer has at least one rule. -->
   <div id="noPriceBanner" class="mb-3" style="display:none"></div>
 
   <div class="card">
@@ -81,7 +85,7 @@
 
   <div class="mt-3 p-3 bg-light rounded small text-muted">
     <i class="bi bi-info-circle me-1"></i>
-    ลำดับความสำคัญ: <strong>ลูกค้า+วิธีจัดส่ง</strong> &gt; ลูกค้าอย่างเดียว &gt; วิธีจัดส่งอย่างเดียว &gt; ราคาเริ่มต้นของสินค้า
+    ลำดับความสำคัญ: <strong>ลูกค้า+วิธีจัดส่ง</strong> &gt; ลูกค้า (ทุกวิธีจัดส่ง) — ไม่มีราคากลางแล้ว ลูกค้าที่ยังไม่มีราคาต้องตั้งราคาก่อนออกใบกำกับ
   </div>
 </div>
 
@@ -103,10 +107,10 @@
           </select>
         </div>
         <div class="mb-3">
-          <label class="form-label fw-semibold">ลูกค้า</label>
+          <label class="form-label fw-semibold">ลูกค้า <span class="text-danger">*</span></label>
           <div class="cust-search-wrap">
             <input type="text" id="priceCustomerSearch" class="form-control" autocomplete="off"
-                   placeholder="— ทุกลูกค้า (ราคากลาง) — พิมพ์เพื่อค้นหา"
+                   placeholder="— เลือกลูกค้า — พิมพ์เพื่อค้นหา"
                    oninput="_pcFilter()" onfocus="_pcOpen()" onkeydown="_pcKey(event)">
             <input type="hidden" id="priceCustomer">
             <div id="priceCustDropdown" class="cust-dd" style="display:none"></div>
@@ -186,7 +190,7 @@
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.234"></script><script src="db.js?v=1.0.234"></script><script src="auth.js?v=1.0.234"></script><script src="nav.js?v=1.0.234"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.235"></script><script src="db.js?v=1.0.235"></script><script src="auth.js?v=1.0.235"></script><script src="nav.js?v=1.0.235"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -231,7 +235,8 @@ let _pcHi   = -1;
 function _pcRefresh(){ _pcList = DB.getCustomers().map(c => ({ id: c.id, name: c.name })); }
 function _pcRender(list){
   const dd = document.getElementById('priceCustDropdown');
-  const rows = [{ id: '', name: '— ทุกลูกค้า (ราคากลาง) —' }].concat(list);
+  // No "— ทุกลูกค้า (ราคากลาง) —" entry: standard prices were retired in v1.0.235.
+  const rows = list;
   dd.innerHTML = rows.map((c, i) =>
     `<div class="copt${i === _pcHi ? ' hi' : ''}" data-id="${esc(c.id)}" data-name="${esc(c.name)}"
           onmousedown="_pcSelect('${esc(c.id)}', this.dataset.name)">${esc(c.name)}</div>`
@@ -252,7 +257,7 @@ function _pcSelect(id, name){
   _pcClose();
   _pcUpdateSuspendBlock(id);
 }
-// Set both the hidden id and the visible text from a customer id ('' = ทุกลูกค้า)
+// Set both the hidden id and the visible text from a customer id ('' = none chosen)
 function _pcSetById(custId){
   const c = custId ? _pcList.find(x => x.id === custId) : null;
   document.getElementById('priceCustomer').value       = c ? c.id : '';
@@ -260,7 +265,7 @@ function _pcSetById(custId){
   _pcUpdateSuspendBlock(custId);
 }
 // Blocks saving a customer-specific price rule for a suspended customer.
-// The customer-independent "ทุกลูกค้า" base price (custId='') is never blocked.
+// No customer chosen (custId='') is not blocked here — savePrice rejects it instead.
 function _pcUpdateSuspendBlock(custId){
   const alertDiv = document.getElementById('priceSuspendAlert');
   const saveBtn  = document.getElementById('pricingSaveBtn');
@@ -278,7 +283,8 @@ function _pcUpdateSuspendBlock(custId){
   }
 }
 // Safety net at save time: if the user typed an exact customer name but didn't click
-// a result, resolve it to that id. Unmatched text falls back to ทุกลูกค้า (id='').
+// a result, resolve it to that id. Unmatched text leaves no customer chosen, which
+// savePrice rejects (there is no ทุกลูกค้า price to fall back to any more).
 function _pcCommit(){
   if (document.getElementById('priceCustomer').value) return; // already bound to an id
   const txt = document.getElementById('priceCustomerSearch').value.trim().toLowerCase();
@@ -355,6 +361,7 @@ function populateSelects() {
 }
 
 function render() {
+  renderStdRetireCard();
   const fp = document.getElementById('filterProduct').value;
   const fc = document.getElementById('filterCustomer').value.trim().toLowerCase();
   const fs = document.getElementById('filterShipping').value;
@@ -385,7 +392,7 @@ function render() {
   const pg    = document.getElementById('pricePagination');
   if (list.length === 0) {
     // Distinguish "this customer exists but has no rules" from "nothing matched at all".
-    // A customer with no rules is legitimate — they just bill at ราคากลาง — but the bare
+    // A customer with no rules has NO price at all (ราคากลาง retired, v1.0.235) — the bare
     // "ไม่พบข้อมูลราคา" read as though the CUSTOMER was missing (reported for
     // เขากลอยการค้า, who is present in DB.getCustomers() and in the picker, with 0 of the
     // 3,277 rules). Only fires when the typed text resolves to a real customer; an
@@ -394,8 +401,8 @@ function render() {
     tbody.innerHTML = (hit.length === 1)
       ? `<tr><td colspan="7" class="text-center py-4">
            <i class="bi bi-tag text-muted d-block mb-2" style="font-size:26px"></i>
-           <div style="font-size:13.5px">ลูกค้า <strong>${esc(hit[0].name)}</strong> ยังไม่มีราคาเฉพาะ</div>
-           <div class="small text-muted mb-3">ตอนนี้ใช้ราคากลางอยู่ — เพิ่มราคาเฉพาะได้ถ้าต้องการ</div>
+           <div style="font-size:13.5px">ลูกค้า <strong>${esc(hit[0].name)}</strong> ยังไม่มีราคา</div>
+           <div class="small text-muted mb-3">ต้องเพิ่มราคาก่อนออกใบกำกับ — ไม่มีราคากลางแล้ว</div>
            <button class="btn btn-primary btn-sm" onclick="openPriceModalFor('${esc(hit[0].id)}')">
              <i class="bi bi-plus-lg me-1"></i>เพิ่มราคาให้ลูกค้ารายนี้
            </button>
@@ -511,8 +518,128 @@ function setNotifiedDate(priceId, isoDate) {
   Utils.showAlert('<i class="bi bi-check-circle me-1"></i>บันทึกวันที่แจ้งลูกค้าแล้ว');
 }
 
-// Customers holding NO pricing rule at all — they fall back to ราคากลาง when invoiced,
-// which is legitimate but easy to miss: nothing anywhere else in the app points it out,
+// ── Retire ราคากลาง (ทุกลูกค้า) — one-time, admin only (v1.0.235) ────────────────
+// The user asked to remove the ทุกลูกค้า prices while keeping the value for customers who
+// relied on one, and chose to convert ONLY the customer × product × delivery combinations
+// actually invoiced at a standard price (11 at the time) rather than all 2,769 theoretical
+// fallbacks. The conversion writes each as the customer's own rule (same value unless
+// edited here, tier fields copied) with a price-history entry, then deletes every
+// standard rule — one DB.savePricing, which the per-rule sync (v1.0.234) uploads as
+// individual adds/deletes. Afterwards nothing falls back to a standard price (see
+// DB.getPriceAsOf) and this card no longer appears.
+let _stdEdits = {};   // conversion key → value typed in the card (survives re-renders)
+
+function _stdConversions(pricing, invoices, customers) {
+  const std = pricing.filter(r => r && !r.customerId);
+  if (!std.length) return [];
+  const own = new Set(pricing.filter(r => r && r.customerId)
+    .map(r => r.productId + '|' + r.customerId + '|' + (r.shippingMethod || '')));
+  const custName = new Map(customers.filter(c => c && c.id).map(c => [c.id, c.name || '']));
+  const out = new Map();
+  for (const inv of (invoices || [])) {
+    if (!inv || inv.cancelled || !custName.has(inv.customerId)) continue;
+    const ship = inv.shippingMethod || '';
+    for (const it of (inv.items || [])) {
+      if (!it || !it.productId) continue;
+      // the customer already has its own price for this → never used the standard one
+      if (own.has(it.productId + '|' + inv.customerId + '|' + ship) ||
+          own.has(it.productId + '|' + inv.customerId + '|')) continue;
+      const s = std.find(r => r.productId === it.productId && (r.shippingMethod || '') === ship)
+             || std.find(r => r.productId === it.productId && !r.shippingMethod);
+      if (!s) continue;
+      const key = it.productId + '|' + inv.customerId + '|' + (s.shippingMethod || '');
+      const when = inv.createdAt || '';
+      const prev = out.get(key);
+      if (!prev || when > prev.lastDate) {
+        out.set(key, { key, productId: it.productId, customerId: inv.customerId,
+          shippingMethod: s.shippingMethod || '', std: s,
+          lastBilled: parseFloat(it.price), lastInvoice: inv.invoiceNumber || '', lastDate: when });
+      }
+    }
+  }
+  return [...out.values()].sort((a, b) =>
+    (custName.get(a.customerId) || '').localeCompare(custName.get(b.customerId) || '', 'th') ||
+    a.productId.localeCompare(b.productId));
+}
+
+// The newest price-history entry for a standard rule, when it disagrees with the rule —
+// i.e. the standard price itself was one of the saves that never reached the server.
+function _stdLostSave(s) {
+  const h = DB.getPriceHistoryFor(s.productId, '', s.shippingMethod || '')
+    .slice().sort((a, b) => ((b.changedAt || '') > (a.changedAt || '') ? 1 : -1))[0];
+  return (h && Math.abs(+h.price - +s.price) > 0.001) ? h : null;
+}
+
+function renderStdRetireCard() {
+  const box = document.getElementById('stdRetireCard');
+  if (!box) return;
+  const pricing = DB.getPricing();
+  const stdCount = pricing.filter(r => r && !r.customerId).length;
+  if (!stdCount || !Auth.isAdmin()) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  const customers = DB.getCustomers();
+  const rows = _stdConversions(pricing, DB.getInvoices(), customers);
+  const cname = new Map(customers.map(c => [c.id, c.name]));
+  const pname = id => (DB.getProductById(id) || {}).name || id;
+  const fmt = n => (n == null || isNaN(n)) ? '-' : Utils.formatNumber(n);
+  const nCust = new Set(rows.map(r => r.customerId)).size;
+  box.style.display = '';
+  box.innerHTML = `
+    <div class="card border-warning">
+      <div class="card-body py-2 px-3">
+        <div class="fw-semibold mb-1"><i class="bi bi-arrow-left-right me-1"></i>ยกเลิกราคากลาง (ทุกลูกค้า)</div>
+        <div class="small text-muted mb-2">${rows.length
+          ? `ลูกค้า ${nCust} ราย เคยซื้อสินค้า ${rows.length} รายการโดยใช้ราคากลาง — จะได้ราคาของตัวเองด้วยค่าเดิม (แก้ได้) จากนั้น`
+          : 'ไม่มีลูกค้าที่ใช้ราคากลางอยู่ — '}ลบราคากลางทั้ง ${stdCount} รายการ</div>
+        ${rows.length ? `<div class="table-responsive"><table class="table table-sm small mb-2">
+          <thead><tr><th>ลูกค้า</th><th>สินค้า</th><th>จัดส่ง</th><th class="text-end">เรียกเก็บล่าสุด</th><th class="text-end">ราคาที่จะตั้ง</th></tr></thead>
+          <tbody>${rows.map(r => {
+            const lost = _stdLostSave(r.std);
+            const v = Object.prototype.hasOwnProperty.call(_stdEdits, r.key) ? _stdEdits[r.key] : r.std.price;
+            return `<tr${lost ? ' class="table-warning"' : ''}>
+              <td>${esc(cname.get(r.customerId) || r.customerId)}</td>
+              <td>${esc(pname(r.productId))}${lost ? `<div class="small text-danger"><i class="bi bi-exclamation-triangle me-1"></i>ราคากลาง ${fmt(+r.std.price)} แต่เคยบันทึกเป็น ${fmt(+lost.price)} เมื่อ ${esc(Utils.formatDateTH(lost.changedAt))} — ตรวจก่อนแปลง</div>` : ''}</td>
+              <td>${esc(r.shippingMethod || 'ทุกวิธีจัดส่ง')}</td>
+              <td class="text-end">${fmt(r.lastBilled)}<div class="text-muted" style="font-size:10px">${esc(r.lastInvoice)}</div></td>
+              <td class="text-end"><input type="number" min="0" step="0.01" class="form-control form-control-sm text-end d-inline-block" style="width:90px"
+                   data-stdkey="${esc(r.key)}" value="${esc(v)}" oninput="_stdEdits[this.dataset.stdkey]=this.value"></td>
+            </tr>`; }).join('')}</tbody></table></div>` : ''}
+        <div class="d-flex justify-content-end">
+          <button class="btn btn-sm btn-warning" onclick="retireStandardPrices()"><i class="bi bi-check2-circle me-1"></i>${rows.length ? `แปลง ${rows.length} รายการ และ` : ''}ลบราคากลาง ${stdCount} รายการ</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function retireStandardPrices() {
+  if (!Auth.isAdmin()) return;
+  const pricing = DB.getPricing();
+  const std = pricing.filter(r => r && !r.customerId);
+  if (!std.length) { render(); return; }
+  const rows = _stdConversions(pricing, DB.getInvoices(), DB.getCustomers());
+  const vals = rows.map(r => ({ r, price: parseFloat(Object.prototype.hasOwnProperty.call(_stdEdits, r.key) ? _stdEdits[r.key] : r.std.price) }));
+  if (vals.some(v => isNaN(v.price) || v.price < 0)) { Utils.showAlert('กรุณากรอกราคาให้ครบทุกแถว', 'warning'); return; }
+  if (!await Utils.confirm(`แปลงเป็นราคาของลูกค้า ${rows.length} รายการ และลบราคากลาง (ทุกลูกค้า) ทั้ง ${std.length} รายการ?\n\nทำครั้งเดียว — ลูกค้าที่ยังไม่มีราคาจะไม่มีราคาจนกว่าจะตั้ง`)) return;
+  const now = new Date().toISOString();
+  const list = pricing.filter(r => r && r.customerId);
+  const hist = [];
+  for (const { r, price } of vals) {
+    const { id, customerId, notifiedAt, _by, _byName, _ts, ...rest } = r.std;
+    list.push({ ...rest, id: Utils.uuid(), productId: r.productId, customerId: r.customerId, shippingMethod: r.shippingMethod, price });
+    hist.push({ id: Utils.uuid(), productId: r.productId, customerId: r.customerId, shippingMethod: r.shippingMethod, price,
+      tierQty: rest.tierQty != null ? rest.tierQty : null, tierPrice: rest.tierPrice != null ? rest.tierPrice : null,
+      tierBasis: rest.tierBasis || 'line', changedAt: now, changedBy: session.name, changedByUser: session.username,
+      note: 'แปลงจากราคากลาง' });
+  }
+  DB.savePricing(list);
+  if (hist.length) DB.savePriceHistory(hist.concat(DB.getPriceHistory()));
+  try { DB.logActivity(session.userId, session.username, 'ยกเลิกราคากลาง', { converted: rows.length, removed: std.length }); } catch {}
+  _stdEdits = {};
+  Utils.showAlert(`<i class="bi bi-check-circle me-1"></i>แปลง ${rows.length} รายการ และลบราคากลาง ${std.length} รายการแล้ว`);
+  render();
+}
+
+// Customers holding NO pricing rule at all — since ราคากลาง was retired (v1.0.235) they
+// have no price until one is set, which is easy to miss: nothing anywhere else in the app points it out,
 // and a customer with no rules looks identical to one whose rules failed to sync. Three
 // were found in production (เขากลอยการค้า, น้ำดื่มทวีสุข, มัสยิดกลาง ปริก) only because
 // one of them was reported as "cannot be found" on this page.
@@ -544,7 +671,7 @@ function renderNoPriceBanner(customers) {
     <div class="alert alert-warning py-2 px-3 mb-0">
       <div class="d-flex align-items-center gap-2 flex-wrap">
         <i class="bi bi-exclamation-circle"></i>
-        <span class="small">มีลูกค้า <strong>${none.length} ราย</strong> ที่ยังไม่มีราคาเฉพาะ (ใช้ราคากลาง)</span>
+        <span class="small">มีลูกค้า <strong>${none.length} ราย</strong> ที่ยังไม่มีราคา — ต้องตั้งราคาก่อนออกใบกำกับ</span>
         <button id="noPriceToggle" class="btn btn-sm btn-outline-warning ms-auto" onclick="toggleNoPriceList()">${_npExpanded ? 'ซ่อน' : 'ดูรายชื่อ'}</button>
       </div>
       <div id="noPriceList" style="display:${_npExpanded ? 'block' : 'none'}" class="mt-2 pt-2 border-top">
@@ -606,6 +733,7 @@ function savePrice() {
     return;
   }
   if (!productId) { Utils.showAlert('กรุณาเลือกสินค้า', 'warning', 'modalAlert'); return; }
+  if (!customerId) { Utils.showAlert('กรุณาเลือกลูกค้า — ยกเลิกราคากลาง (ทุกลูกค้า) แล้ว', 'warning', 'modalAlert'); return; }
   if (isNaN(price) || price < 0) { Utils.showAlert('กรุณากรอกราคา', 'warning', 'modalAlert'); return; }
 
   // Optional volume tier — active only when BOTH qty and price are filled

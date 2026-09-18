@@ -120,11 +120,13 @@ console.log('\nEmpty state — names the customer only when the filter resolves 
 
 console.log('\nThe rendered empty state carries the right pieces');
 {
-  const s = src.indexOf('ยังไม่มีราคาเฉพาะ');
+  // v1.0.235 retired ราคากลาง: the message now says the customer has NO price at all
+  const s = src.indexOf('ยังไม่มีราคา</div>');
   t('the named branch exists in render()', s > 0);
   const block = src.slice(s - 400, s + 500);
   t('offers a button to add a price for that customer', block.includes('openPriceModalFor('));
-  t('explains the ราคากลาง fallback', block.includes('ใช้ราคากลางอยู่'));
+  t('says there is no standard price to fall back on', block.includes('ไม่มีราคากลางแล้ว'));
+  t('no longer claims a ราคากลาง fallback', !block.includes('ใช้ราคากลางอยู่'));
   t('the plain message is still the fallback', block.includes('ไม่พบข้อมูลราคา'));
 }
 
