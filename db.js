@@ -922,7 +922,23 @@ const DB = {
   getPaymentsByCustomer(customerId) {
     return this.getPayments().filter(p => p.customerId === customerId);
   },
-  addPayment(p) { const a = this.getPayments(); a.unshift(p); this.savePayments(a); },
+  // Stamps invoiceEditCount — WHICH VERSION of the invoice this payment was recorded
+  // against — so a later edit that moves the total can be told apart from a genuine
+  // under/overpayment. Purely descriptive: getInvoicePaidAmount() still counts every
+  // payment regardless of version, because the money really did change hands.
+  // Stamped centrally here so all callers (payments.html, excel-import, and db.js's own
+  // carryForwardOwedBalance/writeOffRemainder) get it without their own edit.
+  // An explicit value on `p` wins, for any caller that already knows the version.
+  addPayment(p) {
+    const a = this.getPayments();
+    if (p && p.invoiceEditCount == null && p.invoiceNumber) {
+      const pgs = this.getCurrentPagesByNumber(p.invoiceNumber);
+      const pg  = (p.customerId && pgs.find(x => x.customerId === p.customerId)) || pgs[0];
+      if (pg) p = { ...p, invoiceEditCount: pg.editCount || 0 };
+    }
+    a.unshift(p);
+    this.savePayments(a);
+  },
   updatePayment(id, patch) {
     const a = this.getPayments();
     const i = a.findIndex(p => p.id === id);
@@ -1014,6 +1030,59 @@ const DB = {
       ps = ps.filter(p => p.customerId === customerId);
     }
     return ps.reduce((s, p) => s + this.effectivePaymentAmount(p), 0);
+  },
+
+  // The invoice total that was live at version `ec`. editHistory[i].previous.totalAmount
+  // is the total BEFORE edit i+1 — i.e. the total AT version i — and the record itself
+  // holds the total at the latest version. See saveInvoiceEdit() in invoice-create.html.
+  totalAtEditCount(inv, ec) {
+    if (!inv) return 0;
+    const hist = inv.editHistory || [];
+    const i = Math.max(0, parseInt(ec) || 0);
+    if (i < hist.length && hist[i] && hist[i].previous) {
+      return parseFloat(hist[i].previous.totalAmount) || 0;
+    }
+    return parseFloat(inv.totalAmount) || 0;
+  },
+
+  // Why is this invoice's balance non-zero? Returns null when it is settled, when the
+  // invoice was never edited, or when the total never actually moved — in all of those
+  // a diff is a genuine under/overpayment and needs no explaining. Otherwise reports the
+  // total that was live when the money was recorded, so the UI can say "paid in full
+  // against the old total" instead of implying the customer owes an amount they were
+  // never billed. Descriptive only — no money calculation consumes this.
+  //   editCaused true  → payments exactly settle the version they were made against
+  //              false → a real shortfall/excess existed at that version too
+  explainInvoiceDiff(invoiceNumber, customerId) {
+    const pages = this.getCurrentPagesByNumber(invoiceNumber);
+    const inv = (customerId && pages.find(p => p.customerId === customerId)) || pages[0];
+    if (!inv) return null;
+    const currentTotal = parseFloat(inv.totalAmount) || 0;
+    const paid = this.getInvoicePaidAmount(invoiceNumber, customerId);
+    const diff = currentTotal - paid;
+    if (Math.abs(diff) <= 0.005) return null;
+    if (!(inv.editCount > 0)) return null;
+
+    let ps = this.getPaymentsByInvoice(invoiceNumber)
+      .filter(p => !p.cancelled && !this.isChequePending(p));
+    if (customerId && ps.length && this._numberHasMultipleOwners(invoiceNumber)) {
+      ps = ps.filter(p => p.customerId === customerId);
+    }
+    if (!ps.length) return null;
+
+    // Payments predating the stamp read as version 0 (the original), per the chosen
+    // migration rule. Where payments span versions the newest stamp is the one the
+    // customer was last billed at.
+    const paidVersion = ps.reduce((m, p) => Math.max(m, parseInt(p.invoiceEditCount) || 0), 0);
+    const oldTotal = this.totalAtEditCount(inv, paidVersion);
+    if (Math.abs(oldTotal - currentTotal) <= 0.005) return null;
+
+    return {
+      editCaused: Math.abs(oldTotal - paid) <= 0.005,
+      oldTotal, currentTotal, paid, diff,
+      editCount: inv.editCount || 0,
+      paidVersion,
+    };
   },
 
   // Record that `amount` of `paymentId`'s excess was cut to `targetInvNum`.

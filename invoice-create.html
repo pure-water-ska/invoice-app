@@ -649,10 +649,19 @@ async function loadView(invNum) {
 
   await renderPreview(pages);
 
-  // Auto-print if flagged by saveInvoice(true) / saveInvoiceEdit(true)
-  const _ap = sessionStorage.getItem('autoPrint');
-  if (_ap === invNum) {
-    sessionStorage.removeItem('autoPrint');
+  // Auto-print if flagged by saveInvoice(true) / saveInvoiceEdit(true) / invoices.html
+  // printInvoice().  Consumed unconditionally and expiring after AUTOPRINT_TTL_MS: the
+  // flag used to be a bare invoice number removed ONLY on a matching view, so an arm
+  // that never reached this view (interrupted navigation, Back, another row clicked)
+  // stayed in sessionStorage for the whole session and then fired on a later
+  // save-only edit of that same invoice — bumping printCount and writing a
+  // printHistory entry for a print nobody asked for.  Legacy bare-string values throw
+  // in JSON.parse, so they are ignored and cleared rather than firing.
+  const AUTOPRINT_TTL_MS = 30000;
+  let _ap = null;
+  try { _ap = JSON.parse(sessionStorage.getItem('autoPrint') || 'null'); } catch(e) {}
+  sessionStorage.removeItem('autoPrint');
+  if (_ap && _ap.num === invNum && Date.now() - (_ap.at || 0) < AUTOPRINT_TTL_MS) {
     setTimeout(() => doPrint(), 800);
   }
 }
@@ -664,15 +673,6 @@ async function doPrint() {
   const reprintCount = pages[0].printCount || 0;  // count BEFORE this print
   const editCount    = pages[0].editCount    || 0;
   const printNum     = reprintCount + 1;
-  const printRecord  = { at: new Date().toISOString(), by: session.name, byUser: session.username };
-
-  pages.forEach(p => {
-    const history = [...(p.printHistory || []), printRecord];
-    DB.updateInvoice(p.id, { printCount: (p.printCount||0) + 1, printHistory: history });
-  });
-  DB.logActivity(session.userId, session.username, 'พิมพ์ใบกำกับ', { invoiceNumber: currentInvNum, reprintCount });
-  // Commit the updated print count to Firestore immediately; upload bar shows progress.
-  try { if (window.Sync && typeof Sync.flushNow === 'function') Sync.flushNow(); } catch (e) {}
 
   const cfg        = DB.getSettings();
   const cust       = DB.getCustomers().find(c => c.id === pages[0].customerId);
@@ -691,6 +691,22 @@ async function doPrint() {
   document.getElementById('printArea').innerHTML = html;
   _fitPrintPages();   // scale any overflowing page down to fit one A5 (14-row pages)
   window.print();
+
+  // Count the print only once the dialog has been dismissed — window.print() blocks
+  // until then wherever the browser implements it synchronously. Counting BEFORE the
+  // build meant an exception while assembling the print HTML still bumped printCount
+  // for a dialog that never opened.
+  // No web API distinguishes "printed" from "cancelled" (afterprint fires for both),
+  // so a cancelled dialog still counts. That is deliberate: for an audit trail an
+  // occasional over-count is safer than silently losing a real print.
+  const printRecord = { at: new Date().toISOString(), by: session.name, byUser: session.username };
+  pages.forEach(p => {
+    const history = [...(p.printHistory || []), printRecord];
+    DB.updateInvoice(p.id, { printCount: (p.printCount||0) + 1, printHistory: history });
+  });
+  DB.logActivity(session.userId, session.username, 'พิมพ์ใบกำกับ', { invoiceNumber: currentInvNum, reprintCount });
+  // Commit the updated print count to Firestore immediately; upload bar shows progress.
+  try { if (window.Sync && typeof Sync.flushNow === 'function') Sync.flushNow(); } catch (e) {}
 
   // Save PDF in background after print dialog opens
   const _custName = cust ? cust.name : 'unknown';
@@ -967,7 +983,10 @@ function checkCustomerBalance(custId) {
     const diff  = total - paid;
     if (Math.abs(diff) > 0.005) {
       const staleRef = staleRefMap[num] && staleRefMap[num].target !== num ? staleRefMap[num].target : null;
-      _balanceDetails.push({ num, total, paid, diff, custId: page1.customerId, staleRef });
+      // Non-null when the diff exists only because the invoice was edited after being
+      // paid — folding that onto a new invoice would bill for an edit, not a debt.
+      const editExp = DB.explainInvoiceDiff(num, page1.customerId);
+      _balanceDetails.push({ num, total, paid, diff, custId: page1.customerId, staleRef, editExp });
     }
   });
 
@@ -1015,11 +1034,12 @@ function checkCustomerBalance(custId) {
   const rows = _balanceDetails.map((d, idx) => `
     <tr${d.staleRef ? ' style="background:#fdece9"' : ''}>
       <td class="text-center">
-        <input type="checkbox" class="balance-chk form-check-input" data-idx="${idx}" id="bchk${idx}" ${d.staleRef ? '' : 'checked'} onchange="updateAddBtn()">
+        <input type="checkbox" class="balance-chk form-check-input" data-idx="${idx}" id="bchk${idx}" ${(d.staleRef || d.editExp) ? '' : 'checked'} onchange="updateAddBtn()">
       </td>
       <td>
         <label for="bchk${idx}" style="cursor:pointer;margin:0">${d.num}</label>
         ${d.staleRef ? `<div class="mt-1"><span class="badge rounded-pill" style="background:#f7c1c1;color:#501313;font-weight:normal;font-size:10.5px"><i class="bi bi-exclamation-circle me-1"></i>เพิ่มลงใบ ${d.staleRef} แล้ว แต่ใบนี้ยังไม่ได้ตัดยอด</span></div>` : ''}
+        ${d.editExp ? `<div class="mt-1"><span class="badge rounded-pill" style="background:#b5d4f4;color:#042c53;font-weight:normal;font-size:10.5px"><i class="bi bi-pencil me-1"></i>ส่วนต่างจากการแก้ไข ฿${Utils.formatNumber(d.editExp.oldTotal)} → ฿${Utils.formatNumber(d.editExp.currentTotal)}</span></div>` : ''}
       </td>
       <td class="text-end">${Utils.formatNumber(d.total)}</td>
       <td class="text-end">${Utils.formatNumber(d.paid)}</td>
@@ -1048,6 +1068,7 @@ function checkCustomerBalance(custId) {
         <tbody>${rows}</tbody>
       </table>
       ${_balanceDetails.some(d => d.staleRef) ? `<div class="small text-muted mt-1">แถวสีแดงอ่อน = เคยเพิ่มลงใบอื่นแล้วแต่ใบนี้ยังไม่ถูกตัดยอด (ไม่ได้เลือกไว้ให้อัตโนมัติ ป้องกันการเพิ่มซ้ำ)</div>` : ''}
+      ${_balanceDetails.some(d => d.editExp) ? `<div class="small text-muted mt-1">แถวที่มีป้าย “ส่วนต่างจากการแก้ไข” = ยอดต่างเพราะใบกำกับถูกแก้ไขหลังชำระ ไม่ใช่ลูกค้าค้างชำระ (ไม่ได้เลือกไว้ให้อัตโนมัติ — ตรวจสอบก่อนนำไปรวมในใบใหม่)</div>` : ''}
     </div>`;
   updateAddBtn();
 }
@@ -1698,7 +1719,7 @@ async function saveInvoice(shouldPrint = false) {
 
   if (shouldPrint) {
     // "บันทึก & พิมพ์" — navigate to view mode to trigger auto-print
-    try { sessionStorage.setItem('autoPrint', invNumber); } catch(e) {}
+    try { sessionStorage.setItem('autoPrint', JSON.stringify({ num: invNumber, at: Date.now() })); } catch(e) {}
     setTimeout(() => { location.href = 'invoice-create.html?view=' + invNumber; }, 1500);
   } else {
     // "บันทึก PDF" — go straight to invoice list to avoid race condition
@@ -1847,7 +1868,16 @@ async function loadEdit(invNum) {
   if (previewBtn) previewBtn.innerHTML = '<i class="bi bi-eye me-1"></i>ดูตัวอย่างการแก้ไข';
 
   const ec = first.editCount || 0;
-  Utils.showAlert(`กำลังแก้ไขใบกำกับ ${invNum} (แก้ไขมาแล้ว ${ec} ครั้ง)`, 'warning');
+  // Warn up front when money is already recorded against this invoice — changing the
+  // total from here leaves a difference someone has to chase or refund. showAlert()
+  // replaces the container rather than stacking, so both messages go in one call.
+  const paidSoFar = DB.getInvoicePaidAmount(invNum, first.customerId);
+  const hasPaid   = paidSoFar > 0.005;
+  const paidWarn  = hasPaid
+    ? `<hr class="my-2"><i class="bi bi-exclamation-circle me-1"></i><strong>ใบกำกับนี้มีการชำระแล้ว ฿${Utils.formatNumber(paidSoFar)}</strong> — หากแก้ไขยอดรวม จะเกิดส่วนต่างที่ต้องตามเก็บหรือคืนเงินลูกค้า`
+    : '';
+  Utils.showAlert(`กำลังแก้ไขใบกำกับ ${invNum} (แก้ไขมาแล้ว ${ec} ครั้ง)${paidWarn}`,
+                  hasPaid ? 'danger' : 'warning');
 }
 
 async function saveInvoiceEdit(shouldPrint = false) {
@@ -2035,7 +2065,7 @@ async function saveInvoiceEdit(shouldPrint = false) {
   Utils.showAlert('<i class="bi bi-hourglass-split me-1"></i>กำลังสร้าง PDF...', 'info');
   await PdfGen.run(_ePdfBody, _eFn);
   try { sessionStorage.setItem('freshPdf', JSON.stringify({ inv: currentInvNum, file: _eFn })); } catch(e) {}
-  if (shouldPrint) { try { sessionStorage.setItem('autoPrint', currentInvNum); } catch(e) {} }
+  if (shouldPrint) { try { sessionStorage.setItem('autoPrint', JSON.stringify({ num: currentInvNum, at: Date.now() })); } catch(e) {} }
 
   setTimeout(() => { location.href = 'invoice-create.html?view=' + currentInvNum; }, 1500);
 }
@@ -2125,6 +2155,20 @@ async function renderPreview(pages) {
   const editCount   = firstPage.editCount   || 0;
   const reprintCount = firstPage.printCount || 0;
 
+  // When the balance only differs because the invoice was edited after it was paid,
+  // say so — otherwise the bar reads as though the customer still owes (or is owed)
+  // money they were never billed. See DB.explainInvoiceDiff().
+  const _exp = DB.explainInvoiceDiff(firstPage.invoiceNumber, firstPage.customerId);
+  const editDiffHtml = !_exp ? '' : `
+    <div class="alert alert-warning py-2 px-3 mb-0 mt-2 small">
+      <i class="bi bi-info-circle me-1"></i>ชำระ ฿${Utils.formatNumber(_exp.paid)} บันทึกไว้กับยอดเดิม
+      <strong>฿${Utils.formatNumber(_exp.oldTotal)}</strong> (ก่อนแก้ไขครั้งที่ ${_exp.paidVersion + 1})
+      — ยอดปัจจุบัน ฿${Utils.formatNumber(_exp.currentTotal)}
+      ${_exp.editCaused
+        ? `· ส่วนต่าง ฿${Utils.formatNumber(Math.abs(_exp.diff))} เกิดจากการแก้ไขใบกำกับ ไม่ใช่ลูกค้าค้างชำระ`
+        : '· ส่วนต่างเกิดจากทั้งการแก้ไขใบกำกับและยอดชำระที่ไม่ครบ'}
+    </div>`;
+
   // Payment status card (shared)
   const statusHtml = `
     <div class="card mt-3 no-print">
@@ -2134,6 +2178,7 @@ async function renderPreview(pages) {
         <span>ชำระแล้ว: <strong class="text-success">฿${Utils.formatNumber(paid)}</strong></span>
         <span>ค้าง: <strong class="${remaining>0?'text-danger':'text-success'}">฿${Utils.formatNumber(remaining)}</strong></span>
         ${remaining>0 ? `<a href="payments.html?inv=${firstPage.invoiceNumber}" class="btn btn-sm btn-success ms-auto"><i class="bi bi-cash-coin me-1"></i>บันทึกชำระ</a>` : '<span class="badge bg-success ms-auto">ชำระครบแล้ว</span>'}
+        ${editDiffHtml ? `<div class="w-100">${editDiffHtml}</div>` : ''}
       </div>
     </div>`;
 
