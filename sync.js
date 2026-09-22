@@ -872,7 +872,7 @@ var Sync = {
         if (!document.body) return;
         bar = document.createElement('div');
         bar.id = 'wtUploadBar';
-        bar.style.cssText = 'position:fixed;left:0;right:0;z-index:1100;display:none;' +
+        bar.style.cssText = 'position:fixed;left:0;right:0;z-index:999;display:none;' +
           'align-items:center;gap:10px;padding:8px 16px;font-size:14px;' +
           'box-shadow:0 2px 6px rgba(0,0,0,.12);font-family:Sarabun,sans-serif';
         document.body.appendChild(bar);
@@ -2467,7 +2467,7 @@ var Sync = {
       if (!document.body) return;
       el = document.createElement('div');
       el.id = 'wtUploadInfo';
-      el.style.cssText = 'position:fixed;right:12px;z-index:1101;width:min(560px,calc(100vw - 24px));max-height:65vh;overflow:auto;' +
+      el.style.cssText = 'position:fixed;right:12px;z-index:999;width:min(560px,calc(100vw - 24px));max-height:65vh;overflow:auto;' +
         'background:var(--bs-body-bg,#fff);color:var(--bs-body-color,#212529);border:1px solid var(--bs-border-color,#dee2e6);' +
         'border-radius:12px;padding:12px 14px;box-shadow:0 6px 18px rgba(0,0,0,.15);font-family:Sarabun,sans-serif;font-size:14px';
       document.body.appendChild(el);
