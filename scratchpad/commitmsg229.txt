@@ -1,0 +1,75 @@
+release v1.0.229 — choose the cash receiver; admins decide who appears in the list
+
+User requests, in order:
+  1. "in payments, user can select cash receiver by user name"
+  2. "cash receiver should be a logged in user by default"
+  3. "admin can select which user can show on the dropdown list", refined with a
+     worked example — with test hidden: aing (user) cannot see test; joe (admin) can;
+     test can only see themselves.
+
+── 1. The receiver is a choice ─────────────────────────────────────────────────────
+ผู้รับเงิน was a READ-ONLY input locked to the logged-in user, deliberately. Asked who
+should be allowed to name someone else, the user chose anyone who records payments; no
+new permission. The audit trail is unaffected: createdBy / createdByUser still record
+who ENTERED the payment, so naming a different receiver never hides the recorder.
+
+Both modals now use a <select> built by one shared _cashCollectorOptions(). It stores
+the USERNAME, as every existing record does, so history, the payment-summary print and
+reports keep reading one consistent value. Labels read "name (username)", or the
+username alone when the two match. Names and usernames are HTML-escaped. Suspended users
+are never offered, but a suspended username that is already selected stays listed
+rather than being silently swapped for the first name.
+
+The multi-invoice modal's save path IGNORED its box and hard-coded session.username. It
+now reads the box, falling back to the logged-in user if empty.
+
+── 2. Default to the logged-in user ────────────────────────────────────────────────
+The builder keeps the box's current value so switching to โอน and back doesn't lose a
+pick — but openPayModal() calls the same builder, so a receiver picked on one invoice
+carried into the NEXT invoice's window. Reproduced live: pick aing on 100969-001, open
+100969-002, and it defaulted to aing instead of the logged-in admin. openPayModal()
+already reset every other field (note, amount, banks, dates); it now clears this one
+before rebuilding. The logged-in user is also always in their own list, including when
+users haven't synced to the device yet.
+
+── 3. Admins decide who appears ────────────────────────────────────────────────────
+users.html (already admin-only) gains a แสดงในรายชื่อผู้รับเงินสด switch per user and a
+รับเงินสด column (cash icon, or eye-slash when hidden); the empty-state colspan moves
+8 → 9 to match. The flag is cashReceiver on the user record. Absent counts as shown, so
+nothing changes for existing users until an admin turns someone off. It is written
+through the existing `data` object on both the add and edit paths; DB.updateUser merges,
+and user-sync carries whole records, so the flag reaches every device.
+
+A hidden user (cashReceiver === false):
+  - is not offered to ordinary users — and cannot reach them through the kept-selection
+    fallback either
+  - IS offered to admins, labelled "· ซ่อน" (an <option> can't hold the mockup's icon)
+  - if not an admin, is locked to only themselves: a single option, box disabled, in
+    both modals. A disabled select's .value still reads normally, so saving is unchanged.
+A hidden ADMIN is not locked and still sees everyone — admin wins; hiding an admin only
+stops ordinary users picking them. Admin is read with bare Auth.isAdmin(), never
+window.Auth (undefined — see CLAUDE.md).
+
+Operational note: on the live data, the account named "test" has the admin role, so
+hiding it will NOT lock it to itself. It must be a user-role account for that. Roles
+were read, not changed.
+
+── Verification ────────────────────────────────────────────────────────────────────
+Live in the preview on real data, saving nothing and changing no user:
+  - with nobody hidden (the real state), every active user is listed as before
+  - with test marked hidden in page memory only, then reloaded away: admin sees
+    "test · ซ่อน"; aing sees admin/aing/joe/aieng and can still choose; test sees only
+    test, locked
+  - users.html shows nine headers and nine cells a row, and the switch in the form
+
+test-cash-collector-select.js — 62 assertions, driving the REAL helpers sliced out of
+payments.html, the REAL multi-modal opener lines and the REAL multi-pay save expression,
+plus users.html's openModal/saveUser and table alignment. Mutation-checked across both
+files: existing users reading as hidden, the switch never saved, a misaligned colspan,
+admins unable to see hidden users, a hidden admin locked, the single and the multi box
+never locked, a new window keeping the last pick, the multi save ignoring the box, the
+builder forgetting a pick, and suspended users offered — each fails its own assertions,
+and both files were restored byte-identical. Full regression of all twenty-five suites
+(586 assertions) green.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

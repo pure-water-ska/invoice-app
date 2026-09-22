@@ -1,0 +1,20 @@
+Revert "release v1.0.221 — payment summary print now reconciles"
+
+This reverts commit 2a0a98f. Rolls the app back to v1.0.220 at the user's request;
+the working tree is now byte-identical to the v1.0.220 tag (git diff --cached
+v1.0.220 is empty). Version files read 1.0.220 again and
+test-payment-summary-print.js is removed with the feature it covered.
+
+CODE ONLY — no data was touched. The carry-forward payment records already written
+to Firestore are untouched and still stand, so 180869-005, 240869-002 and
+260869-002 remain settled regardless of which version runs. The ฿1.50 that left the
+books when 280869-003 was edited is a data issue, not a code one, and reverting
+does not address it.
+
+Kept for the record, since the reverted release found it: methodDetail() falls back
+to p.notes for any method outside เงินสด/โอน/เช็ค while the caller appends p.notes
+again, so carry-forward rows print their note twice on the payment summary
+("ยกยอดค้างชำระไปใบกำกับ X | ยกยอดค้างชำระไปใบกำกับ X"). That pre-existing bug is
+back with this revert.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

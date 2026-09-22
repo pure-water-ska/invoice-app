@@ -1,0 +1,50 @@
+release v1.0.216 — payments list showed the pre-edit amount
+
+User-reported: 150869-004 was edited, but the invoice list on the PAYMENTS page kept
+showing the old amount (the invoices page showed it correctly). The server was
+confirmed to hold both the stale pre-edit record and the corrected one — the usual
+condition where an edit's explicit Firestore delete of the old page never landed.
+
+Root cause: payments.html built its own row map with first-seen-wins —
+
+    if (!seen.has(inv.invoiceNumber)) seen.set(inv.invoiceNumber, inv);
+
+so whichever record happened to load first became the row, which is the stale one.
+invoices.html got an editCount preference for exactly this in v1.0.202; payments.html
+never did, and nothing tied the two together.
+
+Two more fixes from the same era turned out to be missing on the same page, both
+feeding the amounts, the status filter and the sort on that table:
+- paidMap was keyed by invoiceNumber ALONE, so on a collided number one customer's
+  payments counted toward the other's invoice (v1.0.198's fix, un-ported).
+- paidMap summed raw p.amount instead of effectivePaymentAmount, so an overpayment
+  already cut to another invoice still counted in full here — the same money counted
+  on both the source and the target.
+
+Rather than porting three fixes into a second copy, the logic now lives in db.js as
+DB.currentInvoiceRowMap() and DB.invoicePaidMap()/paidForInvoice(), and BOTH pages call
+them. Duplication is what let these three diverge for four releases; this is the third
+time an invoices.html fix has turned out to be missing on payments.html.
+
+currentInvoiceRowMap() builds the map in one pass rather than calling
+getCurrentPagesByNumber() per number, which would rescan the whole array each time
+(O(n²) — the pricing.html per-row-scan lesson). Replacement still requires the same
+customer AND page, so a collided number and an ordinary multi-page invoice behave
+exactly as before.
+
+test-invoices-list-dedup.js is retargeted at the shared helpers (so it now covers both
+pages instead of one) and grows 9 → 17 assertions: the allocated-away overpayment case,
+cancelled/un-cleared-cheque exclusion, and six guards asserting both pages actually call
+the helpers and that neither of the two bug shapes has reappeared in payments.html.
+test-subrow-badges.js (20 assertions on the v1.0.210 fix) still passes against the
+refactored invoices.html. Full regression of all sixteen suites (307 assertions) green
+before and after the version bump.
+
+Verified against the reported shape: a stale editCount:0 record at ฿12,500 alongside the
+corrected editCount:1 record at ฿9,800 now resolves to ฿9,800 on the payments list.
+
+Note this corrects the DISPLAY only — the stale record still exists on the server, and
+the underlying failed-delete cause is still under investigation (see v1.0.215's lookup
+tool).
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

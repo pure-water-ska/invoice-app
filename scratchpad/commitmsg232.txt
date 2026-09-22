@@ -1,0 +1,61 @@
+release v1.0.232 — pick-only bank dropdowns; payment details name the customer
+
+User request: "in payment with transferred, customer's bank should be a drop down list",
+then "build it, cheque bank too".
+
+The four payment bank fields — the customer's bank on a transfer (paySourceBank,
+multiSourceBank) and the cheque's bank (payChequeBank, multiChequeBank) — were text boxes
+with a searchable suggestion popup (_initBankCombos). Anyone could skip the popup and type
+"กสิกร" or "kbank", which was saved exactly as typed. The ธนาคารต้นทาง filter on the
+payment list matches the saved text exactly, so each variant showed up as a separate bank.
+
+They are now pick-only <select>s filled from Utils.BANKS — the same 18 banks plus อื่นๆ,
+in the same order — with an empty "— เลือกธนาคาร —" first option:
+  - the saved value is the FULL bank name, e.g. "กสิกรไทย (KBANK)" — exactly what the old
+    picker saved (_bankPick) — so payments saved before and after match in the filter,
+    the detail view and the print; the saving code is unchanged
+  - the empty option is real because every reset sets .value = ''; nothing writes a bank
+    name into these fields by code, so no auto-fill can land on a missing option
+  - filled by _initBankSelects() at start-up, in the same DB.ready block that wired the
+    old picker; the four fields are taken off that picker's list (_BANK_IDS), which
+    still serves the transfer-account manager's own bank fields
+  - bank names are escaped with the page's own esc()
+  - applies to both บันทึกชำระเงิน and ชำระหลายบิลในครั้งเดียว
+
+Existing payments are untouched — and need nothing. Read live, read-only: of 916 transfer
+payments, 890 already hold a full name from the list and 26 are blank; of 28 cheque
+payments, 27 hold a list name and 1 is blank. No free-typed or short-code values exist,
+so every saved value already matches a dropdown option and the filter is unchanged.
+
+Verified live in the preview on real data, saving nothing: all four fields render as
+<select>s with 19 options (placeholder + 18 banks) in both windows, for transfer and
+cheque; 120969-001's payment count was unchanged afterwards.
+
+test-bank-dropdowns.js — 37 assertions driving the REAL _bankSelectOptions and
+_initBankSelects against the REAL Utils.BANKS from utils.js and the page's own escaper,
+plus structural checks on all four fields, the old picker's list, the start-up call, the
+resets and both save paths. Mutation-checked, eight breaks, each caught by its own
+assertions: a field back to a free-typing text box, the old picker re-attached, the
+dropdowns never filled, no empty option, saving the short code instead of the full name,
+names not escaped, one dropdown left out of the fill, and a field auto-filled with a typed
+name. The first run exposed a test bug — a negative lookahead after \s* backtracked and
+flagged the '' resets themselves, failing on correct code and making every mutation look
+"caught"; it now captures each assignment's right-hand side and requires ''. payments.html
+restored byte-identical and still LF. ── Payment details name the customer ─────────────────────────────────────────────
+Second request in the same release: "in payment record, there's no customer name, just
+add it". Each payment in the payment window's history has a collapsible
+รายละเอียดทั้งหมด block (_payDetailHtml) whose comment says it lists EVERY stored field —
+yet it never said whose payment it was, because the record stores only customerId. It now
+opens with a ลูกค้า row, the name looked up with DB.getCustomerById(p.customerId) as
+reports.html already does. No lookup when the record has no customerId; no row when the
+customer no longer exists; the name goes through the block's existing esc(); the payment
+record is not modified. Verified live on 100969-003: the block opens with
+"ลูกค้า: จันทร์สุข", matching the invoice's customer; nothing saved.
+
+test-payment-detail-customer.js — 15 assertions driving the REAL _payDetailHtml with the
+page's own escaper. Mutation-checked, four breaks, each caught: row removed, the id shown
+instead of the name, the row moved below the date, and a lookup attempted without an id.
+
+Full regression of all twenty-nine suites (781 assertions) green.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

@@ -1,0 +1,28 @@
+release v1.0.212 — flag old balances already added to another invoice
+
+User-reported: an overpaid/partial balance kept showing on invoice-create's
+balance alert even though it was already folded onto a newer invoice. Root
+cause: DB.allocateOverpayCredit() (v1.0.194) and DB.carryForwardOwedBalance()
+(v1.0.203) only retire the source invoice for additions made AFTER each fix
+shipped — any "เพิ่มที่เลือกลงใบใหม่" addition made before that leaves a
+"ค้างชำระ X" / "ชำระเกิน X" memo line on the newer invoice with no matching
+retirement, so the source keeps showing as outstanding forever. Same class of
+bug v1.0.194 fixed retroactively for two known invoices at the time (overpaid
+only) — this session's report is the owed-side/older equivalent surfacing again.
+
+Since there's no live access to identify every affected pair, this ships a
+read-only in-context flag rather than guessing at a fix: checkCustomerBalance()
+now scans every invoice's items for that exact label pattern and flags any
+balance-alert row whose source invoice was already referenced elsewhere but
+never retired — red row, an inline badge naming the invoice it was added to,
+and the checkbox defaults unchecked so staff can't accidentally add it a
+second time. Ordinary (never-referenced) balances are unaffected.
+
+test-stale-balance-flag.js adds 10 assertions: newest-reference-wins mapping,
+the flagged/unchecked/badged render, an ordinary balance rendering unflagged,
+a genuinely-retired reference correctly NOT flagged, and a self-reference
+edge case ignored. Verified the actual generated HTML in a browser (not just
+the mockup) before shipping. Full regression of all twelve suites (206
+assertions) green before and after the version bump.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>

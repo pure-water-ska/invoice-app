@@ -1,0 +1,69 @@
+release v1.0.230 — stop pairing a user's own Firebase email with the team password
+
+User report: "why some users firestore badge is red with invalid log in credentials
+warning, how can i fix it".
+
+Found live, read-only: of five users, aing and test have firebaseEmail but NO
+firebasePassword in their records; admin, joe and aieng have both. sync.js chose the two
+halves independently —
+
+    _fbEmail = _appUser?.firebaseEmail    || teamEmail
+    _fbPass  = _appUser?.firebasePassword || teamPassword
+
+— so aing signed in with aing@main.wt.local + the TEAM password. Firebase rejects that
+pair as invalid credentials, init's catch fires: red badge, wt_sync_last_error, and
+`ready` is never set, so there is no sync for the whole session. Saves are not lost — push()
+queues them on that device (_enqueue) and they upload after the next successful sign-in
+there — but they can arrive late. index.html's login-time switch had the same pairing bug.
+
+How the records got that way: users.html _createFirebaseAccount, on
+auth/email-already-in-use (e.g. a user deleted and re-added), returns the email with
+firebasePassword: null and the caller keeps whatever password the record had — none.
+Those passwords can't be recovered, and can't be reset by email for @main.wt.local.
+
+Fix (the user chose "pair + self-repair"):
+  - Sync._pickFirebaseCreds: the user's OWN account only when BOTH halves are stored and
+    it hasn't failed this session; otherwise team email AND team password. index.html
+    applies the same rule at login.
+  - One _signIn() for all three sign-in paths (browser fresh, browser account switch,
+    Tauri). If the own account is still rejected as bad credentials
+    (Sync._shouldFallbackToTeam), it signs in with the team account instead, remembers
+    that in sessionStorage wt_fb_own_failed:<username> so later page loads don't repeat
+    a doomed sign-in, and logs SYNC-AUTH-FALLBACK (DB.logError stamps the username;
+    the password is never logged). This covers a stored password that is WRONG, not
+    just missing.
+  - Deliberately NOT falling back: auth/user-disabled (a disable in Firebase Console is
+    an intentional block and must not be bypassed through the team account), network
+    errors (init's offline handling still applies), and the team account itself failing
+    (surfaced as before — no loop).
+  - Settings' red Firestore card blamed "password ใน Netlify env var" for
+    auth/invalid-credential. This app isn't on Netlify, and after this fix that error
+    can only mean the TEAM password is wrong, so the advice now names the
+    FIREBASE_TEAM_PASSWORD GitHub Secret and points at SYNC-AUTH-FALLBACK in
+    Troubleshoot for per-user fallbacks.
+  - CLAUDE.md documents the new sessionStorage key.
+
+aing and test now sync as the shared team account, exactly like any never-provisioned
+user. Giving them their own Firebase identities back would need their two accounts
+deleted in Firebase Console and re-provisioned — not done here.
+
+Also explained along the way: the local preview had been signing in as the team account
+even for admin. That was a stale cached sync.js in the preview browser (the loaded
+Sync object lacked the new methods while a fresh fetch had them); after a reload, sync
+logged "auth switch team@main.wt.local → admin@main.wt.local" as designed.
+
+Verified live in the preview on real data, attempting no sign-in of my own: new code
+loaded, sync connected for admin with no error and no fallback flag; _pickFirebaseCreds
+chooses the team pair for aing and test and each own account for admin, joe and aieng.
+
+test-firebase-cred-pairing.js — 52 assertions driving the REAL _pickFirebaseCreds,
+_AUTH_FALLBACK_CODES and _shouldFallbackToTeam, the REAL _signIn closure against a
+stubbed Firebase, and the REAL credential lines sliced out of index.html. sync.js is
+checked out with CRLF line endings, so its structural patterns accept \r?\n (the first
+draft didn't, and failed for that reason alone). Mutation-checked: own account chosen on
+email alone (sync and index), a disabled account bypassed, the fallback not remembered,
+the password leaking into the log, step 4c bypassing _signIn, and the Netlify advice
+restored — each fails its own assertions; all files restored byte-identical. Full
+regression of all twenty-six suites (638 assertions) green.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

@@ -1,0 +1,25 @@
+release v1.0.224 — rounding buttons only on genuinely over/under-paid invoices
+
+User-reported, and correct: v1.0.223 gated the ตัดเศษ button on `(total - paid) > 0.005`,
+which is ALSO true of a wholly unpaid invoice — its shortfall is simply its full value. So
+every pending bill offered to write itself off, including a ฿28,477 one that had never been
+touched. With no threshold cap (the user's explicit choice) that is the worst thing the
+button could have offered.
+
+Rounding is for an invoice that HAS been paid but whose amount doesn't match — partial or
+over. The down button now additionally requires `paid > 0.005`, and openRoundModal
+re-checks it so calling the handler directly can't bypass the row condition either.
+
+Verified against the real extracted condition:
+  wholly unpaid ฿28,477   → no button      (was: offered to write off ฿28,477)
+  partial, ฿0.45 short    → ตัดเศษ
+  partial, ฿5,000 short   → ตัดเศษ         (no cap, by user decision)
+  paid exactly            → no button
+  overpaid ฿0.45          → ปัดขึ้น
+  cancelled               → no button
+
+test-payment-rounding.js 40 → 41: the row condition must require money actually paid, and
+the modal must re-check it. Full regression of all twenty suites (430 assertions) green
+before and after the version bump.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

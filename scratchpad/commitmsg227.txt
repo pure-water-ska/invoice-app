@@ -1,0 +1,37 @@
+release v1.0.227 — the payment summary printed the reason twice
+
+User report: "in summary print at payment if customers amount were round, why there are
+double reason in detail of payment".
+
+printPaymentSummary() assembles the รายละเอียด cell as
+
+    [methodDetail(p), p.notes].filter(Boolean).join(' | ')
+
+so methodDetail() is only ever meant to supply the METHOD-SPECIFIC part — the caller adds
+the note. Its fallback branch returned p.notes, so for any method outside โอน / เช็ค /
+เงินสด the note was returned by the fallback AND appended again by the join:
+
+    ตัดเศษ: ลูกค้าไม่จ่ายเศษ | ตัดเศษ: ลูกค้าไม่จ่ายเศษ
+
+The rounding write-off the user was looking at is method 'ตัดเศษ' (db.js
+writeOffRemainder, v1.0.223), which is exactly that gap. So is the other non-cash method,
+'ยกยอดไปใบใหม่' (carryForwardOwedBalance) — same doubling on every carry-forward receipt,
+never reported. So would be any method added later.
+
+Fix: the fallback returns '' and lets the join supply the note, as it already does for the
+three handled methods. Those three are untouched — cash still prints collector | note,
+transfer bank · account | note, cheque bank · #no · (รอขึ้นเงิน) | note, and a cash row
+with no collector still prints just its note with no dangling separator.
+
+test-print-detail-dedup.js adds 23 assertions. It slices the REAL methodDetail out of
+payments.html and the REAL join expression by regex (rather than restating either), builds
+its write-off and carry-forward records with the REAL db.js, and drives them through both —
+so a method rename in db.js, or a change to the join, fails here instead of in print. The
+invariant is asserted two ways: textually (no `return p.notes` survives in methodDetail)
+and by driving an unknown method through it for real.
+
+Verified discriminating: reintroducing the one-line fallback fails 10 of the 23, and the
+failure output is character-for-character the doubled cell the user described. Full
+regression of all twenty-three suites (502 assertions) green before and after the bump.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

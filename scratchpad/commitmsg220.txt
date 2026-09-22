@@ -1,0 +1,43 @@
+release v1.0.220 — active/suspended tabs and capped unpaid chips on customers.html
+
+Two user-requested changes to the customer list.
+
+1. Status tabs — ทั้งหมด / ใช้งาน / ระงับ, with counts.
+
+Suspension was already an ENFORCED state everywhere else: invoice-create blocks a new
+invoice for a suspended customer in three separate places and shows a warning banner,
+pricing warns when setting their prices, and the flag carries a reason, timestamp, author
+and history log. But customers.html only dimmed the card and dropped it into the same
+24-per-page grid, with a sort dropdown offering name and balance only — no way to filter
+by status, so a suspended customer could sit anywhere across the pages.
+
+ทั้งหมด is the default deliberately. Suspension usually FOLLOWS unpaid debt, so an
+active-only default would hide exactly the accounts most worth chasing; the ระงับ tab
+doubles as a "who owes us and is cut off" view, balance badges intact. Within ทั้งหมด
+suspended sort last so they stop cluttering the top, while the chosen sort still applies
+inside each group. Counts are of the current search result, computed before the status
+filter — otherwise each tab would report itself as the total.
+
+2. Unpaid-invoice chips capped at 5, expandable in place.
+
+Every unpaid invoice rendered as a chip with no cap, so a customer with 20 outstanding
+produced a card tall enough to stretch its whole grid row (h-100 cards in a row g-3). The
+list was already sorted by remaining amount descending, so the first five are the largest
+debts.
+
+The toggle reads "อีก N ใบ · ฿X" rather than a bare "see more": without the amount, a
+customer with 6 unpaid looks identical to one with 30 and real debt quietly leaves the
+screen — the same trap as the cancelled-invoice and stale-record work earlier this week.
+Expansion is per customer and held outside render(), so it survives a re-render from a
+search keystroke or a sync event instead of snapping shut mid-read.
+
+test-customers-tabs-chips.js adds 28 assertions on the real extracted render() blocks:
+counts staying stable across tabs, each tab's filtering, suspended-last in ทั้งหมด
+without breaking bal_desc inside a single-status tab, a big-balance suspended customer
+still sorting after every active one, chips capped/uncapped either side of the limit, the
+hidden count AND total appearing, largest debts kept visible, expansion being per-customer
+rather than global, and source guards that the default tab is ทั้งหมด and the expansion
+state is declared outside render(). Rendered output verified in a browser. Full regression
+of all nineteen suites (386 assertions) green before and after the bump.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

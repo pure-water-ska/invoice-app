@@ -1,0 +1,31 @@
+release v1.0.228 — address in the outstanding statement header, B.E. dates in its table
+
+User request: on the customer's ใบแจ้งยอดค้างชำระ (customers.html → รายการค้างชำระ), the
+header must carry the customer's address, and the วันที่ column must read dd/mm/yyyy in
+Buddhist Era.
+
+Both in showOutstandingPreview():
+
+  - c.address prints between the name and the phone, with white-space:pre-line so a
+    multi-line address keeps its breaks. Conditional, so a customer with no address on
+    file gets no blank line. The phone gains a "โทร." prefix — it is no longer the only
+    line under the name and would otherwise read ambiguously beside a postcode.
+
+  - The date cell printed r.date.slice(0,10) — the raw ISO string (2026-08-15), neither
+    dd/mm/yyyy nor B.E. It now goes through Utils.formatDateTH, which already emits
+    exactly that format and already returns '-' for a missing date, so the old fallback
+    survives without a second hand-rolled formatter that could drift from the rest of the
+    app. The statement date in the heading was already using it.
+
+This is one block, so the on-screen preview, the copied image and the saved PNG all pick
+the change up together — #outstandingCapture is the single render site.
+
+test-outstanding-statement.js adds 22 assertions. It runs the REAL
+showOutstandingPreview sliced out of customers.html against the REAL Utils.formatDateTH
+sliced out of utils.js (neither restated), covering the address position, the no-address
+case emitting no empty div, both dates converting, no CE year or raw ISO leaking, a
+missing date still rendering a dash, settled invoices staying excluded, and the empty
+state. Verified discriminating: reverting both edits fails 9 of the 22. Full regression of
+all twenty-four suites (524 assertions) green before and after the bump.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

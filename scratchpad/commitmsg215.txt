@@ -1,0 +1,43 @@
+release v1.0.215 — Settings tool to find an invoice that exists only on the server
+
+User-reported: invoice 300669-209 is not in the list and search can't find it, yet
+importing it reports "มีอยู่บนเซิร์ฟเวอร์แล้ว" naming BOTH customers — so the server
+still holds the entire cross-customer collision while this device holds none of it.
+
+Nothing in the app could see that state. Every path that PULLS invoices down —
+_pullAll, the real-time listener, and loadArchive — filters on createdAt, so a doc
+whose date is missing or malformed is silently excluded from all three by Firestore
+while still occupying the number, invisible on every device. And with more than one
+device in use, a device holding a stale copy can re-upload records deleted here (the
+documented _serverIds resurrection), which local state alone cannot distinguish from
+"my delete silently failed".
+
+Firestore stamps _by (device) and _ts (when) on every write, and that is exactly what
+separates those two causes. New Settings → "ตรวจสอบเลขที่ใบกำกับบนเซิร์ฟเวอร์" (gated
+on invoice_edit) runs a date-UNfiltered query for one number and prints every server
+doc with its customer, page, total, date, writing device and write time, marks which
+are present locally, and calls out records written by another device — telling the
+user that machine must sync first or a re-delete will just ping-pong.
+
+Two actions:
+- "ดึงลงเครื่องนี้" writes the server's copies into local ONLY, never touching the
+  server, so it is safe whatever the cause. It clears any tombstone on those ids first
+  (otherwise the delete that caused this re-hides them immediately) and registers them
+  in _serverIds/_pullIds so the next save can't infer a delete and wipe them again.
+- "ลบออกจากเซิร์ฟเวอร์" tombstones before deleting so the removal propagates, and
+  AWAITS the commit — unlike the old fire-and-forget cleanup paths, a failure rejects
+  to the caller and is logged rather than reported as success (the v1.0.211 lesson).
+
+test-invoice-server-lookup.js adds 30 assertions driving the real extracted Sync
+methods against a fake Firestore: the query targets invoiceNumber not createdAt, a doc
+with NO createdAt is still found (the case every pull drops), offline returns null
+rather than a misleading empty list, the pull adds only missing records while
+preserving unrelated local ones and never writes to the server, and a failed delete
+commit propagates instead of silently succeeding. Rendered output verified in a browser
+against the approved mockup. Full regression of all sixteen suites (299 assertions)
+green before and after the version bump.
+
+Diagnostic only — this does not yet fix whatever put 300669-209 in that state; the
+tool exists to identify which of the two causes it actually is.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

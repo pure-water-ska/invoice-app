@@ -1,0 +1,49 @@
+release v1.0.223 — round down (write off) / round up on payments, and a real income split
+
+User request: clear the penny remainders customers never pay, "without record as income".
+Their data is full of them — every carry-forward transfer on file was ฿0.05–฿1.20, i.e.
+the carry-forward feature was being used as a makeshift write-off.
+
+The two directions are deliberately ASYMMETRIC, because the money differs (the user's own
+framing, and it is the correct accounting):
+  down (ตัดเศษ)  — the shortfall was NEVER received. Forgiving it settles the invoice but
+                   must not create income. DB.writeOffRemainder writes a non-cash payment.
+  up   (ปัดขึ้น) — the excess WAS received and is already a real payment, so it stays
+                   income. DB.roundUpInvoice writes NO payment at all; the invoice total
+                   rises to meet what was actually paid, closing the balance.
+Round-up applies to every current page (each page carries the same whole-invoice total, so
+touching only page 1 would leave them disagreeing) and skips stale duplicate pages.
+
+This exposed a real pre-existing bug. `carryForward` appeared ONLY in db.js and
+invoice-create.html — nothing in reports excluded it — so every non-cash carry-forward has
+been silently counted as revenue. Fixed generally rather than for write-offs alone:
+  • DB.isNonCashPayment(p)          — carryForward OR writeOff
+  • DB.getInvoiceCashReceived(...)  — paid minus non-cash; use for INCOME
+  • DB.getInvoicePaidAmount(...)    — unchanged; use for SETTLEMENT
+Reports' headline and per-group totals now use the income figure, and the payment-method
+report drops non-cash rows. The dashboard is untouched on purpose — all three of its uses
+are settlement (status/remaining), not income.
+
+The drill-down detail view keeps settlement totals, because its per-row badges ask "is this
+invoice closed?" and the two would otherwise contradict each other; instead the non-cash
+portion is broken out as its own badge, so it is never presented as money received while
+the figures still reconcile.
+
+No threshold cap, by explicit user decision after the risk was raised. Kept instead:
+payment_edit gate, a confirm naming the exact amount and its consequences, an optional
+reason, a re-entrancy lock on the confirm button, an activity-log entry per action, and
+DB.logError on failure.
+
+test-payment-rounding.js adds 40 assertions on the real DB: both directions end to end,
+the settlement-vs-income split across cash/carry-forward/write-off/cancelled/pending-cheque
+together, allocated-away overpayments still deducted, multi-page round-up, stale pages left
+alone, and the reports/dashboard/UI wiring. test-reports-payment-filter.js grows 7 → 10
+covering the new non-cash exclusion.
+
+Note on process: patching three files with a Python script silently rewrote them to CRLF
+(text-mode write on Windows) — every line showed as changed and it broke a test's
+extraction. Caught by the full regression, converted back to LF, and the diff is now 210
+insertions / 6 deletions as intended. Full regression of all twenty suites (429 assertions)
+green before and after the version bump.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

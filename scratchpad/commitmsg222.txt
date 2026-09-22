@@ -1,0 +1,18 @@
+release v1.0.222 — re-release of the v1.0.220 code on a forward-moving version
+
+No code change. The tree is functionally identical to v1.0.220 — the only differences
+are the version strings and the build timestamp (verified: a diff against the v1.0.220
+tag shows nothing but 1.0.220 → 1.0.222 and the APP_VERSION date).
+
+Why: v1.0.221 was reverted (see d732ab4) and its GitHub Release deleted, which returned
+the updater endpoint to v1.0.220. But Tauri only updates FORWARD, so any desktop client
+that had already reached 1.0.221 could never come back down. Publishing the reverted code
+under a higher version is the only way to pull such a machine onto it. Harmless belt-and-
+braces given nobody was known to have installed 1.0.221.
+
+Does NOT address the open data issue: the three carry-forward payments on 180869-005,
+240869-002 and 260869-002 still stand while 280869-003 no longer carries the matching
+ค้างชำระ lines, so ฿1.50 remains off the books. Nor the underlying defect that editing a
+target invoice orphans its carry-forward payments.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

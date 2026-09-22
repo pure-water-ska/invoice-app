@@ -1,0 +1,50 @@
+release v1.0.235 — retire ราคากลาง (ทุกลูกค้า); convert the 11 in use to customer prices
+
+User request: remove the ทุกลูกค้า prices — "which customer prices refer to standard
+prices, just keep its value". Asked which customers, the user chose ONLY the
+customer × product × delivery combinations actually invoiced at a standard price (11 on
+live data, 7 customers) over giving every active customer every fallback (2,769 new
+rules, 3,280 → 5,990). Shown a mockup, approved.
+
+Live data (read-only): 59 standard rules across 30 products (30 รับหน้าโรงงาน,
+29 จัดส่ง); 1 active customer with no prices at all (มัสยิดกลาง ปริก); 12 invoice lines
+on 10 invoices for 6 customers used a standard price in the last 90 days; the product
+"default price" field is 0 on all 32 products, so it was never the issue.
+
+pricing.html:
+  - A one-time, admin-only card lists the conversions (_stdConversions: non-cancelled
+    invoices of existing customers, for products the customer has no own price for on
+    that delivery method or on every method), with the last billed price and invoice,
+    and an editable value defaulting to the standard price. A standard price whose
+    newest history entry disagrees is flagged (_stdLostSave) — live, ถุงขวด 830(ขุ่น)
+    เกรด A shows 92 but aing saved 70 on 8 Aug (one of the lost saves fixed in
+    v1.0.234). Values typed in the card survive re-renders.
+  - retireStandardPrices(): admin only, Utils.confirm, rejects empty/negative values;
+    adds each conversion as the customer's own rule (tier fields copied, notify date
+    not, new id) with a price-history entry noted แปลงจากราคากลาง, deletes every
+    standard rule, all in ONE savePricing — which the per-rule sync from v1.0.234
+    uploads as individual adds and deletes — and logs ยกเลิกราคากลาง. The card then
+    disappears. It is NOT run by this release: an admin presses it after updating.
+  - The customer picker no longer offers "— ทุกลูกค้า (ราคากลาง) —"; savePrice requires
+    a customer. Placeholder, banner ("ที่ยังไม่มีราคา — ต้องตั้งราคาก่อนออกใบกำกับ"),
+    the empty-state message and the priority note no longer promise a standard price.
+
+db.js: DB.getPriceAsOf — which invoices use — fell back to standard-price HISTORY,
+which keeps every old standard price forever, so deleting the rules alone would have kept
+charging a retired price. It now falls back to it only while a standard rule for that
+product still exists: unchanged until the conversion, no fallback after. getPrice /
+getPricingRule keep their chain; with no standard rules they find none. _seedPricing
+(brand-new installs only) is untouched — its local seeds are never uploaded.
+
+Verified live in the preview on real data without pressing convert: the card showed
+7 customers / 11 items / 59 to delete with the flagged row; the picker had no
+ทุกลูกค้า and both fields were marked required; rules, history and the upload queue were
+unchanged afterwards.
+
+test-standard-price-retire.js — 49 assertions driving the REAL page functions and the
+REAL DB.getPriceAsOf. Mutation-checked, thirteen breaks, all caught (a first run exposed
+a sample where the newest invoice came first, so "newest wins" was untested; reordered).
+test-pricing-no-price-customers.js now expects the new wording. CLAUDE.md documents the
+retirement. Full regression of all thirty-one suites (905 assertions) green.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

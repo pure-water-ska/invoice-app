@@ -1,0 +1,34 @@
+release v1.0.217 — delete just the stale page from the server lookup tool
+
+v1.0.215's lookup tool could only delete ALL docs for an invoice number. For the
+150869-004 case that is useless: the number holds a stale pre-edit record AND the
+corrected one, and deleting both would remove the invoice outright. So the one thing
+the tool existed to help with — clearing the leftover that makes the list show a
+pre-edit amount — it couldn't actually do.
+
+Each server row now carries a checkbox and a status badge. The current record per
+(customer, page) is identified by the same rule as DB.getCurrentPagesByNumber /
+currentInvoiceRowMap — highest editCount, ties keep first-seen — badged ปัจจุบัน and
+deliberately left UNTICKED; stale rows are badged เก่า/ซ้ำ with their editCount, tinted,
+and pre-ticked. Deletion is destructive, so the default selection is the safe one and the
+confirm dialog itemises exactly which customer/amount pairs are going. Selecting every
+doc for a number gets an extra warning, since that removes the whole invoice — legitimate
+for a pure ghost, but not what "clean up the stale page" means.
+
+A cross-customer collision is correctly NOT treated as staleness: each customer's record
+is current for its own group, so nothing is pre-ticked and no เก่า/ซ้ำ badge appears —
+those need a renumber, not a delete.
+
+This path is preferable to the invoice list's sub-row delete for repair work because
+deleteInvoiceDocsFromServer() awaits the commit and surfaces a real error, whereas the
+list's cleanup is fire-and-forget (it logs since v1.0.211, but reports success either
+way) — and on this data deletes have repeatedly failed to land.
+
+test-invoice-server-lookup.js grows 30 → 39 assertions, driving the real extracted row
+block: the 150869-004 shape resolves the editCount-1 record as current and pre-ticks only
+the stale one, and a pure collision pre-ticks nothing. Verified in a browser that the
+rendered checkboxes carry the right state (querySelectorAll finds 2, only 'stale'
+checked). Full regression of all sixteen suites (316 assertions) green before and after
+the bump.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

@@ -1,0 +1,43 @@
+release v1.0.219 — pricing page says WHY a customer's price list is empty
+
+User-reported: "why เขากลอยการค้า cannot be found at pricing.html". Diagnosed on the
+live data rather than guessed: the customer IS present (99 customers, id
+mq0t77la4xkdetas8) and the picker DOES match them — typing เขากลอย returns exactly
+["เขากลอยการค้า"] — but they hold 0 of the 3,277 pricing rules. Filtering the price list
+by that name therefore matched nothing and the table showed the bare "ไม่พบข้อมูลราคา",
+which reads as though the CUSTOMER is missing rather than their prices. Not a bug in the
+picker; a genuinely misleading message.
+
+Two earlier theories were tested and killed before any code was written, which is the
+only reason this didn't ship as another guessed fix:
+- "a record with a non-string name throws and aborts the filter" (the documented
+  invoice-create incident) — disproved: customers.html's search is equally unguarded and
+  finds the customer fine.
+- "the cached _pcList is stale" — disproved: _pcList holds all 99 including this one.
+
+Fixes:
+- The empty state now names the customer when the typed filter resolves to exactly ONE,
+  explains that ราคากลาง applies, and offers a button that opens the add-price dialog
+  pre-set to them. An unmatched or ambiguous string still gets the plain message, since
+  naming a customer there would itself be misleading.
+- renderNoPriceBanner() surfaces every customer with no rules at all, collapsed by
+  default, each chip opening the add-price dialog for that customer. Three exist in
+  production — เขากลอยการค้า, น้ำดื่มทวีสุข, มัสยิดกลาง ปริก — all billing at ราคากลาง,
+  and nothing anywhere else in the app pointed that out. Only one was noticed, and only
+  because it was mistaken for a missing customer.
+
+customersWithoutPrices() builds a Set of rule-owning ids in ONE pass; a per-customer
+.some() over 3,277 rules would be O(customers × rules) on every render, the per-row-scan
+mistake this page was already fixed for once.
+
+test-pricing-no-price-customers.js adds 21 assertions on the real extracted functions:
+the three-uncovered-customers shape, a ราคากลาง (null customerId) rule not counting as
+coverage, malformed records skipped rather than crashing, the banner's count/chips/
+collapsed state, hidden-and-emptied when everyone is covered, the expanded toggle
+surviving a re-render, and the one-hit-only rule for naming a customer in the empty state.
+Full regression of all eighteen suites (358 assertions) green before and after the bump.
+
+Investigated directly in the user's signed-in session; read-only apart from typing in the
+filter box, which was cleared afterwards.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

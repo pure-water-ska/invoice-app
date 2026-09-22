@@ -1,0 +1,42 @@
+release v1.0.225 — say so when an invoice number could not be verified
+
+Investigation of a live incident: an invoice saved 31 Aug at 16:24 was issued 310869-003
+when 003 and 004 had existed on the server since 06:39 and 08:45 THE SAME DAY. Not a race
+— eight hours apart.
+
+Established from server data:
+  • issuedAt timeline: 001 02:02, 002 02:05, 003 06:39, 004 08:45 (all aing), then joe at
+    16:24 receiving 003.
+  • It is ONE machine. All 35 invoices since 25 Aug carry the same device id, across the
+    aing / joe / aieng logins — a shared PC, not separate devices. (This also limits the
+    v1.0.215 lookup tool's "เขียนโดยเครื่อง" column: it identifies machines, not staff.)
+  • The counter is healthy: data/inv_counter syncs and holds 2026-08-31 = 5.
+  • The atomic reservation's logic is sound — it takes max(serverMax, localFloor) + 1 and
+    forces a server read, so had it run it would have returned 005.
+
+Which leaves: neither server tier actually ran. Both reserveInvoiceNumberAtomic and
+reserveFreeInvoiceNumber return null the instant Sync isn't connected — the normal state
+for a few seconds after the app opens, since DB.ready resolves before the Firestore
+listener delivers anything. Saving in that window falls through to purely local numbering
+against a local cache that may not hold the day's later invoices. Every failure path was
+console.warn only, invisible in the desktop build, so a number that could NOT be verified
+was indistinguishable from one that was, and the duplicate surfaced only the next day.
+
+This does not change the numbering — offline-first, a save must never be blocked. It makes
+the unverified case announce itself: a _numWhy trail records why each tier was skipped
+(not loaded / not connected / returned null / threw, with the exception text), and when the
+number ends up unverified it is written to DB.logError as INV-NUMBER-UNVERIFIED, logged to
+activity, and the user is warned AT SAVE TIME rather than finding out a day later.
+
+Deliberately not proven, and said so to the user: the exact cause of this one instance is
+unrecoverable, because wt_activity and wt_errors are in Sync.NO_SYNC and never leave the
+machine that wrote them. The fix is what makes the next one diagnosable.
+
+test-invoice-number-unverified.js adds 25 assertions driving the REAL extracted allocation
+block: the healthy atomic path stays silent, the exact incident shape (Sync not connected)
+warns and records "saved before sync finished", a rescue by the checked tier is NOT warned,
+both-tiers-null and both-tiers-throw preserve their reasons and exception text, Sync absent
+entirely is handled, and a logError that itself throws still cannot lose the invoice. Full
+regression of all twenty-one suites (455 assertions) green before and after the bump.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

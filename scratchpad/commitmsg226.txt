@@ -1,0 +1,47 @@
+release v1.0.226 — device identity stops travelling with the data
+
+User correction to a conclusion I drew in v1.0.225: invoices ARE created on different
+machines, yet every server record carries the same _by / _byName
+(dev_kb2b12k711mmqg47oj7 / "ASUS") across the aing, joe and aieng logins. I had read the
+shared id as proof of a single shared PC. It proved no such thing — and the reasoning in
+v1.0.225's commit message is wrong on that specific point.
+
+Root cause: device identity was stored as ordinary data, so it travelled with the data.
+DB._set() mirrors EVERY key it is handed to the Local Folder Sync folder — wt_device_id
+included — and restore() reads every .json in that folder back. A folder shared between
+machines, or a restore from one machine onto another, therefore made them the same
+"device", destroying the only field that records WHICH machine wrote something. Confirmed
+live: 21 of 21 recent invoices, three different users, one id and one name.
+
+Three fixes:
+  1. local-folder-sync.js: DEVICE_LOCAL_KEYS excluded from queueWrite, from writeAll, and
+     — importantly — from restore(), so a folder that already holds a stale identity can
+     no longer re-infect a machine on read. (wt_device_label is written straight to
+     localStorage and never reaches DB._set, so it could not leak this way; listed anyway
+     in case that changes.)
+  2. Settings: the existing device-name field gains the id, a recent-write count, a
+     collision check, and a one-time regenerate. Run per machine, then rename each — doing
+     them all at once just yields a new set of indistinguishable ids. sync.js warns that an
+     id changing on every launch breaks echo-suppression; a deliberate one-off is fine.
+  3. Records now carry createdDevice / createdDeviceName, stamped at CREATION by
+     DB.creatorDeviceFields() on invoices and both payment sites. This is the part that
+     makes later investigation actually work: _by records the LAST writer and is
+     overwritten by any re-push, whereas this is immutable app data alongside createdBy.
+     Deliberately NOT applied on the edit path — an edit must not relabel who issued an
+     invoice.
+
+Also made creatorDeviceFields use window.Sync consistently rather than guarding on
+window.Sync then reading a bare Sync; the test harness surfaced the inconsistency.
+
+Note this does not retro-fit history: existing records keep the merged id, and the
+collision check is a heuristic (a genuinely shared PC with several logins looks the same),
+so it is phrased as something to check rather than a fault.
+
+test-device-identity.js adds 24 assertions: the exclusion list is driven for real rather
+than restated, all three call sites filter, creatorDeviceFields captures/degrades/survives
+a throwing _deviceName, both payment sites and the invoice site are stamped, the edit path
+is NOT, and the Settings action is confirmed via Utils.confirm with logging on success and
+failure. Full regression of all twenty-two suites (479 assertions) green before and after
+the bump.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

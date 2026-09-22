@@ -1,0 +1,73 @@
+release v1.0.234 — price changes can no longer be lost or overwritten
+
+User report: "prices.html shows prices the old one not updated (may be common prices)".
+
+Not a stale screen: this device's local rules matched the server exactly (0 of 3,280
+different). The server itself held the old prices. Measured live, read-only: 67 rules
+no longer equal the last value saved for them on pricing.html (every save writes a
+price-history entry, so history is the record of intent):
+  - 41 never reached the server — the product doc's _ts is EARLIER than the save
+    (e.g. 12 Sep 13:49, ฝาขวด PET for จรัส จันทมณี saved 0.17 by aing; doc last
+    written 11:41; still 0.18)
+  - 26 were written after the save but carry the older price (overwritten)
+  - including 2 ราคากลาง: ถังน้ำ 20 ลิตร saved 84 on 11 Aug, shows 68;
+    ถุงขวด 830(ขุ่น) เกรด A saved 70 on 8 Aug, shows 92
+Almost all aing's, 6 Jun → 12 Sep. The price HISTORY did upload — it goes through
+sync.js's persistent queue — which is why history and rules disagree.
+
+Three causes in pricing-grouped-sync.js, all fixed:
+  1. A change made while sync wasn't ready (a failed sign-in — aing's account until
+     v1.0.230 — quota, a slow start) waited in an in-memory array; a rejected commit
+     was only logged. Leaving the page lost it, invisibly: the pending bar never knew.
+     → Changes are persisted to a durable queue (wt_price_pending) and retried until
+       the server acknowledges them: on init, 'online', every snapshot, the pending
+       bar's ลองอัปโหลดอีกครั้ง, and logout (Sync.flushNow).
+  2. A server snapshot replaced local wholesale (un-acked retention only covered
+     products absent from the server), so an unsent price flipped back.
+     → Queued ops are overlaid on every snapshot before it reaches local.
+  3. Every save wrote set({ rules: ALL rules of the product }, { merge:false }), so a
+     device holding stale prices reverted every other customer's newer price for that
+     product whenever it saved any one of them.
+     → Only changed rules are written, as field-level merges
+       ({ rules: { <id>: rule | FieldValue.delete() } }, { merge:true }).
+
+What changed is found by diffing local against a per-rule baseline of the server as
+last seen (wt_price_baseline: rule id → [productId, content hash], key-order
+independent) — never against db's "prev", which is the same mutated array. The queue is
+replaced by the current diff each time, so a price edited and then changed back uploads
+nothing; an op re-edited while its commit is in flight keeps a new `at` and is sent
+again. A doc still carrying this device's own un-acked write keeps its old baseline, so
+a write the server later rejects remains a difference. On the first run of this version
+the baseline is initialised from local wt_pricing (what the listener last wrote) —
+never empty, which would re-upload every rule from a possibly stale device. Both keys
+are stored via DB.setLocalOnly (HDD-backed on desktop, so they survive the launch wipe)
+and excluded from LocalFolderSync, where restoring another copy would resend stale
+prices. The bootstrap path (server collection empty on first run) is unchanged.
+
+The pending-upload bar (v1.0.231) now includes price changes: Sync._extraPending()
+feeds them into the count, the รายละเอียด panel ("ราคาสินค้า (N รายการ)", waiting since,
+last try, reason), the retry, and logout. While being sent they count as uploading, not
+waiting. Failures are logged to Troubleshoot as PRICE-SYNC-FAIL. CLAUDE.md documents the
+model, the keys, and that pricing's trust window no longer caches a fingerprint.
+
+The 67 prices already lost are NOT changed by this release.
+
+Verified live in the preview without writing a price: the new module loaded, built its
+baseline from all 3,280 rules, took the server snapshot (31 product docs) with nothing
+queued and nothing uploaded; re-saving unchanged data queued nothing; the bar rendered a
+page-memory-only fake pending summary correctly and was restored.
+
+test-pricing-durable.js — 65 assertions driving the REAL pricing-grouped-sync.js: its
+exported helpers under node, and the REAL stateful module evaluated against a fake
+Firestore/DB/Sync that persists across simulated reloads — replaying each cause (saved
+while not connected survives a reload; the old server copy no longer undoes the unsent
+0.17; a stale device's write contains only the edited rule, merge:true; a refused upload
+is kept, explained, retried) plus deletes, product moves, edit-back, the upgrade path,
+re-edits mid-flight, concurrent flushes, pending-doc baselines, and the sync.js bar
+methods. test-pricing-roundtrip.js (11) unchanged and green; test-upload-info.js's
+harness includes the new helper. Mutation-checked, twelve breaks, all caught against a
+fully green baseline (the first two runs were discarded: a test-ordering bug made the
+unmutated baseline fail, which would have made every mutation look caught). Full
+regression of all thirty suites (855 assertions) green.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

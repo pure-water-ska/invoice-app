@@ -1,0 +1,38 @@
+release v1.0.214 — cancelled invoices no longer count as unpaid
+
+User-reported: a cancelled invoice still showed on a customer's unpaid list.
+
+Root cause: DB.getCustomerBalance() has always excluded cancelled invoices, but SIX
+other places computed "unpaid/outstanding" by re-filtering on customerId alone and
+so silently kept them. The customer card contradicted itself — the ค้างสุทธิ money
+badge excluded a voided invoice while the "N ค้างชำระ" count and the red chip list
+right beside it still counted it. CLAUDE.md already documents the convention these
+sites were violating: cancelled invoices stay visible in list views but never count
+toward money totals.
+
+Two of the six were customer-facing and two touched real money:
+- copyOverdueMsg() — the reminder text copied to send to the customer, which would
+  demand payment for a voided invoice ("2 ใบ รวม 8,277.00" instead of "1 ใบ 500.00")
+- showOutstandingPreview() ×2 (customers.html + payments.html) — the printed
+  ใบแจ้งยอดค้างชำระ statement handed to the customer
+- _overpayOutstanding() — offered cancelled invoices as targets when cutting an
+  overpayment, i.e. would allocate REAL credit onto a bill that no longer exists
+- the sort-by-balance comparator, and getPayTermsViolations(), which raised false
+  credit-limit warnings by counting voided bills toward maxBills/maxDays
+
+Fix: new DB.getActiveInvoicesByCustomer(custId) is the single list every money
+calculation now draws from, so this can't drift apart again. Per explicit user
+decision the customer card hides cancelled invoices completely — the "N ใบกำกับ"
+count and "ใบล่าสุด" date exclude them too (the void was the newest invoice in
+testing, so it was posing as the customer's latest activity). They remain visible
+on invoices.html with their ยกเลิก badge, as the convention intends.
+
+test-cancelled-excluded-from-unpaid.js adds 22 assertions driving the REAL code out
+of db.js/customers.html/payments.html. Discrimination was verified, not assumed: with
+the filter removed, 15 of the 22 fail with exactly the reported symptoms (statement
+lists the void, overpay offers it as a credit target, reminder says 2 ใบ 8,277.00,
+false เกินกำหนด violation) — the 7 that still pass are the no-cancelled regression
+cases, which is correct. Full regression of all fifteen suites (269 assertions) green
+before and after the version bump.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

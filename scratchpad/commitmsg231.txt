@@ -1,0 +1,72 @@
+release v1.0.231 — the pending-upload bar can explain itself and retry
+
+User request: "sometimes the warning bar shows pending upload, how can user know what it
+is and reason with try to upload button". Shown a redesign, the user chose: "keeping the
+old form with adding 'more info' button to show details".
+
+The blue bar ("ค้างอัปโหลด N รายการ — จะอัปโหลดเองเมื่อเน็ต/โควต้ากลับมา · ปิดได้ …")
+had no button and no detail. Three different situations drew the same wording (writes
+queued after a failure, writes in flight with no server ack for 12 s, offline with writes
+waiting), and the reason for a failed upload was thrown away — only written to the
+device-local Troubleshoot log, which other PCs can't see.
+
+The bar is unchanged — same text, same colour — except for a รายละเอียด button. It opens
+a panel showing:
+  - สาเหตุ — the reason in plain Thai: the current blocker first (offline, not connected
+    to Firebase with the sign-in error), otherwise the newest recorded Firebase error
+    (quota, permission-denied, unauthenticated, connection, oversized batch, or the raw
+    code), otherwise "server not acknowledging for 12 s", otherwise "page closed before
+    upload". For the quota it says when it returns, computed from midnight Pacific
+    (≈14:00 Thai now, ≈15:00 after daylight saving ends) rather than hard-coded.
+  - ข้อมูลที่รออัปโหลด — each waiting data type in Thai, when it FIRST started waiting,
+    and when it was last tried; writes still in flight show how long they've waited.
+  - a note that the data is safe on this PC — and not to clear the browser's data until
+    it has uploaded.
+  - ลองอัปโหลดอีกครั้ง — reuses flushNow() (the routine behind Settings' อัปโหลดที่ค้าง and
+    logout), then reports success or the new reason. Locked against a double-click;
+    disabled offline, and says so; says so when Firebase isn't connected.
+
+To have a reason to show, every queue entry now carries { since, reason, attempts }:
+  - all seven _enqueue call sites pass one — page closed before the debounce fired
+    ('unload', both paths), saved while offline / not connected (push), and the actual
+    Firebase error on both failed-write paths and both flushNow paths, which previously
+    discarded it with catch(() => …)
+  - _flushQueue and _flushQueueNow record a failed retry on the entry (_noteQueueFailure)
+    instead of stopping silently; the queue itself is left exactly as before
+  - re-queuing a key used to overwrite its timestamp, so data waiting since 09:42 would
+    read "since 10:15"; `since` now survives re-queues
+  - a later "page closed" re-queue keeps an earlier real error rather than hiding it
+  - the headline prefers the newest ERROR over a newer "page closed"/"offline" — caught
+    in the live preview, where a quota error on invoices was hidden behind a page-close
+    on payments three minutes later; fixed and pinned by a test before release
+Firebase error text is HTML-escaped before display. Entries queued by an older version
+have no reason and say so.
+
+CLAUDE.md documents the entry shape — and that fake entries must never be injected into
+wt_sync_pending to test the bar, since a flush writes each entry's whole value to
+Firestore.
+
+Verified live in the preview without touching data: Sync._getQueue was swapped IN PAGE
+MEMORY for two demo entries with every upload path stubbed out, the panel opened and
+screenshotted, everything restored before leaving the page, then reloaded — the real
+queue was empty before and after. The same session's console showed a genuine
+`resource-exhausted: Quota exceeded.` from Firestore at 11:08 — the free daily quota was
+already used up, the likely cause of the bars users are seeing today.
+
+_reasonFromError stamps its time with Date.now() rather than `new Date()`, matching
+_enqueue — one clock, so reasons order correctly against each other. No behaviour change
+for users; it is what let the headline test actually pin time.
+
+test-upload-info.js — 91 assertions driving the REAL queue, reason, rendering and retry
+methods sliced out of sync.js against stubbed storage, DOM and time, plus structural
+checks on every call site and on the bar's unchanged wording. Mutation-checked, ten
+breaks, each caught cleanly by its own assertions: the error-first headline, the
+"waiting since" time, "page closed" hiding an error, recording a failed retry, the
+double-click lock, escaping, the retry button disabled offline, the Pacific quota offset,
+the bar rendering the panel, and a queue site dropping its reason. The first mutation run
+exposed two weak tests, both fixed before release: the headline test passed even with the
+fix removed (the clock mismatch above), and a missing lock hung the suite instead of
+failing it (it now releases every pending flush). sync.js restored byte-identical and
+still uniformly CRLF. Full regression of all twenty-seven suites (729 assertions) green.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

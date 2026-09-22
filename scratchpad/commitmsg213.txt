@@ -1,0 +1,36 @@
+release v1.0.213 — Settings tool to actually settle old folded-over balances
+
+v1.0.212 only FLAGGED balances that were folded onto a newer invoice but never
+retired on the source — it didn't fix them. The retirement mechanisms
+(allocateOverpayCredit v1.0.194, carryForwardOwedBalance v1.0.203) only ever
+applied to additions made after each shipped, so every older one is still
+double-counted: billed on the newer invoice while the source stays outstanding
+forever. This adds the repair tool.
+
+Settings → "ตัดยอดเก่าที่ยกไปใบใหม่แล้ว" (gated on payment_edit, hidden otherwise)
+scans every customer, lists each stale pair with source/target/amounts, and
+settles the ticked rows through the SAME primitives a live invoice save uses —
+no parallel accounting path that could drift.
+
+Two deliberate safety rules, both covered by tests:
+- settleAmount is min(|folded|, |current outstanding|). If part of the source was
+  paid directly after it was folded, settling the full folded amount would push
+  the invoice into a phantom credit; capping leaves any real remainder owed. The
+  UI tints those rows and explains the difference.
+- A source folded as owed but now sitting overpaid (or vice versa) is ambiguous,
+  so it is reported in a separate "skipped" note rather than guessed at — never
+  silently dropped from the count.
+
+Also grouped by source number rather than per memo line, so a balance folded onto
+two different invoices settles once, not twice.
+
+test-stale-balance-cleanup.js adds 30 assertions driving the REAL DB object from
+db.js against in-memory storage: the clean case, the never-overshoot cap, an
+already-retired pair correctly ignored, sign disagreement routed to skipped,
+double-folded settling once, cancelled/self-referencing invoices ignored, both
+owed and overpaid settle paths verified end-to-end against getInvoicePaidAmount,
+and idempotency (a re-scan after settling finds nothing). Verified the real
+rendered output in a browser against the approved mockup before shipping. Full
+regression of all thirteen suites (236 assertions) green before and after bump.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

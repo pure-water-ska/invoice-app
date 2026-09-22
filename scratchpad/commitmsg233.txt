@@ -1,0 +1,25 @@
+release v1.0.233 — the payment window's header names the customer
+
+User request: "in payment record pane, it should have customer name under
+บันทึกชำระเงิน - ddmmyy-000". Shown a mockup, approved.
+
+The payment window's header was one line — "บันทึกชำระเงิน — <invoice number>" — so
+staff had to open a payment's details (v1.0.232) to see whose invoice it was. The header
+now carries a second line with a person icon and the customer's name.
+
+  - openPayModal looks the name up from the customerId it already receives, right after
+    storing it, and sets it with textContent — any name renders as text.
+  - The line starts hidden and is hidden again when the customer can't be found, so an
+    empty line never shows.
+  - The modal is reused for every invoice, so the name is always overwritten — cleared
+    when unknown — and a previous invoice's customer can never linger (the same trap as
+    the v1.0.229 cash-receiver default).
+
+test-payment-detail-customer.js gains 9 assertions (now 24), driving the REAL lines
+sliced out of openPayModal against stub elements, plus the header markup.
+Mutation-checked, four breaks, each caught by its own assertion: the line never shown,
+the name set as HTML, a previous name not cleared on reuse, and the empty line starting
+visible; payments.html restored byte-identical and still LF. Full regression of all
+twenty-nine suites (790 assertions) green.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

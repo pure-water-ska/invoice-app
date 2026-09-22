@@ -1,0 +1,43 @@
+release v1.0.221 — payment summary print now reconciles
+
+User-reported: over/under-paid amounts moved onto another invoice should appear on the
+printed payment summary. It turned out to be worse than an omission — the sheet did not
+ADD UP, on a document handed to the customer.
+
+The payment rows print each payment's RAW amount, while ชำระแล้ว uses
+getInvoicePaidAmount() → effectivePaymentAmount(), which subtracts whatever was allocated
+to other invoices. So an invoice whose overpayment was cut elsewhere printed a ฿10,000 row
+above a ฿8,000 "ชำระแล้ว" with ฿2,000 unexplained and the status still reading ✓ ชำระครบ.
+
+Three things separate the rows from the net figure; each now gets its own summary line,
+and each only prints when it applies, so an ordinary invoice is unchanged:
+  • หัก ตัดไปใบอื่น — allocated away (subtracts)
+  • ยกยอดไปใบใหม่ (ไม่ใช่เงินสด) — the customer's OWN old debt moved onto a new invoice.
+    It settles this invoice, so it counts toward paid, but it is NOT money they handed
+    over and must not sit inside a "รับเงิน" total.
+  • เช็ครอขึ้นเงิน (ยังไม่นับ) — printed in the rows but deliberately excluded from paid.
+    Not part of the original request, but without it the new reconciling column still
+    would not have reconciled whenever an un-cleared cheque was present.
+When any of these apply the cash line is relabelled รวมรับเงินจริง and a ชำระแล้ว (สุทธิ)
+line closes the arithmetic: cash + carryForward − allocated = paid, by construction.
+
+Each allocation also prints under the payment it came from, naming the destination
+invoice ("↳ ตัดไปใบ 030869-003 ฿2,000.00") from the allocations[] audit trail, so the
+customer can trace their money rather than just seeing a smaller total. Carry-forward rows
+are greyed and marked "↳ ไม่ใช่การรับเงิน" on the row itself.
+
+Also fixes a pre-existing bug the rendering check exposed: methodDetail() fell back to
+p.notes for any method outside เงินสด/โอน/เช็ค while the caller appends p.notes again, so
+the note printed twice — which in practice meant exactly the carry-forward rows
+("ยกยอดค้างชำระไปใบกำกับ X | ยกยอดค้างชำระไปใบกำกับ X"). The fallback now returns ''.
+
+test-payment-summary-print.js adds 32 assertions driving the real extracted breakdown
+against real DB predicates. The load-bearing ones assert the identity
+cash + carryForward − allocated = paid holds in every combination: allocation only,
+carry-forward only, pending cheque only, all three at once, multiple allocations from one
+payment, and an ordinary invoice. Plus the cleared-cheque case, the conditional rendering
+of each line, and the methodDetail de-duplication. Rendered print verified in a browser
+before and after the duplication fix. Full regression of all twenty suites (418
+assertions) green before and after the bump.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

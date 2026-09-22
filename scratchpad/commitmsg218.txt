@@ -1,0 +1,43 @@
+release v1.0.218 — balance and reports agree when a stale edited page is kept
+
+The user chose to KEEP stale pre-edit records as history rather than delete them. That
+is safe only if every money calculation resolves an invoice number to the same record
+regardless of array order — and two of them did not:
+
+    getCustomerBalance   invs.find(i => i.page === 1)              → the FIRST record won
+    reports.html         if (!invByNum[key] || inv.page === 1)     → the LAST page-1 won
+
+Measured on a stale ฿12,500 record beside its corrected ฿9,800 replacement (the
+150869-004 shape), the two produced OPPOSITE answers and contradicted each other:
+
+    stale first  → balance ฿12,500,  reports ฿9,800
+    fixed first  → balance ฿9,800,   reports ฿12,500
+
+Array order follows sync/load order, so neither was stable. getCustomerBalance also
+feeds the customer cards, the invoice-create warning bar and the carry-forward logic.
+
+Both now route through DB._isBetterInvoiceRep(cur, cand): prefer page 1, then the
+highest editCount, incumbent stays on a tie. Deterministic, so order cannot change the
+result, and the two can no longer disagree. Applied at both reports.html grouping sites
+(the summary and the payment-behaviour report). Normal multi-page invoices behave
+exactly as before — page 1 still wins, and the whole-invoice total is still counted once.
+
+Worth doing independently of this one invoice: 180769-001, 220769-007 and 070869-001 are
+already in the same state, and more will appear until the failed-delete cause is found.
+The app should give the same answer whether or not a stale record happens to be present.
+
+Also confirmed while investigating that the user's history requirement is already met
+without the duplicate: editHistory[].previous stores the pre-edit total, customer and
+every original line item on the CURRENT record, rendered on the invoice view page as
+struck-through-old → new with an expandable ดูรายการเดิม table (v1.0.185). The stale
+record is debris from a failed delete, not the history mechanism — but keeping it is now
+harmless either way.
+
+test-invoice-rep-consistency.js adds 21 assertions loading the real DB and applying the
+real reports rule extracted from reports.html: the shared rule's six cases, both paths
+order-independent and agreeing with each other, multi-page not summed to 1500, an invoice
+with no page-1 record still resolving, a cross-customer collision still counted per
+customer, and a kept stale record not making a settled invoice look underpaid. Full
+regression of all seventeen suites (337 assertions) green before and after the bump.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
