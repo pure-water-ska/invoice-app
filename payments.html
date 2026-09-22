@@ -2521,7 +2521,7 @@ function closeOverpay(createNew) {
   if (createNew && pendingOverpayData && Math.abs(pendingOverpayData.diff || 0) > 0.01) {
     const { custId, invNum, diff } = pendingOverpayData;
     const label = diff > 0 ? `ชำระเกินจากใบ ${invNum}` : `ค้างจากใบ ${invNum}`;
-    sessionStorage.setItem('pendingAdjust', JSON.stringify({ custId, label, amount: diff }));
+    sessionStorage.setItem('pendingAdjust', JSON.stringify({ custId, label, amount: diff, sourceInvNum: invNum }));
     location.href = `invoice-create.html?cust=${custId}&adjust=1`;
   } else {
     Utils.showAlert('บันทึกชำระเงินสำเร็จ', 'success');

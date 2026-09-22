@@ -579,6 +579,13 @@ window.addEventListener('DOMContentLoaded', () => {
           items[0].price = Math.abs(adj.amount).toFixed(2);
           items[0].total = Math.abs(adj.amount);
           renderRows();
+          // Queue the source invoice retirement so saveInvoice() can settle it.
+          // Without this the source's balance is never reduced and keeps reappearing
+          // in the balance bar on every subsequent new invoice for this customer.
+          if (adj.sourceInvNum) {
+            if (isOver) _pendingCreditAllocations.push({ num: adj.sourceInvNum, amount: adj.amount });
+            else        _pendingCarryForwards.push({ num: adj.sourceInvNum, custId: adj.custId, amount: Math.abs(adj.amount) });
+          }
           Utils.showAlert(
             `โหลดรายการ${isOver ? 'ชำระเกิน' : 'ค้างชำระ'} ฿${Utils.formatNumber(Math.abs(adj.amount))} จากใบกำกับเดิมแล้ว`,
             'warning'
