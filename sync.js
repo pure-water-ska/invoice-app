@@ -94,6 +94,51 @@ var Sync = {
     'wt_errors',
   ]),
 
+  // ── Proportional mass-delete guard for the per-record sync modules (v1.0.239) ──
+  // The >5 guard in _writeKey only covers COLLECTIONS (invoices/payments). Customers,
+  // products, users and pricing are owned by collection-sync.js / customer-sync.js /
+  // pricing-grouped-sync.js, which compute "delete = on the server, absent locally"
+  // with no size limit at all. On 23 Sep 2026 a device came up with a seeded local
+  // (1 customer "ร้านทดสอบ", 7 price rules), diffed it against the server fingerprint
+  // and deleted 98 customers + ~3,270 price rules from Firestore; the listener then
+  // propagated the empty state to every device.
+  //
+  // A FLAT threshold cannot work here: retiring ราคากลาง (v1.0.235) legitimately
+  // deletes 59 rules in one savePricing. So the rule is proportional — a single push
+  // may not delete more than _MASS_DEL_MIN records AND more than _MASS_DEL_FRAC of
+  // what the server holds. The wipe (98/99 = 99%, 3,272/3,279 = 99.8%) is blocked;
+  // the retirement (59/3,279 = 1.8%) and every ordinary delete pass through.
+  //
+  // Blocked pushes keep their upserts — only the deletes are dropped — so a device
+  // with stale local still can't lose a genuine edit.
+  _MASS_DEL_MIN: 20,
+  _MASS_DEL_FRAC: 0.30,
+  allowMassDelete: false,   // set true only by an admin tool that means it
+
+  massDeleteBlocked(name, delCount, serverCount) {
+    if (this.allowMassDelete) return false;
+    if (!(delCount > this._MASS_DEL_MIN)) return false;
+    if (!serverCount || !(delCount > serverCount * this._MASS_DEL_FRAC)) return false;
+    const pct = serverCount ? Math.round(delCount / serverCount * 100) : 0;
+    const msg = name + ': blocked a push that would delete ' + delCount + ' of ' +
+                serverCount + ' records (' + pct + '%) — local looks incomplete';
+    try { console.warn('[Sync] ' + msg); } catch {}
+    // Throttle the log: while local stays incomplete this fires on every save, and
+    // wt_errors only keeps the last 200 entries — unthrottled it would flush every
+    // other diagnostic out of the ring buffer.
+    this._massDelLogged = this._massDelLogged || {};
+    const now = Date.now();
+    if (!(this._massDelLogged[name] > now - 60000)) {
+      this._massDelLogged[name] = now;
+      try {
+        if (typeof DB !== 'undefined' && DB.logError) {
+          DB.logError('SYNC-DEL-BLOCKED', msg, { collection: name, deletes: delCount, server: serverCount, pct });
+        }
+      } catch {}
+    }
+    return true;
+  },
+
   // ── Tombstones: persist deleted record IDs so _pullAll + listener won't restore them ──
   _getTombstones(colName) {
     try {

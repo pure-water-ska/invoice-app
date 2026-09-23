@@ -3691,3 +3691,186 @@ async function regenerateDeviceId() {
 
 window.addEventListener('DOMContentLoaded', () => { try { renderDeviceIdentity(); } catch (e) {} });
 window.addEventListener('sync:ready', () => { try { renderDeviceIdentity(); } catch (e) {} });
+
+// ── Customer/pricing recovery (v1.0.239) ────────────────────────────────────
+// On 23 Sep 2026 a device came up with a seeded local (1 customer, 7 price rules),
+// and the unguarded "delete = on the server, absent locally" diff in the per-record
+// sync modules wiped customers_v2 and pricing_byproduct for everyone. The guard is
+// Sync.massDeleteBlocked (v1.0.239); this card puts the data back.
+//
+// Source = the desktop restore point DB.buildBackupPayload() writes to the data
+// folder on a clean close (_restore_on_close.json), or a file the admin picks — the
+// close handler OVERWRITES that file, so a picked copy must always be possible.
+// Only wt_customers and wt_pricing are written. Invoices, payments, products and
+// users are never touched.
+
+const _CP_KEY = r => [r.customerId || '', r.productId || '', r.shippingMethod || ''].join('|');
+
+// Pure, so test-customer-price-restore.js can drive it without a browser.
+function _cpBuildPlan(rp, history, curCustomers, curPricing) {
+  if (!rp || !Array.isArray(rp.customers) || !Array.isArray(rp.pricing)) {
+    throw new Error('ไฟล์กู้คืนไม่ถูกต้อง (ไม่มีลูกค้า/ราคา)');
+  }
+  const cutoff = rp.exportDate || '';
+
+  // Customers: the restore point wholesale, plus any CURRENT customer it predates
+  // (added after the restore point and somehow still here) so nothing is dropped.
+  const custById = new Map(rp.customers.filter(c => c && c.id).map(c => [c.id, c]));
+  let custKept = 0;
+  for (const c of (curCustomers || [])) {
+    if (c && c.id && !custById.has(c.id)) { custById.set(c.id, c); custKept++; }
+  }
+  const customers = [...custById.values()];
+
+  // Pricing: the restore point, then replay every price change recorded after the
+  // restore point so edits made between then and the wipe survive.
+  const rules = new Map(rp.pricing.filter(r => r && r.id).map(r => [_CP_KEY(r), { ...r }]));
+  const restored = rules.size;
+  const after = (history || [])
+    .filter(h => h && h.changedAt && h.changedAt > cutoff)
+    .sort((a, b) => String(a.changedAt).localeCompare(String(b.changedAt)));
+  let replayUpd = 0, replayAdd = 0;
+  for (const h of after) {
+    const k = _CP_KEY(h), ex = rules.get(k);
+    if (ex) {
+      ex.price = h.price; ex.tierPrice = h.tierPrice;
+      ex.tierQty = h.tierQty; ex.tierBasis = h.tierBasis;
+      replayUpd++;
+    } else {
+      rules.set(k, {
+        id: h.id, customerId: h.customerId, productId: h.productId,
+        shippingMethod: h.shippingMethod, price: h.price,
+        tierPrice: h.tierPrice, tierQty: h.tierQty, tierBasis: h.tierBasis,
+      });
+      replayAdd++;
+    }
+  }
+  // Anything currently on this device that the replay did not cover is kept too.
+  let priceKept = 0;
+  for (const r of (curPricing || [])) {
+    if (r && r.id && !rules.has(_CP_KEY(r))) { rules.set(_CP_KEY(r), r); priceKept++; }
+  }
+  const pricing = [...rules.values()];
+
+  return {
+    customers, pricing,
+    stats: {
+      cutoff, restored,
+      custFrom: (curCustomers || []).length, custTo: customers.length, custKept,
+      priceFrom: (curPricing || []).length, priceTo: pricing.length,
+      replayed: after.length, replayUpd, replayAdd, priceKept,
+      std: pricing.filter(r => r && !r.customerId).length,
+    },
+  };
+}
+
+let _cpPlan = null;
+
+async function _cpReadRestorePoint() {
+  if (!window.IS_TAURI || !window.__TAURI__ || !window.__TAURI__.fs) return null;
+  const t = (typeof DB !== 'undefined') && DB._tauri;
+  if (!t || !t.dataDir) return null;
+  try {
+    const p = await window.__TAURI__.path.join(t.dataDir, '_restore_on_close.json');
+    return JSON.parse(await window.__TAURI__.fs.readTextFile(p));
+  } catch (e) { return null; }
+}
+
+async function renderCustPriceRestore() {
+  const card = document.getElementById('custPriceRestoreCard');
+  const body = document.getElementById('custPriceRestoreBody');
+  if (!card || !body) return;
+  if (typeof Auth === 'undefined' || !Auth.isAdmin || !Auth.isAdmin()) return;
+  card.style.display = '';
+
+  const rp = await _cpReadRestorePoint();
+  if (!rp) { _cpPaintPicker(body, 'ไม่พบจุดกู้คืนในเครื่องนี้'); return; }
+  try {
+    _cpPlan = _cpBuildPlan(rp, DB.getPriceHistory(), DB.getCustomers(), DB.getPricing());
+  } catch (e) { _cpPaintPicker(body, e.message || String(e)); return; }
+  _cpPaintPlan(body);
+}
+
+function _cpPaintPicker(body, why) {
+  body.innerHTML =
+    '<div class="small mb-2">' + esc(why) + ' — เลือกไฟล์สำรอง (.json) ที่มีลูกค้าและราคาแทนได้</div>' +
+    '<input type="file" accept=".json,application/json" class="form-control form-control-sm" ' +
+    'onchange="_cpPickFile(this)">';
+}
+
+function _cpPickFile(input) {
+  const f = input && input.files && input.files[0];
+  if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    const body = document.getElementById('custPriceRestoreBody');
+    try {
+      _cpPlan = _cpBuildPlan(JSON.parse(rd.result), DB.getPriceHistory(), DB.getCustomers(), DB.getPricing());
+      _cpPaintPlan(body);
+    } catch (e) { _cpPaintPicker(body, 'อ่านไฟล์ไม่ได้: ' + (e.message || e)); }
+  };
+  rd.readAsText(f);
+}
+
+function _cpPaintPlan(body) {
+  const s = _cpPlan.stats;
+  const n = x => Number(x || 0).toLocaleString('th-TH');
+  const when = s.cutoff ? Utils.formatDateTH(s.cutoff.slice(0, 10)) : '—';
+  body.innerHTML =
+    '<div class="text-muted small mb-3">ข้อมูลลูกค้าและราคาถูกลบออกจากเซิร์ฟเวอร์ ' +
+      'เครื่องนี้มีจุดกู้คืนวันที่ ' + esc(when) + ' อยู่</div>' +
+    '<div class="row g-2 mb-3">' +
+      '<div class="col-6"><div class="border rounded p-2">' +
+        '<div class="text-muted small">ลูกค้า</div>' +
+        '<div class="fs-4 fw-semibold text-danger">' + n(s.custFrom) + ' <span class="fs-6 text-muted">→</span> ' + n(s.custTo) + '</div>' +
+      '</div></div>' +
+      '<div class="col-6"><div class="border rounded p-2">' +
+        '<div class="text-muted small">ราคาสินค้า</div>' +
+        '<div class="fs-4 fw-semibold text-danger">' + n(s.priceFrom) + ' <span class="fs-6 text-muted">→</span> ' + n(s.priceTo) + '</div>' +
+      '</div></div>' +
+    '</div>' +
+    '<table class="table table-sm small mb-3"><tbody>' +
+      '<tr><td class="text-muted">จุดกู้คืน</td><td class="text-end">' + esc(when) + ' — ' + n(s.restored) + ' ราคา</td></tr>' +
+      '<tr><td class="text-muted">ราคาที่แก้หลังจากนั้น</td><td class="text-end">' + n(s.replayed) + ' รายการ (แก้ ' + n(s.replayUpd) + ' / เพิ่ม ' + n(s.replayAdd) + ')</td></tr>' +
+      '<tr><td class="text-muted">ราคากลาง (ทุกลูกค้า)</td><td class="text-end">' + n(s.std) + ' รายการ</td></tr>' +
+      '<tr><td class="text-muted">ใบกำกับ / การชำระ / สินค้า / ผู้ใช้</td><td class="text-end">ไม่แตะต้อง</td></tr>' +
+    '</tbody></table>' +
+    '<div class="alert alert-warning small py-2">ให้ทุกเครื่องอัปเดตเป็น v' + (window.APP_VERSION ? APP_VERSION.version : '1.0.239') +
+      ' ก่อน แล้วค่อยกดปุ่มนี้ ไม่เช่นนั้นเครื่องที่ยังค้างอยู่อาจลบซ้ำอีก</div>' +
+    '<button class="btn btn-danger btn-sm" id="cpRestoreBtn" onclick="runCustPriceRestore()">' +
+      '<i class="bi bi-database-fill-up me-1"></i>กู้คืน ' + n(s.custTo) + ' ลูกค้า และ ' + n(s.priceTo) + ' ราคา</button>';
+}
+
+async function runCustPriceRestore() {
+  if (!_cpPlan) return;
+  if (typeof Auth === 'undefined' || !Auth.isAdmin || !Auth.isAdmin()) {
+    Utils.showAlert('ต้องเป็นผู้ดูแลระบบ', 'danger'); return;
+  }
+  const s = _cpPlan.stats;
+  const ok = await Utils.confirm(
+    'กู้คืน ' + s.custTo + ' ลูกค้า และ ' + s.priceTo + ' ราคาสินค้า\n\n' +
+    'ข้อมูลนี้จะถูกเขียนทับทั้งรายการลูกค้าและราคาในเครื่อง แล้วอัปโหลดขึ้นเซิร์ฟเวอร์\n' +
+    'ใบกำกับ การชำระเงิน สินค้า และผู้ใช้ ไม่ถูกแตะต้อง', 'ยืนยันการกู้คืน');
+  if (!ok) return;
+
+  const btn = document.getElementById('cpRestoreBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลังกู้คืน...'; }
+  try {
+    DB.saveCustomers(_cpPlan.customers);
+    DB.savePricing(_cpPlan.pricing);
+    const u = Auth.session();
+    DB.logActivity(u.userId || u.id || '', u.username || '', 'กู้คืนลูกค้าและราคา', {
+      customers: s.custTo, pricing: s.priceTo, from: s.cutoff, replayed: s.replayed,
+    });
+    if (typeof DB.waitForHddWrites === 'function') await DB.waitForHddWrites(15000);
+    try { if (window.Sync && Sync.flushNow) await Sync.flushNow(); } catch (e) {}
+    Utils.showAlert('กู้คืนแล้ว — ' + s.custTo + ' ลูกค้า, ' + s.priceTo + ' ราคา', 'success');
+    renderCustPriceRestore();
+  } catch (e) {
+    if (typeof DB.logError === 'function') DB.logError('CUST-PRICE-RESTORE-FAIL', String(e && e.message || e));
+    Utils.showAlert('กู้คืนไม่สำเร็จ: ' + (e && e.message || e), 'danger');
+    if (btn) { btn.disabled = false; btn.textContent = 'ลองอีกครั้ง'; }
+  }
+}
+
+window.addEventListener('DOMContentLoaded', () => { try { renderCustPriceRestore(); } catch (e) {} });

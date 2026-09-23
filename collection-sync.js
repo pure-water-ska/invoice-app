@@ -331,7 +331,14 @@ window.CollectionSync = window.CollectionSync || {
         const nextById = new Map(nextArr.filter(r => r && r.id).map(r => [r.id, r]));
         const fp = this._serverFp || new Map();
         const upserts = nextArr.filter(r => r && r.id && fp.get(r.id) !== this._fp(r));
-        const deletes = [...fp.keys()].filter(id => !nextById.has(id));
+        let deletes = [...fp.keys()].filter(id => !nextById.has(id));
+        // v1.0.239: never let a device with an incomplete/seeded local wipe the
+        // collection. Upserts still go; only the deletes are dropped.
+        if (typeof Sync !== 'undefined' && Sync.massDeleteBlocked &&
+            Sync.massDeleteBlocked(this.cfg.col, deletes.length, fp.size)) {
+          this._logLine('BLOCKED ' + deletes.length + ' delete(s) of ' + fp.size + ' — local looks incomplete');
+          deletes = [];
+        }
         if (!upserts.length && !deletes.length) return;
         const unacked = this._loadUnacked();
         upserts.forEach(r => unacked.add(r.id));

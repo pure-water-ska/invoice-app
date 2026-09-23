@@ -556,6 +556,30 @@ invoiced line item.
 A multi-day data-loss incident (payments/invoices mass-deleted across devices)
 added these guards. **Understand them before touching sync.**
 
+- **Proportional mass-delete guard for the per-record modules (`Sync.massDeleteBlocked`, v1.0.239):**
+  the `_writeKey` guard below covers only COLLECTIONS (invoices/payments). Customers,
+  products, users and pricing are owned by `collection-sync.js` / `customer-sync.js` /
+  `pricing-grouped-sync.js`, which computed `delete = on the server, absent locally`
+  with **no size limit at all**. On 23 Sep 2026 a device came up with a seeded local
+  (1 customer `ร้านทดสอบ`, 7 price rules), diffed it against the server fingerprint and
+  deleted 98 customers + ~3,270 price rules from Firestore; the listener propagated the
+  empty state to every device. Invoices/payments/products/users were untouched.
+  A FLAT threshold cannot work here — retiring ราคากลาง (v1.0.235) legitimately deletes
+  59 rules in one `savePricing`. So the rule is **proportional**: a single push may not
+  delete more than `_MASS_DEL_MIN` (20) records **and** more than `_MASS_DEL_FRAC` (30%)
+  of what the server holds. Blocked pushes keep their upserts, log `SYNC-DEL-BLOCKED`
+  (throttled to once/minute per collection so `wt_errors`' 200-entry ring survives), and
+  `Sync.allowMassDelete = true` is the deliberate override. All three call sites must
+  consult it — it is easy to add one and forget the other two. Covered by
+  `test-mass-delete-guard.js`.
+- **Customer/pricing recovery card (`settings.js` `renderCustPriceRestore`, v1.0.239):**
+  admin-only card in Settings → Backup that rebuilds `wt_customers` + `wt_pricing` (only
+  those two) from the desktop restore point `%APPDATA%/<app>/data/_restore_on_close.json`,
+  replaying every `wt_price_history` entry newer than the restore point so edits made
+  after it are not lost (`_cpBuildPlan`, pure + tested). **`utils.js`'s close handler
+  REWRITES that restore point on every clean close** — so the card also accepts a
+  user-picked `.json`, and a recovered restore point should be copied somewhere safe
+  before the app is closed.
 - **Mass-delete guard (`sync.js _writeKey`, COLLECTIONS):** the set-difference
   deletion inference (`serverKnown − local`) is only safe when local data is
   COMPLETE. With an incomplete local array (interrupted pull / cold cache / flaky

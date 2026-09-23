@@ -369,6 +369,20 @@
     </div>
   </div>
 
+  <!-- ── Customer/pricing recovery (v1.0.239) ──────────────────────────────
+       One-time tool. Reads the desktop restore point (_restore_on_close.json)
+       and puts back ONLY wt_customers + wt_pricing, replaying any price change
+       recorded in wt_price_history after the restore point so nothing newer is
+       lost. Invoices, payments, products and users are never touched. -->
+  <div class="card mb-4 admin-only" id="custPriceRestoreCard" style="display:none">
+    <div class="card-header bg-danger text-white fw-semibold py-2">
+      <i class="bi bi-database-fill-up me-1"></i>กู้คืนลูกค้าและราคาสินค้า
+    </div>
+    <div class="card-body" id="custPriceRestoreBody">
+      <div class="text-muted small text-center py-3">กำลังตรวจสอบจุดกู้คืน...</div>
+    </div>
+  </div>
+
   <!-- ── Storage Cleanup ───────────────────────────────────────────────── -->
   <div class="card mb-4 admin-only" id="storageCleanupCard">
     <div class="card-header bg-warning text-dark fw-semibold py-2">
@@ -1009,10 +1023,10 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-<script src="utils.js?v=1.0.238"></script><script src="db.js?v=1.0.238"></script><script src="auth.js?v=1.0.238"></script><script src="nav.js?v=1.0.238"></script><script src="idb.js?v=1.0.238"></script><script src="image-store.js?v=1.0.163"></script>
+<script src="utils.js?v=1.0.239"></script><script src="db.js?v=1.0.239"></script><script src="auth.js?v=1.0.239"></script><script src="nav.js?v=1.0.239"></script><script src="idb.js?v=1.0.239"></script><script src="image-store.js?v=1.0.163"></script>
 <script src="drive-config.js" onerror="window.GOOGLE_CLIENT_ID=''"></script>
 <script src="drive-store.js"></script>
-<script src="settings.js?v=1.0.238"></script>
+<script src="settings.js?v=1.0.239"></script>
 <script>Nav.render('settings');</script>
 </body>
 </html>

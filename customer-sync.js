@@ -335,7 +335,14 @@ if (!window.CustomerSync) window.CustomerSync = {
     // Upsert: in the local array but the server has no copy / a different copy.
     const upserts = nextArr.filter(r => r && r.id && fp.get(r.id) !== this._fp(r));
     // Delete: the server has it but the local array no longer does.
-    const deletes = [...fp.keys()].filter(id => !nextById.has(id));
+    let deletes = [...fp.keys()].filter(id => !nextById.has(id));
+    // v1.0.239: never let a device with an incomplete/seeded local wipe the
+    // collection. Upserts still go; only the deletes are dropped.
+    if (typeof Sync !== 'undefined' && Sync.massDeleteBlocked &&
+        Sync.massDeleteBlocked('customers_v2', deletes.length, fp.size)) {
+      this._logLine('BLOCKED ' + deletes.length + ' delete(s) of ' + fp.size + ' — local looks incomplete');
+      deletes = [];
+    }
     if (!upserts.length && !deletes.length) return;
 
     // Mark upserts un-acked (retained until the server confirms); clear on delete.

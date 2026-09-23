@@ -398,7 +398,17 @@
       try {
         const nextArr = Array.isArray(next) ? next : [];
         const base = this._ensureBaseline((Array.isArray(prev) && prev !== next) ? prev : undefined);
-        const ops = diffRules(base, nextArr);
+        let ops = diffRules(base, nextArr);
+        // v1.0.239: a device whose local wt_pricing came up seeded/incomplete would
+        // otherwise queue a delete for every baseline rule it is missing and wipe the
+        // collection. Proportional guard — the ราคากลาง retirement (59 of ~3,280) still
+        // passes; losing nearly everything does not. Upserts are kept either way.
+        const dels = ops.filter(o => o.rule === null).length;
+        if (typeof Sync !== 'undefined' && Sync.massDeleteBlocked &&
+            Sync.massDeleteBlocked('pricing_byproduct', dels, Object.keys(base || {}).length)) {
+          this._logLine('BLOCKED ' + dels + ' rule delete(s) — local looks incomplete');
+          ops = ops.filter(o => o.rule !== null);
+        }
         const before = this._loadQueue();
         if (!ops.length && !Object.keys(before).length) return;
         const online = !(window.Sync && Sync._online === false);
