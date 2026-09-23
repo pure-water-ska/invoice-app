@@ -586,6 +586,36 @@ added these guards. **Understand them before touching sync.**
   **Still open:** the delete itself is not yet durable (no retry queue), and the 30-minute TTL
   reversal is untouched — deliberately, because widening it risks re-opening the June clobber
   war that `_MAX_AUTO_TOMBSTONE` exists to prevent. Covered by `test-superseded-page-sweep.js`.
+- **ONE rule for picking an invoice number's representative record: `DB._isBetterInvoiceRep`
+  (v1.0.243).** `find(i => i.page === 1)` picks by ARRAY order — i.e. sync/load order — so
+  whenever a superseded page exists it can return the STALE pre-edit total. Seven sites still
+  did this and were converted: `customers.html render`, `invoice-create.html` (the payment-terms
+  check, alongside `checkCustomerBalance`), `payments.html` `_overpayOutstanding` /
+  `showOutstandingPreview` / `openMultiPayModal` / `onMultiCustChange`, and `db.js`
+  `findStaleFoldedBalances`. Four of those move money or print for the customer. **Never write a
+  new `find(page === 1)` to choose one record per invoice NUMBER** — `test-invoice-rep-everywhere.js`
+  fails the build if any live file reintroduces the pattern.
+- **The sweep deletes every superseded page, including ones whose old items cannot be
+  preserved (v1.0.243).** v1.0.242 briefly required an `editHistory[].previous` snapshot before
+  deleting, to protect pre-v1.0.185 edits (180769-001, 220769-007 — whose only copy the first
+  sweep had already removed). The user does not need old versions, and leaving a duplicate in
+  place is the worse trade: it re-exposes every reader above to the stale amount. So the
+  requirement was removed — cleanup always wins over history. Ties (duplicate CREATEs) and real
+  multi-page invoices are still never touched.
+- **Double-save on payments (v1.0.243).** `doSaveAllPayments` awaited `_uploadPaymentImages()`
+  BEFORE `DB.addPayment()`, with the modal and its save button still live — so a second click
+  ran the whole flow again. Measured: 26 groups of payments identical in
+  invoiceNumber+customerId+amount+method; 4 were rapid repeats (0.1s, 0.3s, 6.0s, and a TRIPLE
+  over 6.9s), the other 22 were 19s–30min apart (staff re-entering what they thought had not
+  saved). Two layers: `_savingPayment` is set SYNCHRONOUSLY before any await and released in a
+  `finally` (so a validation bail, a declined duplicate or a throw all free the button), and
+  `DB.findDuplicatePayment` asks before writing a payment identical to one within 30 minutes
+  (`_DUP_PAY_WINDOW_MS`). Matching is strict on all four fields and ignores cancelled payments,
+  so a genuine second instalment never prompts — replayed over live history it would have
+  prompted on 25 of 1,711 saves (1.46%). The 3 duplicate INVOICES are NOT this bug: they are
+  18–28 days apart (re-imports). Covered by `test-double-save-guard.js`; the concurrency test
+  must never `await` the second call before releasing the upload gate or it deadlocks instead
+  of failing.
 - **`checkCustomerBalance` (invoice-create.html) must use `DB._isBetterInvoiceRep` (v1.0.242).**
   It used a plain `find(i => i.page === 1)`, which on a number holding two live page-1 records
   picks whichever the sync loaded first — the STALE pre-edit total — so the warning bar could

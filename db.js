@@ -1298,8 +1298,9 @@ const DB = {
     const rows = [], skipped = [];
     Object.keys(byNum).forEach(src => {
       const e = byNum[src];
-      const pg1 = invoices.find(i => i.invoiceNumber === src && i.page === 1)
-               || invoices.find(i => i.invoiceNumber === src);
+      // v1.0.243 — deterministic representative; see _isBetterInvoiceRep below.
+      let pg1 = null;
+      for (const i of invoices) if (i.invoiceNumber === src && this._isBetterInvoiceRep(pg1, i)) pg1 = i;
       if (!pg1) return;                          // source gone/cancelled — nothing to settle
       const total   = parseFloat(pg1.totalAmount) || 0;
       const current = total - this.getInvoicePaidAmount(src, pg1.customerId);
@@ -1407,6 +1408,40 @@ const DB = {
   // opt-in via localStorage.__invTrace = '1'.
   _traceVerbose() {
     try { return localStorage.getItem('__invTrace') === '1'; } catch { return false; }
+  },
+
+  // ── Duplicate-payment detection (v1.0.243) ──────────────────────────────────
+  // Measured on live data: 26 groups of payments identical in invoice+customer+
+  // amount+method. Only 4 were rapid double-clicks (0.1s–6.9s, one a TRIPLE); the
+  // other 22 were 19 s to 30 min apart — staff re-entering a payment because they
+  // thought it had not saved. A re-entry guard cannot catch those, so the save path
+  // also asks before writing a payment that already exists.
+  //
+  // Returns the most recent matching payment within `windowMs`, or null. Matching is
+  // deliberately strict — invoice, customer, amount and method must ALL be equal —
+  // so a genuine second instalment of a different amount never prompts. Cancelled
+  // payments are ignored: re-entering one that was voided is the correct action.
+  // Advisory only; the caller decides. Nothing here blocks a save.
+  _DUP_PAY_WINDOW_MS: 30 * 60 * 1000,
+
+  findDuplicatePayment(data, nowMs, windowMs) {
+    if (!data) return null;
+    const win = windowMs == null ? this._DUP_PAY_WINDOW_MS : windowMs;
+    const now = nowMs == null ? Date.now() : nowMs;
+    const amt = parseFloat(data.amount);
+    if (!(amt > 0) || !data.invoiceNumber) return null;
+    let best = null, bestT = -Infinity;
+    for (const p of this.getPayments()) {
+      if (!p || p.cancelled || p.id === data.id) continue;
+      if (p.invoiceNumber !== data.invoiceNumber) continue;
+      if ((p.customerId || '') !== (data.customerId || '')) continue;
+      if ((p.method || '') !== (data.method || '')) continue;
+      if (Math.abs((parseFloat(p.amount) || 0) - amt) > 0.005) continue;
+      const t = Date.parse(p.createdAt || '');
+      if (!t || now - t > win || t > now) continue;
+      if (t > bestT) { bestT = t; best = p; }
+    }
+    return best ? { payment: best, agoMs: now - bestT } : null;
   },
 
   findSupersededPages(invoices) {

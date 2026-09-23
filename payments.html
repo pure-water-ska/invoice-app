@@ -297,7 +297,7 @@
         <button class="btn btn-outline-primary" onclick="addPaymentEntry()">
           <i class="bi bi-plus-circle me-1"></i>เพิ่มรายการ
         </button>
-        <button class="btn btn-success" onclick="savePayment()">
+        <button class="btn btn-success" id="paySaveBtn" onclick="savePayment()">
           <i class="bi bi-save me-1"></i>บันทึกทั้งหมด
         </button>
       </div>
@@ -730,7 +730,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.242"></script><script src="db.js?v=1.0.242"></script><script src="auth.js?v=1.0.242"></script><script src="nav.js?v=1.0.242"></script><script src="idb.js?v=1.0.242"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.243"></script><script src="db.js?v=1.0.243"></script><script src="auth.js?v=1.0.243"></script><script src="nav.js?v=1.0.243"></script><script src="idb.js?v=1.0.243"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -2138,6 +2138,54 @@ function refreshSummary(invNum) {
      ค้างชำระ: <strong class="text-danger">฿${Utils.formatNumber(rem)}</strong>`;
 }
 
+// ── Double-save guard (v1.0.243) ────────────────────────────────────────────
+// doSaveAllPayments awaits _uploadPaymentImages() BEFORE DB.addPayment(), and the
+// modal (and its save button) stay live across that await — so a second click ran
+// the whole flow again and wrote a second payment. Measured on live data: 26 groups
+// of payments identical in invoice+customer+amount+method; 4 were rapid repeats
+// (0.1s, 0.3s, 6.0s, and one TRIPLE at 6.9s).
+//
+// _savingPayment is set SYNCHRONOUSLY at the top, before any await, so the second
+// click cannot get past it no matter how fast. Cleared in a finally, so a validation
+// bail, a refused duplicate, or a thrown error all release the button.
+let _savingPayment = false;
+
+function _setPaySaveBusy(busy) {
+  const b = document.getElementById('paySaveBtn');
+  if (!b) return;
+  b.disabled = !!busy;
+  if (busy) {
+    if (!b.dataset.html) b.dataset.html = b.innerHTML;
+    b.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>กำลังบันทึก...';
+  } else if (b.dataset.html) {
+    b.innerHTML = b.dataset.html;
+  }
+}
+
+// The other 22 of those 26 groups were 19 s to 30 min apart — staff re-entering a
+// payment they thought had not saved. No re-entry guard can catch that, so ask.
+// Advisory: the user can always confirm. Returns true if the save should proceed.
+async function _confirmNotDuplicate(payments) {
+  for (const data of payments) {
+    let hit = null;
+    try { hit = DB.findDuplicatePayment(data); } catch (e) { hit = null; }
+    if (!hit) continue;
+    const mins = Math.max(1, Math.round(hit.agoMs / 60000));
+    const p = hit.payment;
+    const when = String(p.createdAt || '').slice(11, 16);
+    const ok = await Utils.confirm(
+      'มีการชำระเงินที่เหมือนกันทุกอย่างบันทึกไว้แล้ว ' + mins + ' นาทีที่แล้ว\n\n' +
+      'ใบกำกับ: ' + (data.invoiceNumber || '-') + '\n' +
+      'จำนวนเงิน: ฿' + Utils.formatNumber(data.amount) + '\n' +
+      'วิธีชำระ: ' + (data.method || '-') + '\n' +
+      'บันทึกโดย: ' + (p.createdByUser || p.createdBy || '-') + (when ? ' · ' + when + ' น.' : '') + '\n\n' +
+      'ถ้าเป็นการชำระคนละครั้งจริง กด "ตกลง" เพื่อบันทึกเพิ่ม',
+      'อาจบันทึกซ้ำ');
+    if (!ok) return false;
+  }
+  return true;
+}
+
 // ── Save payment (with date confirmation) ─────────────────────────────────────
 function collectPaymentData() {
   const invNum = document.getElementById('payInvNumHidden').value;
@@ -2343,6 +2391,12 @@ function confirmSavePayment() {
 
 async function doSaveAllPayments(payments) {
   if (!payments.length) return;
+  // Synchronous re-entry guard — set BEFORE any await so a second click cannot pass.
+  if (_savingPayment) return;
+  _savingPayment = true;
+  _setPaySaveBusy(true);
+  try {
+  if (!(await _confirmNotDuplicate(payments))) return;
   const invNum      = payments[0].invoiceNumber;
   const inv         = DB.getCurrentPagesByNumber(invNum)[0];
   const total       = parseFloat(inv?.totalAmount) || 0;
@@ -2378,6 +2432,12 @@ async function doSaveAllPayments(payments) {
     Utils.showAlert('บันทึกชำระเงิน ' + payments.length + ' รายการสำเร็จ', 'success');
     render();
   }
+  } finally {
+    // Always release — a validation bail, a refused duplicate, or a thrown error
+    // must never leave the button stuck disabled.
+    _savingPayment = false;
+    _setPaySaveBusy(false);
+  }
 }
 
 // Build the list of OTHER outstanding invoices for this customer (oldest first).
@@ -2390,8 +2450,10 @@ function _overpayOutstanding() {
   const allInvs = DB.getActiveInvoicesByCustomer(custId);
   const nums    = [...new Set(allInvs.map(i => i.invoiceNumber))].filter(n => n !== invNum);
   return nums.map(num => {
-    const pg1 = allInvs.find(i => i.invoiceNumber === num && i.page === 1)
-             || allInvs.find(i => i.invoiceNumber === num);
+    // v1.0.243: this drives where overpaid CREDIT is cut — a stale total here moves
+    // real money onto the wrong amount.
+    let pg1 = null;
+    for (const i of allInvs) if (i.invoiceNumber === num && DB._isBetterInvoiceRep(pg1, i)) pg1 = i;
     if (!pg1) return null;
     const rem = (parseFloat(pg1.totalAmount) || 0) - DB.getInvoicePaidAmount(num, custId);
     if (rem <= 0.005) return null;
@@ -2541,8 +2603,9 @@ function showOutstandingPreview(custId) {
   const invNums = [...new Set(allInvoices.map(i => i.invoiceNumber))];
 
   const unpaid = invNums.map(num => {
-    const page1 = allInvoices.find(i => i.invoiceNumber === num && i.page === 1)
-                || allInvoices.find(i => i.invoiceNumber === num);
+    // v1.0.243 — deterministic representative; see DB._isBetterInvoiceRep.
+    let page1 = null;
+    for (const i of allInvoices) if (i.invoiceNumber === num && DB._isBetterInvoiceRep(page1, i)) page1 = i;
     if (!page1) return null;
     const total = parseFloat(page1.totalAmount) || 0;
     const paid  = DB.getInvoicePaidAmount(num, page1.customerId);
@@ -2866,8 +2929,9 @@ function openMultiPayModal() {
   const customers = DB.getCustomers();
   const custIds   = new Set();
   [...new Set(invoices.map(i => i.invoiceNumber))].forEach(num => {
-    const page1 = invoices.find(i => i.invoiceNumber === num && i.page === 1)
-                || invoices.find(i => i.invoiceNumber === num);
+    // v1.0.243 — deterministic representative; see DB._isBetterInvoiceRep.
+    let page1 = null;
+    for (const i of invoices) if (i.invoiceNumber === num && DB._isBetterInvoiceRep(page1, i)) page1 = i;
     if (!page1) return;
     const due = (parseFloat(page1.totalAmount) || 0) - DB.getInvoicePaidAmount(num, page1.customerId);
     if (due > 0.005) custIds.add(page1.customerId);
@@ -2985,8 +3049,9 @@ function onMultiCustChange() {
   const invoices = DB.getInvoices();
   const invNums  = [...new Set(invoices.filter(i => i.customerId === custId).map(i => i.invoiceNumber))];
   _multiAllocs = invNums.map(num => {
-    const page1 = invoices.find(i => i.invoiceNumber === num && i.page === 1)
-                || invoices.find(i => i.invoiceNumber === num);
+    // v1.0.243 — deterministic representative; see DB._isBetterInvoiceRep.
+    let page1 = null;
+    for (const i of invoices) if (i.invoiceNumber === num && DB._isBetterInvoiceRep(page1, i)) page1 = i;
     if (!page1) return null;
     const due = (parseFloat(page1.totalAmount) || 0) - DB.getInvoicePaidAmount(num, custId);
     if (due <= 0.005) return null;
