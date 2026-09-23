@@ -556,6 +556,42 @@ invoiced line item.
 A multi-day data-loss incident (payments/invoices mass-deleted across devices)
 added these guards. **Understand them before touching sync.**
 
+- **Superseded invoice pages: the tombstone TTL REVERSES a failed delete (root cause, v1.0.242).**
+  `saveInvoiceEdit()` (v1.0.185) deletes the pre-edit page docs with a bare
+  `batch.commit()` that is explicitly **not** retried, inside `if (window.Sync && Sync.ready)`
+  with no else branch — so if sync isn't up, or the commit fails, nothing is deleted, nothing
+  is logged, and the local save still succeeds. The tombstone written just before it hides the
+  stale doc — but only for `_tombstoneTTL` = **30 MINUTES**. At expiry `_applyTombstones`
+  (sync.js ~line 274) does `_clearTombstones(...)` — which also calls `_fsClearDeletions`,
+  erasing the marker from the shared `data/_deletions` doc for EVERY device — and then
+  `keep.push(d)`, **re-admitting the stale record**. One missed commit therefore leaves the
+  pre-edit page live forever, on every device, un-suppressable.
+  Measured 23 Sep 2026: 13 invoice numbers held more than one live page record; 10 were edit
+  duplicates, **8 of them AFTER v1.0.185 shipped — a 47% failure rate**. The remaining 3 are
+  duplicate CREATEs (equal editCount), a separate double-save problem.
+  Note the diagnostic added for this bug could never be read: `wt_errors` is capped at 200 and
+  was **85% INV-TRACE success noise**, covering only the last 23.5 hours.
+  Fixed in two parts so far:
+    * `DB.findSupersededPages()` + `Sync.sweepSupersededPages()` — a once-per-session,
+      idempotent repair that re-issues the delete. Conservative by design: grouped by
+      invoiceNumber+customerId+page (a real multi-page invoice is never a candidate), a TIE on
+      editCount is skipped (no safe automatic winner), cancelled records ignored, and a
+      `_SWEEP_MAX` (25) cap refuses to act on a bad local read. On failure the session flag is
+      NOT set, so it retries next session — the durability the original delete lacked.
+      Nothing is lost: the dropped record's state lives in the winner's `editHistory[].previous`.
+    * `DB._traceVerbose()` — the two SUCCESS-only INV-TRACE logs (every `_tauri.write`, and the
+      HDD load on every navigation) are now opt-in via `localStorage.__invTrace = '1'`.
+      Failures, blocked-empty writes and shrink traces stay unconditional. Ring coverage goes
+      from ~24 hours to ~6 days.
+  **Still open:** the delete itself is not yet durable (no retry queue), and the 30-minute TTL
+  reversal is untouched — deliberately, because widening it risks re-opening the June clobber
+  war that `_MAX_AUTO_TOMBSTONE` exists to prevent. Covered by `test-superseded-page-sweep.js`.
+- **`checkCustomerBalance` (invoice-create.html) must use `DB._isBetterInvoiceRep` (v1.0.242).**
+  It used a plain `find(i => i.page === 1)`, which on a number holding two live page-1 records
+  picks whichever the sync loaded first — the STALE pre-edit total — so the warning bar could
+  report a balance the customer card and reports did not. Live: 180769-001 showed a phantom
+  ค้างชำระ ฿950 against an invoice that was settled. Any NEW code picking a representative
+  record for an invoice number must use `_isBetterInvoiceRep`, never `find(page === 1)`.
 - **Proportional mass-delete guard for the per-record modules (`Sync.massDeleteBlocked`, v1.0.239):**
   the `_writeKey` guard below covers only COLLECTIONS (invoices/payments). Customers,
   products, users and pricing are owned by `collection-sync.js` / `customer-sync.js` /

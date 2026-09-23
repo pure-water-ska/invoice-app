@@ -55,6 +55,15 @@ function makeEnv(invoices, payments) {
     // carry-forward references); the label itself is covered by
     // test-payment-version-stamp.js.
     explainInvoiceDiff: () => null,
+    // v1.0.242: checkCustomerBalance now picks its representative record the same
+    // way getCustomerBalance does, so the stub needs the real rule.
+    _isBetterInvoiceRep(cur, cand) {
+      if (!cur) return true;
+      const cp = cur.page || 1, np = cand.page || 1;
+      if (cp !== 1 && np === 1) return true;
+      if (cp === 1 && np !== 1) return false;
+      return (cand.editCount || 0) > (cur.editCount || 0);
+    },
     getCurrentPagesByNumber: (num) => invoices.filter(i => i.invoiceNumber === num),
     _numberHasMultipleOwners: (num) => new Set(invoices.filter(i => i.invoiceNumber === num).map(i => i.customerId)).size > 1,
     effectivePaymentAmount: (p) => Math.max(0, (parseFloat(p.amount) || 0) - (parseFloat(p.allocatedOut) || 0)),
@@ -102,7 +111,7 @@ console.log('\ncheckCustomerBalance(): flags an unretired stale reference with a
     { id: 'p1', invoiceNumber: '180669-009', customerId: 'c1', amount: 1950.5, allocatedOut: 0, cancelled: false },
   ];
   const { Utils, DB, document, getHtml } = makeEnv(invoices, payments);
-  const fn = new Function('DB', 'Utils', 'document', 'updateAddBtn', '_balanceDetails',
+  const fn = new Function('DB','Utils','document','updateAddBtn','_balanceDetails',
     `${mapFnSrc}\n${checkFnSrc}\nreturn checkCustomerBalance;`);
   let _balanceDetails = [];
   const check = fn(DB, Utils, document, () => {}, _balanceDetails);
@@ -124,7 +133,7 @@ console.log('\ncheckCustomerBalance(): an ordinary un-flagged balance still defa
     { id: 'p1', invoiceNumber: '090769-002', customerId: 'c1', amount: 2320, allocatedOut: 0, cancelled: false },
   ];
   const { Utils, DB, document, getHtml } = makeEnv(invoices, payments);
-  const fn = new Function('DB', 'Utils', 'document', 'updateAddBtn', '_balanceDetails',
+  const fn = new Function('DB','Utils','document','updateAddBtn','_balanceDetails',
     `${mapFnSrc}\n${checkFnSrc}\nreturn checkCustomerBalance;`);
   const check = fn(DB, Utils, document, () => {}, []);
   check('c1');
@@ -149,7 +158,7 @@ console.log('\ncheckCustomerBalance(): a RETIRED reference (matching payment exi
     { id: 'p2', invoiceNumber: '250669-002', customerId: 'c1', amount: 500, allocatedOut: 0, cancelled: false },
   ];
   const { Utils, DB, document, getHtml } = makeEnv(invoices, payments);
-  const fn = new Function('DB', 'Utils', 'document', 'updateAddBtn', '_balanceDetails',
+  const fn = new Function('DB','Utils','document','updateAddBtn','_balanceDetails',
     `${mapFnSrc}\n${checkFnSrc}\nreturn checkCustomerBalance;`);
   const check = fn(DB, Utils, document, () => {}, []);
   check('c1');
@@ -166,13 +175,78 @@ console.log('\ncheckCustomerBalance(): self-reference (an invoice referencing it
   ];
   const payments = [];
   const { Utils, DB, document, getHtml } = makeEnv(invoices, payments);
-  const fn = new Function('DB', 'Utils', 'document', 'updateAddBtn', '_balanceDetails',
+  const fn = new Function('DB','Utils','document','updateAddBtn','_balanceDetails',
     `${mapFnSrc}\n${checkFnSrc}\nreturn checkCustomerBalance;`);
   const check = fn(DB, Utils, document, () => {}, []);
   check('c1');
   const html = getHtml();
   t('no self-reference badge', !html.includes('แล้ว แต่ใบนี้ยังไม่ได้ตัดยอด'));
 }
+
+console.log('\ncheckCustomerBalance(): a failed old-page delete must not invent a balance (v1.0.242)');
+{
+  // Live data: 13 invoice numbers hold MORE THAN ONE non-cancelled page-1 record,
+  // because saveInvoiceEdit's explicit Firestore delete of the pre-edit pages failed.
+  // 180769-001 is the reported one: stale 23,665 vs current 22,715, paid 22,715.
+  // A plain find(page === 1) picks whichever the sync loaded first, so the bar reported
+  // ค้างชำระ 950 on an invoice the customer card considered settled.
+  const mk = (extra) => Object.assign({
+    invoiceNumber: '180769-001', page: 1, customerId: 'c1', createdAt: '2026-07-18', items: [],
+  }, extra);
+  const stale   = mk({ id: 'old', totalAmount: 23665 });               // no editCount
+  const current = mk({ id: 'new', totalAmount: 22715, editCount: 1 });
+  const pays = [{ invoiceNumber: '180769-001', customerId: 'c1', amount: 22715 }];
+
+  // Both array orders must give the same answer — order follows sync/load order.
+  for (const [label, invoices] of [['stale first', [stale, current]], ['current first', [current, stale]]]) {
+    const env = makeEnv(invoices, pays);
+    const fn = new Function('DB','Utils','document','updateAddBtn','_balanceDetails',
+      `${mapFnSrc}\n${checkFnSrc}\nreturn checkCustomerBalance;`)(env.DB, env.Utils, env.document, ()=>{}, []);
+    fn('c1');
+    const html = env.getHtml();
+    t(`${label}: no phantom balance row`, !/950/.test(html), html ? html.slice(0, 90) : '(empty)');
+    t(`${label}: the settled invoice is not listed at all`, !html.includes('180769-001'));
+  }
+
+  // The guard must not silently swallow a REAL balance.
+  {
+    const env = makeEnv([stale, current], [{ invoiceNumber: '180769-001', customerId: 'c1', amount: 20000 }]);
+    const fn = new Function('DB','Utils','document','updateAddBtn','_balanceDetails',
+      `${mapFnSrc}\n${checkFnSrc}\nreturn checkCustomerBalance;`)(env.DB, env.Utils, env.document, ()=>{}, []);
+    fn('c1');
+    const html = env.getHtml();
+    t('a genuine shortfall is still reported', html.includes('180769-001'));
+    t('and it is measured against the CURRENT total (22,715 - 20,000 = 2,715), not the stale one',
+      /2,?715/.test(html) && !/3,?665/.test(html));
+  }
+
+  // An edit that RAISED the total (290869-006: 30,021.60 → 31,491.60) must also use
+  // the current record, otherwise the bar under-reports what is owed.
+  {
+    const lo = mk({ id: 'lo', invoiceNumber: '290869-006', totalAmount: 30021.6 });
+    const hi = mk({ id: 'hi', invoiceNumber: '290869-006', totalAmount: 31491.6, editCount: 1 });
+    const env = makeEnv([lo, hi], [{ invoiceNumber: '290869-006', customerId: 'c1', amount: 30021.6 }]);
+    const fn = new Function('DB','Utils','document','updateAddBtn','_balanceDetails',
+      `${mapFnSrc}\n${checkFnSrc}\nreturn checkCustomerBalance;`)(env.DB, env.Utils, env.document, ()=>{}, []);
+    fn('c1');
+    const html = env.getHtml();
+    t('an upward edit reports the shortfall against the NEW total', html.includes('290869-006'));
+    t('the amount is 1,470 (31,491.60 - 30,021.60), not 0', /1,?470/.test(html), html.slice(0, 120));
+  }
+
+  // Ordinary multi-page invoices must be untouched: page 1 still represents the number.
+  {
+    const p1 = mk({ id: 'p1', invoiceNumber: '999999-001', page: 1, totalAmount: 1000 });
+    const p2 = mk({ id: 'p2', invoiceNumber: '999999-001', page: 2, totalAmount: 5000 });
+    const env = makeEnv([p2, p1], [{ invoiceNumber: '999999-001', customerId: 'c1', amount: 1000 }]);
+    const fn = new Function('DB','Utils','document','updateAddBtn','_balanceDetails',
+      `${mapFnSrc}\n${checkFnSrc}\nreturn checkCustomerBalance;`)(env.DB, env.Utils, env.document, ()=>{}, []);
+    fn('c1');
+    t('page 1 represents a normal multi-page invoice, even listed second',
+      !env.getHtml().includes('999999-001'), env.getHtml().slice(0, 90));
+  }
+}
+
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

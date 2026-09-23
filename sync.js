@@ -140,6 +140,87 @@ var Sync = {
   },
 
   // ── Tombstones: persist deleted record IDs so _pullAll + listener won't restore them ──
+  // ── Self-healing sweep for superseded invoice pages (v1.0.242) ──────────────
+  // saveInvoiceEdit() deletes the pre-edit page docs with a bare batch.commit() that
+  // is never retried, and the tombstone hiding them meanwhile expires after
+  // _tombstoneTTL (30 min) — at which point _applyTombstones CLEARS the marker for
+  // every device and RE-ADMITS the stale doc. So one missed commit leaves the old
+  // page live forever. Measured: 10 of 26 ever-edited invoice numbers (47% of the
+  // edits made since the explicit delete shipped in v1.0.185).
+  //
+  // This re-issues the delete for any page DB.findSupersededPages() identifies as
+  // strictly superseded. It runs once per session and is idempotent, so a commit
+  // that fails today is simply retried on the next session instead of being lost —
+  // which is what the original fire-and-forget delete lacked.
+  //
+  // Deliberately NOT a fix for duplicate CREATES (two records, equal editCount):
+  // findSupersededPages skips ties, because there is no safe automatic winner.
+  _SWEEP_MAX: 25,
+  _sweepKey: 'wt_sweep_pages_done',
+
+  async sweepSupersededPages(force) {
+    if (!this.ready || !this._db || typeof DB === 'undefined') return null;
+    if (!force) {
+      try { if (sessionStorage.getItem(this._sweepKey)) return null; } catch {}
+    }
+    let groups;
+    try { groups = DB.findSupersededPages(); } catch (e) { return null; }
+    if (!groups || !groups.length) {
+      try { sessionStorage.setItem(this._sweepKey, '1'); } catch {}
+      return { groups: 0, deleted: 0 };
+    }
+
+    const ids = groups.reduce((a, g) => a.concat(g.dropIds), []);
+
+    // Same spirit as the _writeKey mass-delete guard: a sweep should clean up a
+    // handful of stale pages. A large number means the local array is wrong (cold
+    // cache, interrupted pull), not that 40 invoices were all edited — refuse and
+    // say so rather than deleting invoice records on a bad read.
+    if (ids.length > this._SWEEP_MAX) {
+      try {
+        DB.logError('PAGE-SWEEP-BLOCKED',
+          `พบหน้าเก่าค้าง ${ids.length} รายการ (เกิน ${this._SWEEP_MAX}) — ไม่ลบอัตโนมัติ`,
+          { groups: groups.length, ids: ids.slice(0, 40) });
+      } catch {}
+      return { groups: groups.length, deleted: 0, blocked: true };
+    }
+
+    // Hide them locally right away. setLocalOnly writes cache + HDD/localStorage
+    // WITHOUT re-pushing, so this cannot echo back into Firestore as an edit.
+    try {
+      const keep = DB.getInvoices().filter(i => !(i && ids.includes(i.id)));
+      DB.setLocalOnly(DB.K.INVOICES, keep);
+    } catch {}
+
+    // Tombstone (suppresses the doc until the server delete lands) then delete.
+    try { this._addTombstones('invoices', ids); } catch {}
+    try {
+      const col = this._orgRef().collection('invoices');
+      let batch = this._db.batch(), n = 0;
+      for (const id of ids) {
+        batch.delete(col.doc(id));
+        if (++n >= 450) { await batch.commit(); batch = this._db.batch(); n = 0; }
+      }
+      if (n > 0) await batch.commit();
+      try { sessionStorage.setItem(this._sweepKey, '1'); } catch {}
+      try {
+        DB.logError('PAGE-SWEEP',
+          `ลบหน้าเก่าที่ค้างจากการแก้ไข ${ids.length} รายการ จาก ${groups.length} ใบกำกับ`,
+          { invoices: groups.map(g => g.invoiceNumber), ids });
+      } catch {}
+      return { groups: groups.length, deleted: ids.length };
+    } catch (e) {
+      // Left in the queue by omission: the session flag is NOT set, so the next
+      // session sweeps again. This is the durability the original delete lacked.
+      try {
+        DB.logError('PAGE-SWEEP-FAILED',
+          `ลบหน้าเก่าไม่สำเร็จ: ${(e && e.message) || e}`,
+          { invoices: groups.map(g => g.invoiceNumber), ids });
+      } catch {}
+      return { groups: groups.length, deleted: 0, error: (e && e.message) || String(e) };
+    }
+  },
+
   _getTombstones(colName) {
     try {
       const all = JSON.parse(localStorage.getItem(this._tombstoneKey) || '{}');
@@ -777,6 +858,11 @@ var Sync = {
 
       // Flush any remaining queued writes (belt + suspenders)
       await this._flushQueue();
+
+      // Re-issue the delete for any pre-edit page left behind by a failed cleanup.
+      // Once per session, after the listeners are up so the local array is complete.
+      // Never allowed to break init — a sweep failure is logged, not thrown.
+      this.sweepSupersededPages().catch(() => {});
 
     } catch (e) {
       const msg  = e.message || String(e);

@@ -160,7 +160,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.241"></script><script src="db.js?v=1.0.241"></script><script src="auth.js?v=1.0.241"></script><script src="nav.js?v=1.0.241"></script><script src="idb.js?v=1.0.241"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.242"></script><script src="db.js?v=1.0.242"></script><script src="auth.js?v=1.0.242"></script><script src="nav.js?v=1.0.242"></script><script src="idb.js?v=1.0.242"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -976,8 +976,17 @@ function checkCustomerBalance(custId) {
 
   _balanceDetails = [];
   invNums.forEach(num => {
-    const page1 = allInvoices.find(i => i.invoiceNumber === num && i.page === 1)
-                || allInvoices.find(i => i.invoiceNumber === num);
+    // An edit writes NEW page records and the old ones are supposed to be deleted;
+    // that delete has repeatedly failed to land (13 invoice numbers currently hold more
+    // than one live page record). A plain find(page === 1) then picks whichever the sync
+    // loaded first — the STALE pre-edit total — so this bar could report a balance the
+    // customer card and reports did not. DB._isBetterInvoiceRep is the one deterministic
+    // rule (page 1 wins, then highest editCount); use it here too. v1.0.242.
+    let page1 = null;
+    for (const i of allInvoices) {
+      if (i.invoiceNumber === num && DB._isBetterInvoiceRep(page1, i)) page1 = i;
+    }
+    if (!page1) return;
     const total = parseFloat(page1.totalAmount) || 0;
     const paid  = DB.getInvoicePaidAmount(num, page1.customerId);
     const diff  = total - paid;

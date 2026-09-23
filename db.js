@@ -84,7 +84,7 @@ const DB = {
             const _pc = Array.isArray(DB._cache['wt_payments']) ? DB._cache['wt_payments'].length : 'none';
             const _vv = (typeof APP_VERSION !== 'undefined' && APP_VERSION.version) ? APP_VERSION.version : '?';
             const _pg = (location.pathname.split('/').pop() || 'index');
-            DB.logError('INV-TRACE', `[v${_vv}] tauri.init HDD load: invoices=${_ic} payments=${_pc} (page=${_pg})`);
+            if (DB._traceVerbose()) DB.logError('INV-TRACE', `[v${_vv}] tauri.init HDD load: invoices=${_ic} payments=${_pc} (page=${_pg})`);
           }
         } catch (e) {}
 
@@ -152,7 +152,7 @@ const DB = {
             } catch {}   // file missing/unreadable → fall through and write []
           }
           await writeTextFile(path, JSON.stringify(val));
-          if (_trace) { try { if (DB.logError) DB.logError('INV-TRACE', `[v${_ver()}] _tauri.write OK ${key} len=${_len} | ${_stack}`); } catch {} }
+          if (_trace && DB._traceVerbose()) { try { if (DB.logError) DB.logError('INV-TRACE', `[v${_ver()}] _tauri.write OK ${key} len=${_len} | ${_stack}`); } catch {} }
         })
         .then(() => {
           // HDD write confirmed — clear the sessionStorage shadow copy so it
@@ -1380,6 +1380,60 @@ const DB = {
     if (cp !== 1 && np === 1) return true;
     if (cp === 1 && np !== 1) return false;
     return (cand.editCount || 0) > (cur.editCount || 0);
+  },
+
+  // ── Superseded invoice pages left behind by a failed edit cleanup (v1.0.242) ──
+  // saveInvoiceEdit() writes NEW page records and deletes the old ones from Firestore.
+  // That delete is fire-and-forget, and the tombstone that hides the old doc meanwhile
+  // expires after _tombstoneTTL (30 min) — at which point _applyTombstones CLEARS the
+  // marker everywhere and RE-ADMITS the stale doc (sync.js ~line 274). So a delete that
+  // did not land inside 30 minutes leaves the pre-edit page live forever, on every
+  // device. Measured on live data: 10 of 26 ever-edited invoice numbers.
+  //
+  // Returns [{ invoiceNumber, customerId, page, keepId, dropIds }] for each group where
+  // ONE record is strictly the newest. Deliberately conservative:
+  //   • grouped by invoiceNumber + customerId + page, so a genuine multi-page invoice
+  //     is never a candidate (different pages are different groups)
+  //   • a TIE on editCount is skipped — that is a duplicate CREATE (double save), a
+  //     different problem with no safe automatic winner
+  //   • cancelled records are ignored entirely
+  // Nothing is lost by dropping the superseded record: its full pre-edit state is kept
+  // in the winner's editHistory[].previous (v1.0.185).
+  // INV-TRACE verbosity (v1.0.242). The two SUCCESS-only traces (every _tauri.write,
+  // and the HDD load on every page navigation) were 165 of the 200 entries the error
+  // ring holds — it covered only the last 23.5 hours, so EDIT-DELETE-FAILED and the
+  // other real diagnostics were evicted long before anyone read them. Failures,
+  // blocked-empty writes and shrink traces are ALWAYS logged; the success chatter is
+  // opt-in via localStorage.__invTrace = '1'.
+  _traceVerbose() {
+    try { return localStorage.getItem('__invTrace') === '1'; } catch { return false; }
+  },
+
+  findSupersededPages(invoices) {
+    const groups = new Map();
+    for (const i of (invoices || this.getInvoices())) {
+      if (!i || !i.id || i.cancelled || !i.invoiceNumber) continue;
+      const k = i.invoiceNumber + '|' + (i.customerId || '') + '|' + (i.page || 1);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(i);
+    }
+    const out = [];
+    for (const recs of groups.values()) {
+      if (recs.length < 2) continue;
+      const max = recs.reduce((m, r) => Math.max(m, r.editCount || 0), 0);
+      const top = recs.filter(r => (r.editCount || 0) === max);
+      if (top.length !== 1) continue;            // tie → duplicate CREATE, leave alone
+      const keep = top[0];
+      const drop = recs.filter(r => r !== keep);
+      out.push({
+        invoiceNumber: keep.invoiceNumber,
+        customerId: keep.customerId || '',
+        page: keep.page || 1,
+        keepId: keep.id,
+        dropIds: drop.map(r => r.id),
+      });
+    }
+    return out;
   },
 
   getCustomerBalance(custId) {
