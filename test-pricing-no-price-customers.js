@@ -130,5 +130,48 @@ console.log('\nThe rendered empty state carries the right pieces');
   t('the plain message is still the fallback', block.includes('ไม่พบข้อมูลราคา'));
 }
 
+console.log('\ncustomersWithoutPrices() — suspended customers are not nagged about (v1.0.241)');
+{
+  // invoice-create.html blocks creating an invoice for a suspended customer in four
+  // places, so telling the user to set a price "before invoicing" is advice they can
+  // never act on. Reported: the banner counted all the suspended customers too.
+  const withSusp = [
+    { id: 'a', name: 'เขากลอยการค้า' },
+    { id: 'b', name: 'น้ำดื่มทวีสุข', suspended: true },
+    { id: 'c', name: 'ร้านที่มีราคา' },
+    { id: 'd', name: 'มัสยิดกลาง ปริก' },
+    { id: 'e', name: 'ระงับและมีราคา', suspended: true },
+  ];
+  const pricing = [{ customerId: 'c', productId: 'p1' }, { customerId: 'e', productId: 'p1' }];
+  const b = build(withSusp, pricing);
+  const none = b.fns.customersWithoutPrices(withSusp);
+  t('a suspended customer with no prices is NOT listed', !none.some(c => c.id === 'b'),
+    none.map(c => c.name).join(', '));
+  t('active customers with no prices are still listed', none.map(c => c.id).join(',') === 'a,d');
+  t('the count drops to the active ones only', none.length === 2, String(none.length));
+
+  // Guard the two ways this could regress into over-filtering.
+  t('a suspended customer who HAS prices was already excluded, still is',
+    !none.some(c => c.id === 'e'));
+  t('having a price still excludes an ACTIVE customer', !none.some(c => c.id === 'c'));
+
+  // suspended:false / absent must both count as active.
+  const explicit = [{ id: 'x', name: 'ใช้งานชัดเจน', suspended: false }, { id: 'y', name: 'ไม่มีฟิลด์' }];
+  const b2 = build(explicit, []);
+  t('suspended:false and a missing field both count as active',
+    b2.fns.customersWithoutPrices(explicit).length === 2);
+
+  // The banner itself must reflect the filtered count, not the raw list.
+  const b3 = build(withSusp, pricing);
+  b3.fns.renderNoPriceBanner(withSusp);
+  const html = b3.html;
+  t('the banner says 2 ราย, not 3', html.includes('<strong>2 ราย</strong>'),
+    (html.match(/<strong>[^<]*ราย<\/strong>/) || ['(none)'])[0]);
+  t('the suspended customer gets no chip', !html.includes('น้ำดื่มทวีสุข'));
+  t('the active ones keep their chips',
+    html.includes('เขากลอยการค้า') && html.includes('มัสยิดกลาง ปริก'));
+}
+
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

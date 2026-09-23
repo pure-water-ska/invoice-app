@@ -190,7 +190,7 @@
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.240"></script><script src="db.js?v=1.0.240"></script><script src="auth.js?v=1.0.240"></script><script src="nav.js?v=1.0.240"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.241"></script><script src="db.js?v=1.0.241"></script><script src="auth.js?v=1.0.241"></script><script src="nav.js?v=1.0.241"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -649,7 +649,10 @@ async function retireStandardPrices() {
 // was already fixed for once (see the pagination/orderMap comments above).
 function customersWithoutPrices(customers) {
   const withRules = new Set(DB.getPricing().map(p => p.customerId).filter(Boolean));
-  return customers.filter(c => c && c.id && !withRules.has(c.id));
+  // Suspended customers are excluded (v1.0.241): invoice-create.html already blocks
+  // creating an invoice for them, so "must set a price before invoicing" is advice the
+  // user can never act on - it only inflated the count and the chip list.
+  return customers.filter(c => c && c.id && !c.suspended && !withRules.has(c.id));
 }
 
 let _npExpanded = false;
