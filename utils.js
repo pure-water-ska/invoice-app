@@ -165,9 +165,9 @@ const LZString = (function () {
 // ── End LZString ────────────────────────────────────────────────────────────
 
 const APP_VERSION = {
-  version: '1.0.243',
-  date: '2026-09-23T15:56:51.150Z',
-  label: 'v1.0.243 (23 ก.ย. 2569)',
+  version: '1.0.244',
+  date: '2026-09-23T16:22:01.721Z',
+  label: 'v1.0.244 (23 ก.ย. 2569)',
 };
 
 // Changelog — add new entry here when releasing a new version.
@@ -703,7 +703,19 @@ Utils.compressImage = function(file, maxPx, quality) {
     try {
       var t = (typeof DB !== 'undefined') && DB._tauri;
       if (t && t.dataDir && window.__TAURI__ && window.__TAURI__.fs && typeof DB.buildBackupPayload === 'function') {
-        var p = await window.__TAURI__.path.join(t.dataDir, '_restore_on_close.json');
+        // v1.0.244: one file PER DAY instead of a single slot. The old single
+        // _restore_on_close.json was overwritten by every clean close — on 23 Sep 2026
+        // it destroyed a 4 Sep snapshot that was, by then, the only surviving copy of
+        // 99 customers and 3,279 pricing rules (it had only survived that long because
+        // the app had not closed cleanly in between). A dated name means a good
+        // snapshot can no longer be destroyed by the next close.
+        // Nothing is ever deleted: the desktop fs allowlist has no removeFile, and
+        // adding it would force every device onto a fresh .msi. Old files are the
+        // user's to clear (~3.6 MB/day at current data size).
+        var d = new Date();
+        var stamp = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') +
+                    '-' + String(d.getDate()).padStart(2, '0');
+        var p = await window.__TAURI__.path.join(t.dataDir, '_restore_on_close-' + stamp + '.json');
         await window.__TAURI__.fs.writeTextFile(p, JSON.stringify(DB.buildBackupPayload()));
       }
     } catch (e) {}

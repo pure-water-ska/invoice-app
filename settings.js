@@ -3766,14 +3766,41 @@ function _cpBuildPlan(rp, history, curCustomers, curPricing) {
 
 let _cpPlan = null;
 
+// v1.0.244: the close handler now writes one restore point PER DAY
+// (_restore_on_close-YYYY-MM-DD.json). Pick the NEWEST that actually parses, falling
+// back through older days and finally to the legacy single-slot name — a half-written
+// file from an interrupted close must not hide a good one from the day before.
+// Exported for test-rotating-restore-point.js.
+function _cpPickNewestRestoreFile(names) {
+  return (names || [])
+    .filter(n => /^_restore_on_close(-\d{4}-\d{2}-\d{2})?\.json$/.test(n))
+    .sort((a, b) => {
+      const da = (a.match(/(\d{4}-\d{2}-\d{2})/) || ['', ''])[1];
+      const db = (b.match(/(\d{4}-\d{2}-\d{2})/) || ['', ''])[1];
+      // Newest date first. The undated legacy name yields '' here, which sorts after
+      // every real date, so it is always tried LAST without a special case.
+      return db.localeCompare(da);
+    });
+}
+
 async function _cpReadRestorePoint() {
   if (!window.IS_TAURI || !window.__TAURI__ || !window.__TAURI__.fs) return null;
   const t = (typeof DB !== 'undefined') && DB._tauri;
   if (!t || !t.dataDir) return null;
+  let names = [];
   try {
-    const p = await window.__TAURI__.path.join(t.dataDir, '_restore_on_close.json');
-    return JSON.parse(await window.__TAURI__.fs.readTextFile(p));
-  } catch (e) { return null; }
+    const entries = await window.__TAURI__.fs.readDir(t.dataDir);
+    names = (entries || []).map(e => (e && e.name) || '').filter(Boolean);
+  } catch (e) { names = []; }
+  if (!names.length) names = ['_restore_on_close.json'];
+  for (const name of _cpPickNewestRestoreFile(names)) {
+    try {
+      const p = await window.__TAURI__.path.join(t.dataDir, name);
+      const v = JSON.parse(await window.__TAURI__.fs.readTextFile(p));
+      if (v && Array.isArray(v.customers) && Array.isArray(v.pricing)) return v;
+    } catch (e) { /* unreadable or half-written — try the next oldest */ }
+  }
+  return null;
 }
 
 async function renderCustPriceRestore() {

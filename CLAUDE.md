@@ -586,6 +586,22 @@ added these guards. **Understand them before touching sync.**
   **Still open:** the delete itself is not yet durable (no retry queue), and the 30-minute TTL
   reversal is untouched — deliberately, because widening it risks re-opening the June clobber
   war that `_MAX_AUTO_TOMBSTONE` exists to prevent. Covered by `test-superseded-page-sweep.js`.
+- **Restore point rotates by DAY (v1.0.244).** `utils.js`'s desktop close handler used to
+  write a single `_restore_on_close.json`, overwritten by every clean close. On 23 Sep 2026
+  that destroyed a 4 Sep snapshot which was by then the only surviving copy of 99 customers
+  and 3,279 pricing rules — and it had only survived that long because the app happened not
+  to have closed cleanly in between. It now writes `_restore_on_close-YYYY-MM-DD.json`: the
+  same day's file is overwritten, each new day starts a new one, so a good snapshot cannot be
+  destroyed by the next close. `settings.js` `_cpPickNewestRestoreFile` / `_cpReadRestorePoint`
+  scan the folder, take the newest that PARSES and contains `customers`+`pricing` arrays, and
+  fall back through older days to the legacy undated name — an interrupted half-written close
+  must never hide the previous day's good copy.
+  **Nothing is ever deleted, and cannot be:** the `fs` allowlist has readFile/writeFile/
+  readDir/createDir but NO `removeFile`, and adding it is a BINARY change (fresh `.msi` on
+  every device), so pruning must never be assumed. Growth is ~3.6 MB/day at current data size
+  and old files are the user's to clear. `test-rotating-restore-point.js` asserts the
+  permission is still absent, so enabling it later is a deliberate act rather than drift.
+  This is a safety net, NOT a backup — Settings → Backup → Export is the intended route.
 - **ONE rule for picking an invoice number's representative record: `DB._isBetterInvoiceRep`
   (v1.0.243).** `find(i => i.page === 1)` picks by ARRAY order — i.e. sync/load order — so
   whenever a superseded page exists it can return the STALE pre-edit total. Seven sites still
