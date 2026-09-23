@@ -50,6 +50,13 @@ function makeEnv(invoices, payments) {
     getInvoices: () => invoices,
     getPaymentsByInvoice: (num) => payments.filter(p => p.invoiceNumber === num),
     isChequePending: () => false,
+    // v1.0.237's checkCustomerBalance asks db to explain an edit-caused difference.
+    // null = no edit explanation, which is the case this suite is about (stale
+    // carry-forward references); the label itself is covered by
+    // test-payment-version-stamp.js.
+    explainInvoiceDiff: () => null,
+    getCurrentPagesByNumber: (num) => invoices.filter(i => i.invoiceNumber === num),
+    _numberHasMultipleOwners: (num) => new Set(invoices.filter(i => i.invoiceNumber === num).map(i => i.customerId)).size > 1,
     effectivePaymentAmount: (p) => Math.max(0, (parseFloat(p.amount) || 0) - (parseFloat(p.allocatedOut) || 0)),
     getInvoicePaidAmount: (num, custId) => {
       let ps = payments.filter(p => p.invoiceNumber === num && !p.cancelled);
