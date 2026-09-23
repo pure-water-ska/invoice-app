@@ -730,7 +730,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.237"></script><script src="db.js?v=1.0.237"></script><script src="auth.js?v=1.0.237"></script><script src="nav.js?v=1.0.237"></script><script src="idb.js?v=1.0.237"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.238"></script><script src="db.js?v=1.0.238"></script><script src="auth.js?v=1.0.238"></script><script src="nav.js?v=1.0.238"></script><script src="idb.js?v=1.0.238"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -2521,7 +2521,7 @@ function closeOverpay(createNew) {
   if (createNew && pendingOverpayData && Math.abs(pendingOverpayData.diff || 0) > 0.01) {
     const { custId, invNum, diff } = pendingOverpayData;
     const label = diff > 0 ? `ชำระเกินจากใบ ${invNum}` : `ค้างจากใบ ${invNum}`;
-    sessionStorage.setItem('pendingAdjust', JSON.stringify({ custId, label, amount: diff, sourceInvNum: invNum }));
+    sessionStorage.setItem('pendingAdjust', JSON.stringify({ custId, label, amount: diff }));
     location.href = `invoice-create.html?cust=${custId}&adjust=1`;
   } else {
     Utils.showAlert('บันทึกชำระเงินสำเร็จ', 'success');
