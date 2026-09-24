@@ -556,6 +556,27 @@ invoiced line item.
 A multi-day data-loss incident (payments/invoices mass-deleted across devices)
 added these guards. **Understand them before touching sync.**
 
+- **Nothing could push a record the SERVER had lost, until v1.0.247.** Three separate
+  mechanisms each decline: `_writeKey` skips any record whose content matches
+  `_lastSyncedRecs` (it uploaded fine once and has not changed → "unchanged (skipped)");
+  `Sync.flushNow` only drains the PENDING queue, and a lost record is not pending; and
+  `recoverCollectionMissing` / `recoverCollectionFull` only pull DOWN. So after the
+  v1.0.242 sweep deleted invoices from Firestore, the creating device kept them locally,
+  `checkSyncStatus` reported "ค้าง 2", and **"อัปโหลดที่ค้าง" sent nothing while reporting
+  "อัปโหลดเสร็จ"** — which read as a failure rather than the no-op it was.
+  `Sync.pushRecordsByIds(colName, ids)` is the missing path: it deletes the stale
+  fingerprint and clears any tombstone FIRST (that ordering is the whole point — a test
+  that only checks the map afterwards is tautological, because the fingerprint is
+  re-seeded on success), writes the records, then marks them present in `_serverIds` and
+  re-seeds the fingerprint so the next diff does not resend them.
+  It takes ids from the caller rather than reading the server: `checkSyncStatus` already
+  reads EVERY document to count them (this build's compat Firestore has no `count()`), so
+  collecting ids there is free and covers the whole collection, not just the archive
+  window. The panel now NAMES the missing invoices instead of showing a bare count, and
+  carries the real read cost (~3,400 reads/click) in place of the old and incorrect
+  "ใช้ count — ไม่เปลืองโควต้า" claim. Invoices/payments only — customers, products and
+  pricing are owned by the CollectionSync modules, which re-push from their own diff.
+  Covered by `test-push-missing.js`.
 - **Deleting a record requires PROOF, never inference (v1.0.245 incident → v1.0.246 fix).**
   v1.0.242's `DB.findSupersededPages` ordered records by `editCount` ALONE. A brand-new
   invoice has `editCount: 0`, so against an existing EDITED invoice on the same

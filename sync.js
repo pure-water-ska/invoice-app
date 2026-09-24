@@ -2018,6 +2018,77 @@ var Sync = {
   // number of missing records, not the whole collection. Merges additively.
   // Caveat: only recovers ids this device has seen on the server before; for docs
   // created on another device that never reached _serverIds, use recoverCollectionFull.
+  // ── Force-push specific records the server is missing (v1.0.247) ───────────
+  // Nothing in the app could push a record the server had LOST. _writeKey skips any
+  // record whose content matches _lastSyncedRecs (it uploaded fine once), and
+  // Sync.flushNow only drains the PENDING queue — a lost record is not pending. So
+  // after the v1.0.242 sweep deleted invoices from Firestore, the creating device kept
+  // them locally, the compare panel said "ค้าง 2", and "อัปโหลดที่ค้าง" did nothing at
+  // all while reporting success.
+  //
+  // Takes the ids from the caller rather than reading the server itself:
+  // settings.js checkSyncStatus already reads every document to count them, so it can
+  // hand over exactly which ids are missing at no extra read cost — and across the WHOLE
+  // collection, not just the archive window.
+  async pushRecordsByIds(colName, ids, onProgress) {
+    if (!this.ready || !this._db) throw new Error('Sync not ready');
+    ids = [...new Set((ids || []).filter(Boolean))];
+    if (!ids.length) return { pushed: 0, requested: 0, notFound: 0 };
+
+    const lsKey = Object.keys(this.COLLECTIONS).find(k => this.COLLECTIONS[k] === colName) || ('wt_' + colName);
+    let localArr = [];
+    try { localArr = JSON.parse(this._localRead(lsKey) || '[]'); } catch {}
+    const byId = new Map(localArr.filter(r => r && r.id).map(r => [r.id, r]));
+
+    const recs = ids.map(id => byId.get(id)).filter(Boolean);
+    const notFound = ids.length - recs.length;   // asked for, but not on this device
+    if (!recs.length) return { pushed: 0, requested: ids.length, notFound };
+
+    // These were classified "already uploaded", so the normal diff would skip them.
+    // Drop the stale fingerprint, and clear any tombstone that would suppress the doc
+    // once it is back on the server.
+    const fpMap = this._lastSyncedRecs[colName] || (this._lastSyncedRecs[colName] = new Map());
+    const pushIds = recs.map(r => r.id);
+    pushIds.forEach(id => fpMap.delete(id));
+    try { this._clearTombstones(colName, pushIds); } catch {}
+
+    const col = this._orgRef().collection(colName);
+    let batch = this._db.batch(), ops = 0, pushed = 0;
+    const flush = async () => { if (ops) { await batch.commit(); batch = this._db.batch(); ops = 0; } };
+    for (const r of recs) {
+      const { _by, _ts, _byName, ...rec } = r;
+      batch.set(col.doc(r.id), {
+        ...rec,
+        _by: this._deviceId,
+        _byName: this._deviceName(),
+        _ts: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      pushed++;
+      if (++ops >= 200) { await flush(); if (onProgress) onProgress({ done: pushed, total: recs.length }); }
+    }
+    await flush();
+    if (onProgress) onProgress({ done: pushed, total: recs.length });
+
+    // Server-confirmed now — record the fingerprint and the id so the listener and the
+    // next diff both treat them as present rather than re-sending or dropping them.
+    for (const r of recs) {
+      const { _by, _ts, _byName, ...rClean } = r;
+      fpMap.set(r.id, JSON.stringify(rClean));
+    }
+    if (!this._serverIds[colName]) this._serverIds[colName] = new Set();
+    pushIds.forEach(id => this._serverIds[colName].add(id));
+    try { this._saveServerIds(colName); } catch {}
+
+    try {
+      if (typeof DB !== 'undefined' && DB.logError) {
+        DB.logError('PUSH-MISSING', colName + ': ดันขึ้น server ' + pushed + ' รายการ',
+          { collection: colName, ids: pushIds.slice(0, 40), notFound });
+      }
+    } catch {}
+    console.log(`[Sync] pushRecordsByIds ${colName}: requested=${ids.length}, pushed=${pushed}`);
+    return { pushed, requested: ids.length, notFound };
+  },
+
   async recoverCollectionMissing(colName, onProgress) {
     if (!this.ready || !this._db) throw new Error('Sync not ready');
     const lsKey = Object.keys(this.COLLECTIONS).find(k => this.COLLECTIONS[k] === colName) || ('wt_' + colName);

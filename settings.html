@@ -628,7 +628,8 @@
       </div>
     </div>
     <div class="card-body">
-      <div class="small text-muted mb-2">เทียบจำนวนข้อมูลในเครื่องกับบน Firestore (ใช้ count — ~1 read ต่อรายการ ไม่เปลืองโควต้า)</div>
+      <div class="small text-muted mb-2">เทียบข้อมูลในเครื่องกับบน Firestore และบอกว่าใบไหนที่ server ขาด<br>
+        <span class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Firestore รุ่นนี้ไม่มี count() จึงต้องอ่านทุกเอกสาร — ~3,400 reads ต่อการกด 1 ครั้ง ไม่ควรกดบ่อย</span></div>
       <div id="syncStatusBody"><div class="text-muted small text-center py-3">กด "ตรวจสถานะ" เพื่อเทียบจำนวน</div></div>
 
       <!-- ── กู้ใบกำกับทั้งหมดจาก server (full pull, ไม่จำกัด 6 เดือน) ───────── -->
@@ -1023,10 +1024,10 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-<script src="utils.js?v=1.0.246"></script><script src="db.js?v=1.0.246"></script><script src="auth.js?v=1.0.246"></script><script src="nav.js?v=1.0.246"></script><script src="idb.js?v=1.0.246"></script><script src="image-store.js?v=1.0.163"></script>
+<script src="utils.js?v=1.0.247"></script><script src="db.js?v=1.0.247"></script><script src="auth.js?v=1.0.247"></script><script src="nav.js?v=1.0.247"></script><script src="idb.js?v=1.0.247"></script><script src="image-store.js?v=1.0.163"></script>
 <script src="drive-config.js" onerror="window.GOOGLE_CLIENT_ID=''"></script>
 <script src="drive-store.js"></script>
-<script src="settings.js?v=1.0.246"></script>
+<script src="settings.js?v=1.0.247"></script>
 <script>Nav.render('settings');</script>
 </body>
 </html>

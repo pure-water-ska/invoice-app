@@ -2628,6 +2628,11 @@ async function purgeAllCustomers() {
 }
 
 /* ─── Sync status: local vs server counts (cheap, via count() aggregation) ── */
+// Which ids the server is missing, per collection — filled by checkSyncStatus() and
+// consumed by pushMissingToServer(). Kept in memory only: it is a snapshot of one
+// comparison, and acting on a stale one could push records that have since arrived.
+let _syncMissing = {};
+
 async function checkSyncStatus() {
   const body = document.getElementById('syncStatusBody');
   body.innerHTML = '<div class="text-muted small text-center py-3"><span class="spinner-border spinner-border-sm me-1"></span>กำลังตรวจ…</div>';
@@ -2635,26 +2640,52 @@ async function checkSyncStatus() {
     body.innerHTML = '<div class="alert alert-warning small py-2 mb-0">Firestore ยังไม่พร้อม — รอ badge sync เป็นปกติก่อน</div>';
     return;
   }
+  _syncMissing = {};
   const base = Sync._orgRef();
-  const serverCount = async (path) => {
+
+  // This build's compat Firestore has NO count() aggregation, so every call here reads
+  // the whole collection. Since the documents are fetched anyway, collect their IDs at
+  // the same time — that makes "which invoices is the server missing?" answerable for
+  // FREE, across the whole collection rather than just the archive window.
+  const serverInfo = async (path, wantIds) => {
     try {
       const col = base.collection(path);
-      if (typeof col.count === 'function') { const s = await col.count().get(); return s.data().count; }
-      const s = await col.get();                // fallback: this build has no count() aggregation
-      return s.size;
-    } catch (e) { return '?(' + (e.code || e.message) + ')'; }
+      if (!wantIds && typeof col.count === 'function') {
+        const s = await col.count().get();
+        return { count: s.data().count };
+      }
+      const s = await col.get();
+      return { count: s.size, ids: wantIds ? new Set(s.docs.map(d => d.id)) : null };
+    } catch (e) { return { count: '?(' + (e.code || e.message) + ')' }; }
   };
-  // [label, localCount, serverPromise, note, isPricing]
+
+  const invInfo  = await serverInfo('invoices', true);
+  const payInfo  = await serverInfo('payments', true);
+  const custInfo = await serverInfo('customers_v2', false);
+  const prodInfo = await serverInfo('products_v2', false);
+  const priceInfo = await serverInfo('pricing_byproduct', false);
+
+  // Local records the server does not have. Only invoices/payments: customers, products
+  // and pricing are owned by the CollectionSync modules, which re-push from their own
+  // diff when "อัปโหลดที่ค้าง" runs, so they do not have this blind spot.
+  const missingOf = (localArr, info) => {
+    if (!info.ids) return [];
+    return localArr.filter(r => r && r.id && !info.ids.has(r.id));
+  };
+  const invMissing = missingOf(DB.getInvoices(), invInfo);
+  const payMissing = missingOf(DB.getPayments(), payInfo);
+  _syncMissing = { invoices: invMissing.map(r => r.id), payments: payMissing.map(r => r.id) };
+
   const rows = [
-    ['ใบกำกับ',  DB.getInvoices().length,  await serverCount('invoices'),         'เครื่องเก็บ 6 เดือนล่าสุด'],
-    ['ชำระเงิน', DB.getPayments().length,   await serverCount('payments'),         ''],
-    ['ลูกค้า',    DB.getCustomers().length,  await serverCount('customers_v2'),      ''],
-    ['สินค้า',    DB.getProducts().length,   await serverCount('products_v2'),       ''],
-    ['ราคา',      DB.getPricing().length,    await serverCount('pricing_byproduct'), 'เครื่องนับเป็นรายการ / server นับเป็นสินค้า', true],
+    ['ใบกำกับ',  DB.getInvoices().length,  invInfo.count,   'เครื่องเก็บ 6 เดือนล่าสุด'],
+    ['ชำระเงิน', DB.getPayments().length,   payInfo.count,   ''],
+    ['ลูกค้า',    DB.getCustomers().length,  custInfo.count,  ''],
+    ['สินค้า',    DB.getProducts().length,   prodInfo.count,  ''],
+    ['ราคา',      DB.getPricing().length,    priceInfo.count, 'เครื่องนับเป็นรายการ / server นับเป็นสินค้า', true],
   ];
   const cell = (r) => {
     const [label, local, server, note, isPricing] = r;
-    let status, badge;
+    let status;
     if (typeof server !== 'number') { status = '<i class="bi bi-question-circle text-muted"></i>'; }
     else if (isPricing) { status = server > 0 ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-dash-circle text-muted"></i>'; }
     else if (server >= local) { status = '<i class="bi bi-check-circle-fill text-success"></i>'; }
@@ -2668,11 +2699,57 @@ async function checkSyncStatus() {
       <td class="text-center">${status}</td>
     </tr>`;
   };
+
+  // Name the records rather than just a count — a bare "ค้าง 2" cannot be acted on.
+  const missingBlock = (label, recs, colName, nameOf) => {
+    if (!recs.length) return '';
+    const chips = recs.slice(0, 30).map(r =>
+      `<span class="badge rounded-pill me-1 mb-1" style="background:#f8d7da;color:#842029;font-weight:normal">${esc(nameOf(r))}</span>`).join('');
+    const more = recs.length > 30 ? `<span class="text-muted small">…อีก ${recs.length - 30}</span>` : '';
+    return `
+      <div class="border border-danger rounded p-2 mt-3">
+        <div class="fw-semibold text-danger small mb-2"><i class="bi bi-arrow-up-circle me-1"></i>${label}ที่ไม่มีบน server — ${recs.length} รายการ</div>
+        <div class="mb-2">${chips}${more}</div>
+        <div class="text-muted small mb-2">เครื่องนี้คิดว่าอัปโหลดไปแล้ว ปุ่ม "อัปโหลดที่ค้าง" จึงไม่ส่งซ้ำ — ต้องสั่งดันขึ้นโดยตรง</div>
+        <button class="btn btn-sm btn-outline-danger" onclick="pushMissingToServer('${colName}')">
+          <i class="bi bi-cloud-upload me-1"></i>ดัน ${recs.length} รายการขึ้น server</button>
+      </div>`;
+  };
+
   body.innerHTML = `
     <table class="table table-sm mb-0">
       <thead class="table-light"><tr><th>ประเภท</th><th class="text-end">ในเครื่อง</th><th class="text-end">บน Server</th><th class="text-center">สถานะ</th></tr></thead>
       <tbody>${rows.map(cell).join('')}</tbody>
-    </table>`;
+    </table>
+    ${missingBlock('ใบกำกับ', invMissing, 'invoices', r => r.invoiceNumber || r.id)}
+    ${missingBlock('การชำระเงิน', payMissing, 'payments', r => (r.invoiceNumber || '') + ' ฿' + Utils.formatNumber(r.amount || 0))}
+    <div id="pushMissingOut"></div>`;
+}
+
+// Force-push the records checkSyncStatus() found missing. Sync.pushRecordsByIds clears
+// their stale "already uploaded" fingerprint first — that is precisely what
+// "อัปโหลดที่ค้าง" cannot do, because those records are not in the pending queue.
+async function pushMissingToServer(colName) {
+  const out = document.getElementById('pushMissingOut');
+  const ids = (_syncMissing && _syncMissing[colName]) || [];
+  const show = (html, cls) => { if (out) out.innerHTML = `<div class="small mt-2 ${cls}">${html}</div>`; };
+  if (!ids.length) { show('<i class="bi bi-info-circle me-1"></i>ไม่มีรายการที่ต้องดันขึ้น', 'text-muted'); return; }
+  if (typeof Sync === 'undefined' || typeof Sync.pushRecordsByIds !== 'function' || !Sync.ready) {
+    show('<i class="bi bi-exclamation-triangle me-1"></i>ระบบซิงค์ยังไม่พร้อม', 'text-warning'); return;
+  }
+  show('<span class="spinner-border spinner-border-sm me-1"></span>กำลังดันขึ้น server…', 'text-primary');
+  try {
+    const r = await Sync.pushRecordsByIds(colName, ids, (p) => {
+      show(`<span class="spinner-border spinner-border-sm me-1"></span>กำลังดันขึ้น… ${p.done}/${p.total}`, 'text-primary');
+    });
+    const extra = r.notFound ? ` (ข้าม ${r.notFound} ที่ไม่มีในเครื่องแล้ว)` : '';
+    show(`<i class="bi bi-check-circle-fill text-success me-1"></i>ดันขึ้นสำเร็จ ${r.pushed} รายการ${extra} — กำลังตรวจสถานะใหม่…`, 'text-success');
+    _syncMissing[colName] = [];
+    setTimeout(checkSyncStatus, 1200);
+  } catch (e) {
+    const msg = (e.code === 'resource-exhausted') ? 'โควต้า Firestore หมด — รอรีเซ็ตรายวันแล้วลองใหม่' : (e.message || e.code || 'เกิดข้อผิดพลาด');
+    show(`<i class="bi bi-x-circle-fill text-danger me-1"></i>ดันขึ้นไม่สำเร็จ: ${msg}`, 'text-danger');
+  }
 }
 
 // Force any pending debounced/queued Firestore writes to commit now —
@@ -2690,7 +2767,11 @@ async function flushPendingUploads() {
   try {
     await Utils.bpWatchUploads(bp, { wt_invoices: 'up_inv', wt_payments: 'up_pay' }, ['up_other']);
   } finally { bp.close(); }
-  Utils.showAlert('<i class="bi bi-check-circle me-1"></i>อัปโหลดเสร็จ — กำลังตรวจสถานะ…');
+  // Deliberately does NOT claim success: flushNow only drains the PENDING queue and
+  // the debounced timers. A record the server LOST is not pending — _writeKey skips it
+  // as 'unchanged' — so this button can legitimately send nothing. Saying 'อัปโหลดเสร็จ'
+  // made that look like a failed upload instead of a no-op. v1.0.247.
+  Utils.showAlert('<i class="bi bi-info-circle me-1"></i>ส่งข้อมูลที่ค้างในคิวแล้ว — ถ้ายังมีที่ "ค้าง" ให้ใช้ปุ่มดันขึ้น server ด้านล่าง');
   checkSyncStatus();
 }
 
