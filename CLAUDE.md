@@ -556,24 +556,31 @@ invoiced line item.
 A multi-day data-loss incident (payments/invoices mass-deleted across devices)
 added these guards. **Understand them before touching sync.**
 
-- **⛔ `Sync.sweepSupersededPages` is DISABLED (`_SWEEP_ENABLED: false`, v1.0.245) — it
-  deleted brand-new invoices.** `DB.findSupersededPages` orders records by `editCount`
-  ALONE, and a newly created invoice has `editCount: 0`. Against an existing invoice that
-  had been edited (`editCount: 1`) on the same `invoiceNumber+customerId+page`, the NEW
-  record is classified as the stale pre-edit page and deleted from Firestore. Reported live
-  24 Sep 2026: "invoice that just created doesn't sync across devices" — the creating device
-  still showed it (the invoices listener is union-only and never removes a local record),
-  every other device never received it, and NO upload bar appeared because the push had
-  already succeeded. Same outcome with no number collision at all: create then edit, and if
-  the new record's push has not landed when the sweep deletes the pre-edit doc, the server
-  is left with neither.
-  The repair itself is sound; the ORDERING rule is not. **Before re-enabling, the rule must
-  also compare AGE** — drop a record only when it is genuinely OLDER than the one kept
-  (id timestamp / `issuedAt`), never on `editCount` alone. `test-superseded-page-sweep.js`
-  asserts the flag is still false AND demonstrates the hole, so turning it on without
-  fixing the rule fails the suite.
-  Lesson for this file: "lower editCount = older record" is FALSE for anything newly
-  created. Any future cleanup that deletes records must prove age directly, not infer it.
+- **Deleting a record requires PROOF, never inference (v1.0.245 incident → v1.0.246 fix).**
+  v1.0.242's `DB.findSupersededPages` ordered records by `editCount` ALONE. A brand-new
+  invoice has `editCount: 0`, so against an existing EDITED invoice on the same
+  `invoiceNumber+customerId+page` it was classified as the stale pre-edit page and deleted
+  from Firestore. Reported 24 Sep 2026 as "invoice that just created doesn't sync across
+  devices": the creating device still showed it (the invoices listener is union-only and
+  never removes a local record), no other device ever received it, and NO upload bar
+  appeared because the push itself had succeeded. v1.0.245 was an emergency stop
+  (`_SWEEP_ENABLED: false`); v1.0.246 re-enabled it behind two INDEPENDENT proofs, either
+  of which rules a new invoice out:
+    1. **Age** — `DB._recCreatedMs()` decodes the creation time from the record id
+       (`Date.now().toString(36)` + random). The dropped record must genuinely PREDATE the
+       one kept. An id that does not decode to a plausible timestamp is refused, not guessed.
+    2. **Provenance** — the dropped record's total must match a version the keeper actually
+       records in `editHistory[].previous`. A superseded page IS a previous version of the
+       keeper; an unrelated invoice that merely shares a number is not.
+  This deliberately REVERSES part of the v1.0.243 decision ("cleanup always wins over
+  history"): a duplicate with no `previous[]` snapshot is now left in place, because there
+  is no proof it is a previous version rather than a different invoice. Deleting an
+  unprovable record is what caused the incident. Confirmed with the user 24 Sep.
+  Replayed on live data: 5 of the 7 groups in the 4 Sep snapshot still qualify (the 2
+  pre-v1.0.185 ones have no snapshot), and current data yields nothing.
+  **The general lesson for this file: "lower editCount = older record" is FALSE for
+  anything newly created. Any cleanup that DELETES must prove age and identity directly.**
+  `_SWEEP_ENABLED` remains as a kill switch, asserted by `test-superseded-page-sweep.js`.
 - **Superseded invoice pages: the tombstone TTL REVERSES a failed delete (root cause, v1.0.242).**
   `saveInvoiceEdit()` (v1.0.185) deletes the pre-edit page docs with a bare
   `batch.commit()` that is explicitly **not** retried, inside `if (window.Sync && Sync.ready)`

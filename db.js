@@ -1444,6 +1444,16 @@ const DB = {
     return best ? { payment: best, agoMs: now - bestT } : null;
   },
 
+  // Creation time from a record id (Date.now().toString(36) + random). Returns null
+  // when the id does not decode to a plausible timestamp — callers must then refuse to
+  // act rather than assume an ordering. v1.0.245.
+  _recCreatedMs(rec) {
+    const m = String((rec && rec.id) || '').match(/^[0-9a-z]{8}/);
+    if (!m) return null;
+    const v = parseInt(m[0], 36);
+    return (v > 1e12 && v < 2e13) ? v : null;
+  },
+
   findSupersededPages(invoices) {
     const groups = new Map();
     for (const i of (invoices || this.getInvoices())) {
@@ -1459,7 +1469,44 @@ const DB = {
       const top = recs.filter(r => (r.editCount || 0) === max);
       if (top.length !== 1) continue;            // tie → duplicate CREATE, leave alone
       const keep = top[0];
-      const drop = recs.filter(r => r !== keep);
+
+      // v1.0.245 — editCount ALONE is not enough, and assuming it was deleted brand-new
+      // invoices (see the ⛔ note in CLAUDE.md). A new invoice has editCount 0, so against
+      // an existing EDITED invoice on the same number+customer+page it looked like the
+      // stale pre-edit page. Two independent proofs are now required, either of which
+      // rules a new invoice out:
+      //
+      //   1. AGE — the record must genuinely PREDATE the one kept. Record ids are
+      //      Date.now().toString(36) + random, so the first 8 chars decode to the
+      //      creation time. A brand-new invoice is NEWER than the edited record it
+      //      collides with, so it can never qualify. An id that does not decode is
+      //      refused rather than guessed.
+      //   2. PROVENANCE — its total must match a version the keeper actually records in
+      //      editHistory[].previous. A superseded page IS a previous version of the
+      //      keeper; an unrelated invoice that merely shares a number is not.
+      //
+      // Verified against live data: both held for all 7 groups still present in the
+      // 4 Sep snapshot. Pre-v1.0.185 edits carry no previous[] snapshot, so they no
+      // longer qualify — correct: without provenance there is no proof to delete on.
+      const keepT = this._recCreatedMs(keep);
+      const snaps = (keep.editHistory || [])
+        .filter(h => h && h.previous)
+        .map(h => parseFloat(h.previous.totalAmount))
+        .filter(n => !isNaN(n));
+      // Fast path only — the per-record checks below independently reject a null keepT
+      // and an empty snapshot list. Removing this line changes nothing but speed.
+      if (keepT == null || !snaps.length) continue;
+
+      const drop = recs.filter(r => {
+        if (r === keep) return false;
+        if ((r.editCount || 0) >= (keep.editCount || 0)) return false;
+        const t = this._recCreatedMs(r);
+        if (t == null || !(t < keepT)) return false;                 // must be OLDER
+        const amt = parseFloat(r.totalAmount) || 0;
+        return snaps.some(x => Math.abs(x - amt) <= 0.005);          // must be a known version
+      });
+      if (!drop.length) continue;
+
       out.push({
         invoiceNumber: keep.invoiceNumber,
         customerId: keep.customerId || '',

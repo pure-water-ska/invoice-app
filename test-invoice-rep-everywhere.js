@@ -105,28 +105,46 @@ section('the seven former sites now use the rule');
     (read('db.js').match(/_isBetterInvoiceRep\(cur, cand\) \{/g) || []).length === 1);
 }
 
-section('the sweep cleans every duplicate again (snapshot guard removed)');
+section('the sweep now requires PROOF before deleting (v1.0.246)');
 {
   const src = read('db.js');
+  // findSupersededPages calls this._recCreatedMs — the helper must come along.
+  const h = src.indexOf('  _recCreatedMs(rec) {');
+  const he = src.indexOf('\n  },', h);
   const s = src.indexOf('  findSupersededPages(invoices) {');
   const e = src.indexOf('\n  },', src.indexOf('return out;', s));
-  const fn = new Function('return {' + src.slice(s, e + 5) + '};')();
+  const fn = new Function('return {' + src.slice(h, he + 5) + src.slice(s, e + 5) + '};')();
+
+  const NOW = Date.parse('2026-09-24T10:00:00.000Z');
+  const T = ms => Math.round(ms).toString(36).padStart(8, '0');
   const mk = (id, o) => Object.assign({ id, invoiceNumber: 'A', customerId: 'c1', page: 1 }, o);
+  const OLD = T(NOW - 86400000), NEW = T(NOW);
 
-  // The user does not need old versions, so a missing editHistory snapshot must NOT
-  // stop the cleanup — leaving a duplicate would re-expose the readers above.
-  const noSnap = fn.findSupersededPages([mk('old'), mk('new', { editCount: 1 })]);
-  t('a pair with NO editHistory snapshot is still cleaned', noSnap.length === 1, noSnap.length);
-  t('…keeping the newest', noSnap[0] && noSnap[0].keepId === 'new');
-
+  // v1.0.245 shipped an emergency stop because editCount ALONE misread a brand-new
+  // invoice as a stale page and deleted it from Firestore. Two proofs are now required.
   const withSnap = fn.findSupersededPages([
-    mk('old'), mk('new', { editCount: 1, editHistory: [{ previous: { totalAmount: 1 } }] })]);
-  t('a pair WITH a snapshot is cleaned too', withSnap.length === 1);
+    mk(OLD, { totalAmount: 100 }),
+    mk(NEW, { editCount: 1, totalAmount: 200, editHistory: [{ previous: { totalAmount: 100 } }] })]);
+  t('a provable superseded page is cleaned', withSnap.length === 1, withSnap.length);
+  t('…keeping the newest', withSnap[0] && withSnap[0].keepId === NEW);
+
+  // NOTE: this REVERSES part of the v1.0.243 decision ("cleanup always wins over
+  // history"). A pair with no editHistory[].previous can no longer be proven to be a
+  // previous version rather than a different invoice sharing the number, so it is left
+  // alone. Deleting an unprovable record is what caused the v1.0.245 incident.
+  const noSnap = fn.findSupersededPages([mk(OLD, { totalAmount: 100 }), mk(NEW, { editCount: 1 })]);
+  t('a pair with NO snapshot is now LEFT ALONE, not cleaned', noSnap.length === 0, noSnap.length);
+
+  // The bug itself.
+  const brandNew = fn.findSupersededPages([
+    mk(OLD, { editCount: 1, totalAmount: 200, editHistory: [{ previous: { totalAmount: 100 } }] }),
+    mk(NEW, { editCount: 0, totalAmount: 100 })]);
+  t('a NEWER record is never dropped, even matching a snapshot', brandNew.length === 0, brandNew);
 
   // Still must not touch duplicate CREATEs or real multi-page invoices.
-  t('a tie is still left alone', fn.findSupersededPages([mk('x'), mk('y')]).length === 0);
+  t('a tie is still left alone', fn.findSupersededPages([mk(OLD), mk(NEW)]).length === 0);
   t('a real multi-page invoice is still left alone',
-    fn.findSupersededPages([mk('p1', { page: 1 }), mk('p2', { page: 2 })]).length === 0);
+    fn.findSupersededPages([mk(OLD, { page: 1 }), mk(NEW, { page: 2 })]).length === 0);
 }
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');

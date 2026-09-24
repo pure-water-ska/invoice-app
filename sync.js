@@ -158,7 +158,7 @@ var Sync = {
   _SWEEP_MAX: 25,
   _sweepKey: 'wt_sweep_pages_done',
 
-  // DISABLED v1.0.245 — EMERGENCY STOP. findSupersededPages decides which record is
+  // Was DISABLED in v1.0.245 (emergency stop), RE-ENABLED in v1.0.246 once the rule
   // superseded purely by editCount, and a BRAND-NEW invoice has editCount 0. If it lands
   // on the same invoiceNumber+customerId+page as an existing EDITED invoice (editCount 1),
   // the new one is classified as the stale pre-edit page and deleted from Firestore. The
@@ -167,9 +167,12 @@ var Sync = {
   // 24 Sep 2026. Same outcome without any number collision: create then edit, and if the
   // new record's push has not landed when the sweep deletes the pre-edit doc, the server
   // is left with neither.
-  // The repair itself is sound; the ORDERING rule is not. Re-enable only with a guard
-  // that drops a record solely when it is genuinely OLDER than the one kept.
-  _SWEEP_ENABLED: false,
+  // The repair itself was sound; the ORDERING rule was not. findSupersededPages now
+  // requires TWO independent proofs before dropping anything — the record must be
+  // genuinely OLDER than the one kept (decoded from the id timestamp), AND its total
+  // must match a version the keeper actually records in editHistory[].previous.
+  // Either alone rules out a brand-new invoice.
+  _SWEEP_ENABLED: true,
 
   async sweepSupersededPages(force) {
     if (!this._SWEEP_ENABLED) return null;
