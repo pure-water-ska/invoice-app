@@ -556,6 +556,24 @@ invoiced line item.
 A multi-day data-loss incident (payments/invoices mass-deleted across devices)
 added these guards. **Understand them before touching sync.**
 
+- **⛔ `Sync.sweepSupersededPages` is DISABLED (`_SWEEP_ENABLED: false`, v1.0.245) — it
+  deleted brand-new invoices.** `DB.findSupersededPages` orders records by `editCount`
+  ALONE, and a newly created invoice has `editCount: 0`. Against an existing invoice that
+  had been edited (`editCount: 1`) on the same `invoiceNumber+customerId+page`, the NEW
+  record is classified as the stale pre-edit page and deleted from Firestore. Reported live
+  24 Sep 2026: "invoice that just created doesn't sync across devices" — the creating device
+  still showed it (the invoices listener is union-only and never removes a local record),
+  every other device never received it, and NO upload bar appeared because the push had
+  already succeeded. Same outcome with no number collision at all: create then edit, and if
+  the new record's push has not landed when the sweep deletes the pre-edit doc, the server
+  is left with neither.
+  The repair itself is sound; the ORDERING rule is not. **Before re-enabling, the rule must
+  also compare AGE** — drop a record only when it is genuinely OLDER than the one kept
+  (id timestamp / `issuedAt`), never on `editCount` alone. `test-superseded-page-sweep.js`
+  asserts the flag is still false AND demonstrates the hole, so turning it on without
+  fixing the rule fails the suite.
+  Lesson for this file: "lower editCount = older record" is FALSE for anything newly
+  created. Any future cleanup that deletes records must prove age directly, not infer it.
 - **Superseded invoice pages: the tombstone TTL REVERSES a failed delete (root cause, v1.0.242).**
   `saveInvoiceEdit()` (v1.0.185) deletes the pre-edit page docs with a bare
   `batch.commit()` that is explicitly **not** retried, inside `if (window.Sync && Sync.ready)`

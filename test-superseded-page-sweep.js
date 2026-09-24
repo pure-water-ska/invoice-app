@@ -93,7 +93,9 @@ function loadSweep(env) {
   const e = src.indexOf('\r\n  },', src.indexOf('return { groups: groups.length, deleted: 0, error:', s));
   if (e < 0) throw new Error('sweepSupersededPages end not found');
   const body = src.slice(s, e + 6).replace(/\r\n/g, '\n');
-  const extra = '  _SWEEP_MAX: 25,\n  _sweepKey: "wt_sweep_pages_done",\n';
+  // v1.0.245: the sweep is disabled in production by _SWEEP_ENABLED. These tests drive
+  // the logic deliberately, so the harness turns it on.
+  const extra = '  _SWEEP_MAX: 25,\n  _SWEEP_ENABLED: true,\n  _sweepKey: "wt_sweep_pages_done",\n';
   const obj = new Function('DB', 'sessionStorage', 'return {' + extra + body + '};')(env.DB, env.sessionStorage);
   return Object.assign(obj, env.sync);
 }
@@ -231,7 +233,66 @@ function runTrace() {
     const shrink = src.split('\n').find(l => l.includes("this.logError('INV-TRACE'") && l.includes('_ol'));
     t('the shrink trace is still always logged', shrink && !shrink.includes('_traceVerbose()'));
 
-    console.log('\n' + pass + ' passed, ' + fail + ' failed');
-    process.exit(fail ? 1 : 0);
+    runStop();
   }
 }
+
+function runStop() {
+  section('EMERGENCY STOP (v1.0.245) — the sweep must not run in production');
+  {
+  const src = read('sync.js');
+  t('_SWEEP_ENABLED exists and is false', /_SWEEP_ENABLED:\s*false/.test(src),
+    (src.match(/_SWEEP_ENABLED:\s*\w+/) || [])[0]);
+  const i = src.indexOf('async sweepSupersededPages(force) {');
+  const head = src.slice(i, i + 400);
+  t('the flag is checked FIRST, before anything else',
+    head.indexOf('_SWEEP_ENABLED') < head.indexOf('this.ready'));
+  t('it returns without touching Firestore', /if \(!this\._SWEEP_ENABLED\) return null;/.test(head));
+
+  // Drive it for real with the flag off — nothing may be deleted.
+  const src2 = read('sync.js');
+  const s2 = src2.indexOf('  async sweepSupersededPages(force) {');
+  const e2 = src2.indexOf('\r\n  },', src2.indexOf('return { groups: groups.length, deleted: 0, error:', s2));
+  const body = src2.slice(s2, e2 + 6).replace(/\r\n/g, '\n');
+  const env = makeEnv(PAIR);
+  const off = Object.assign(
+    new Function('DB', 'sessionStorage',
+      'return {  _SWEEP_MAX: 25,\n  _SWEEP_ENABLED: false,\n  _sweepKey: "x",\n' + body + '};')(env.DB, env.sessionStorage),
+    env.sync);
+  off.sweepSupersededPages(true).then(r => {
+    t('with the flag off it does nothing, even forced', r === null, r);
+    t('no Firestore delete is issued', env.deleted.length === 0, env.deleted.length);
+    t('no tombstone is written', env.tombstoned.length === 0);
+    t('local invoices are untouched', env.local.length === PAIR.length, env.local.length);
+    runHole();
+  });
+}
+
+}
+
+function runHole() {
+  section('WHY it is disabled — a brand-new invoice is misread as a stale page');
+  {
+    // The rule orders records by editCount alone. A newly created invoice has
+    // editCount 0, so against an existing EDITED invoice on the same
+    // invoiceNumber+customerId+page it is classified as the superseded one and
+    // deleted from Firestore. Reported live 24 Sep 2026: the creating device still
+    // showed it (the invoices listener is union-only and never removes), every other
+    // device never received it, and no upload bar appeared because the push had
+    // already succeeded.
+    const find = loadDetector();
+    const mk = (id, o) => Object.assign({ id, invoiceNumber: '240969-001', customerId: 'c1', page: 1 }, o);
+    const g = find([mk('existing_edited', { editCount: 1 }), mk('brand_new', { editCount: 0 })]);
+    t('the hole is real and still present in the detector',
+      g.length === 1 && g[0].dropIds.includes('brand_new'), g[0] && g[0].dropIds);
+    t('…and it would keep the OLD edited record instead',
+      g.length === 1 && g[0].keepId === 'existing_edited');
+    // This assertion is the point: while the hole exists, the sweep stays off.
+    t('so the sweep MUST remain disabled until the rule also compares age',
+      /_SWEEP_ENABLED:\s*false/.test(read('sync.js')));
+  }
+
+  console.log('\n' + pass + ' passed, ' + fail + ' failed');
+  process.exit(fail ? 1 : 0);
+}
+
