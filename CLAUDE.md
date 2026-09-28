@@ -958,6 +958,39 @@ Drive uses Google OAuth, which rejects desktop origins. `drive-config.js` is **e
 - `src-tauri/Cargo.toml`: tauri features include `updater`, `os-all`, the `dialog-*` set, `fs-*`, `path-all`.
 - Dialogs: `window.confirm/alert/prompt` are native in Tauri and require the `dialog` allowlist entries (`confirm`, `message`, `ask`).
 
+### Single instance — loopback port lock in `src/main.rs` (v1.0.248)
+
+Two copies of the app must never run at once: both mount the same HDD store in
+`%APPDATA%\<app>\data\`, and `DB._tauri.write` rewrites each `wt_*.json` **whole-file**,
+so the second process silently clobbers whatever the first wrote. They would also both
+sync to Firestore under the same device id.
+
+**crates.io has no Tauri-1-compatible `tauri-plugin-single-instance`** — all 51 published
+versions target Tauri 2 — so the lock is hand-rolled from `std` only (the alternative was
+a git dependency on the plugins-workspace `v1` branch, a moving target for CI). No crate
+was added.
+
+- A loopback `TcpListener` on port **49731** is the lock, taken **before**
+  `tauri::Builder` so a second copy never creates a window. A socket beats a lock file
+  because the OS releases it when the process dies — a crash cannot leave a stale lock
+  that keeps the user out of their own invoicing app.
+- **It fails OPEN.** 49731 is in the ephemeral range, so an unrelated program could hold
+  it. A failed bind is NOT trusted alone: the second copy connects and requires our own
+  `WTINV-OK` reply before exiting. Foreign occupant, no reply, or refused connection → it
+  starts normally WITHOUT the lock. Never make this fail closed; refusing to launch is far
+  worse than losing the guard for a session.
+- The handshake is newline-delimited and read with `read_line` on **both** sides — a
+  single `read()` can return a partial payload and turn a valid ping into a mismatch. All
+  three socket operations carry timeouts so neither side can hang.
+- Loopback only, never `0.0.0.0` — that would expose the port and can trigger a Windows
+  Firewall prompt.
+- Focus falls back to the first window if `get_window("main")` misses, so a future window
+  `label` change in tauri.conf.json cannot silently turn focusing into a no-op.
+
+Covered by `test-single-instance.js`, which pins these decisions and exercises the real OS
+socket behaviour. `cargo check` is available in the sandbox (cargo 1.95) — **compile Rust
+changes before pushing** rather than relying on CI.
+
 ### Version sources — keep in sync with `npm run bump`
 Three files carry the version: `package.json`, `src-tauri/tauri.conf.json` (drives the auto-update comparison), and `utils.js` `APP_VERSION` (the Settings card display, with an ISO timestamp for date+time). **Always run `node scripts/bump-version.js X.Y.Z` (`npm run bump X.Y.Z`)** to update all three at once, then commit + tag.
 
