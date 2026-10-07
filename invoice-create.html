@@ -133,6 +133,10 @@
           <tbody id="itemRows"></tbody>
         </table>
       </div>
+      <!-- Rows that have a product but no จำนวน and no เศษ. They used to be dropped
+           at save with nothing said; now they are flagged here while typing, and the
+           save asks what to do with each one. -->
+      <div id="blankQtyWarn" class="mt-2"></div>
       <div class="text-end mt-2 pe-2">
         <span class="fs-5 fw-bold">รวมทั้งสิ้น: <span class="text-primary" id="grandTotal">฿0.00</span></span>
         <div class="small text-muted" id="totalWords"></div>
@@ -160,7 +164,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.249"></script><script src="db.js?v=1.0.249"></script><script src="auth.js?v=1.0.249"></script><script src="nav.js?v=1.0.249"></script><script src="idb.js?v=1.0.249"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.250"></script><script src="db.js?v=1.0.250"></script><script src="auth.js?v=1.0.250"></script><script src="nav.js?v=1.0.250"></script><script src="idb.js?v=1.0.250"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -1177,12 +1181,12 @@ function renderRows() {
         <input type="text" value="${item.name||''}" placeholder="หรือพิมพ์รายการ" oninput="items[${i}].name=this.value;updateTotal(${i})" style="margin-top:2px;width:100%;border:1px solid #dee2e6;border-radius:4px;padding:2px 5px;font-size:12px">
       </td>
       <td>${buildBrandCell(i, item.brand)}</td>
-      <td><input type="number" value="${item.qty === 0 ? '0' : (item.qty || '')}" placeholder="0" step="any" oninput="items[${i}].qty=this.value;onQtyChange(${i})" class="text-center"></td>
+      <td><input type="number" value="${item.qty === 0 ? '0' : (item.qty || '')}" placeholder="0" step="any" oninput="items[${i}].qty=this.value;_clearZeroDecision(${i});onQtyChange(${i})" class="text-center"${_isBlankQtyRow(item) && !item.keepZero ? ' style="border-color:#ffc107;box-shadow:0 0 0 2px rgba(255,193,7,.25)"' : ''}></td>
       <td>
         <input type="number" value="${item.unitSize||''}" placeholder="0" min="0" oninput="items[${i}].unitSize=this.value;updateTotal(${i})" class="text-center">
         ${(() => { const p = item.productId ? DB.getProductById(item.productId) : null; const u = (p && p.unit) || Utils.productUnit(item.name); return u ? `<div style="font-size:10px;color:#6c757d;text-align:center;margin-top:1px">${u}</div>` : ''; })()}
       </td>
-      <td><input type="number" value="${item.remainder === 0 ? '0' : (item.remainder || '')}" placeholder="0" min="0" oninput="items[${i}].remainder=this.value;updateTotal(${i})" class="text-center"></td>
+      <td><input type="number" value="${item.remainder === 0 ? '0' : (item.remainder || '')}" placeholder="0" min="0" oninput="items[${i}].remainder=this.value;_clearZeroDecision(${i});updateTotal(${i})" class="text-center"></td>
       <td><input type="number" id="priceInp${i}" value="${item.price||''}" placeholder="0.00" min="0" step="0.01" oninput="items[${i}].price=this.value;items[${i}]._manual=true;updateTotal(${i})" class="text-end"></td>
       <td class="text-end fw-semibold pe-2" id="rowTotal${i}">${total>0?'฿'+Utils.formatNumber(total):'-'}</td>
       <td class="text-center"><button class="btn btn-sm text-danger p-0" onclick="removeRow(${i})" title="ลบแถว"><i class="bi bi-x-circle"></i></button></td>
@@ -1238,6 +1242,100 @@ function calcTotal(item) {
   return (qty * unitSize + rem) * price;
 }
 
+// ── Rows with no quantity (v1.0.250) ───────────────────────────────────────────
+// A row the user put a product in but left without จำนวน AND without เศษ used to be
+// filtered out at save with nothing said — pick four products, forget one quantity,
+// and the invoice printed three lines and a smaller total in silence. onProductSelect
+// fills name/unitSize/brand/price but never qty, so this is one slip away at all times.
+//
+// It is not always a mistake, though: a typed note line or a ของแถม row legitimately
+// has no quantity. So such a row is still excluded by DEFAULT, but never silently —
+// the user is shown them at save and decides each one. `keepZero` marks a row the user
+// chose to print anyway (จำนวน 0, ฿0.00); `zeroDecided` marks one they have ruled on,
+// so the save paths can tell "deliberately left out" from "never asked about".
+//
+// Note qty may legitimately be NEGATIVE (returns are added as negative lines), so the
+// test is !== 0, not <= 0.
+function _isBlankQtyRow(item) {
+  if (!item.name) return false;
+  const qty = parseFloat(item.qty) || 0;        // '' → 0 intentionally
+  const rem = parseFloat(item.remainder) || 0;
+  return qty === 0 && rem === 0;
+}
+
+// The ONE place that decides what goes on the invoice. previewInvoice, saveInvoice and
+// saveInvoiceEdit all read it, so they can never disagree about which rows are included.
+function _splitItems() {
+  const active = [], blank = [];
+  items.forEach(item => {
+    if (!item.name) return;
+    if (!_isBlankQtyRow(item)) { active.push(item); return; }
+    if (item.keepZero) { active.push(item); return; }
+    blank.push(item);
+  });
+  return { active, blank, undecided: blank.filter(it => !it.zeroDecided) };
+}
+
+// Typing a quantity (or clearing one) makes any earlier answer stale.
+function _clearZeroDecision(i) {
+  items[i].keepZero = false;
+  items[i].zeroDecided = false;
+}
+
+function renderBlankQtyWarning() {
+  const el = document.getElementById('blankQtyWarn');
+  if (!el) return;
+  const n = items.filter(it => _isBlankQtyRow(it) && !it.keepZero).length;
+  el.innerHTML = n
+    ? `<div class="alert alert-warning py-2 px-3 mb-0 small no-print">
+         <i class="bi bi-exclamation-triangle me-1"></i>
+         มี ${n} รายการที่ยังไม่ได้ใส่จำนวน — ระบบจะถามก่อนบันทึก
+       </div>`
+    : '';
+}
+
+// Per-row choice, so one line can be a note worth printing while another is a genuine
+// slip. Utils.confirm is a NATIVE dialog in the desktop app and cannot carry checkboxes,
+// so this is a self-contained overlay returning a Promise. Resolves false when the user
+// backs out to go and type the missing quantity.
+function askAboutBlankRows(rows) {
+  return new Promise(resolve => {
+    const host = document.createElement('div');
+    host.style.cssText = 'position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px';
+    host.innerHTML = `
+      <div class="bg-white rounded-3 shadow" style="width:100%;max-width:440px;max-height:90vh;overflow:auto">
+        <div class="px-3 py-2 border-bottom fw-semibold">
+          <i class="bi bi-exclamation-triangle text-warning me-2"></i>มีรายการที่ไม่ได้ใส่จำนวน
+        </div>
+        <div class="px-3 py-3">
+          <p class="small text-muted mb-3">เลือกรายการที่ต้องการให้แสดงบนใบกำกับ (จำนวนจะเป็น 0) — รายการที่ไม่ได้เลือกจะถูกตัดออก</p>
+          ${rows.map((r, k) => `
+            <label class="d-flex align-items-center gap-2 border rounded p-2 mb-2" style="cursor:pointer">
+              <input type="checkbox" class="form-check-input mt-0 js-keep-zero" data-k="${k}">
+              <span class="js-nm"></span>
+            </label>`).join('')}
+        </div>
+        <div class="d-flex gap-2 justify-content-end px-3 py-2 border-top">
+          <button class="btn btn-outline-secondary btn-sm js-back">กลับไปแก้ไข</button>
+          <button class="btn btn-primary btn-sm js-go">บันทึกต่อ</button>
+        </div>
+      </div>`;
+    // Product names are free text typed by the user — set them as text, never as HTML.
+    host.querySelectorAll('.js-nm').forEach((el, k) => { el.textContent = rows[k].name; });
+    const close = () => { try { document.body.removeChild(host); } catch (e) {} };
+    host.querySelector('.js-back').onclick = () => { close(); resolve(false); };
+    host.querySelector('.js-go').onclick = () => {
+      host.querySelectorAll('.js-keep-zero').forEach(c => { rows[+c.dataset.k].keepZero = c.checked; });
+      // Every row shown has now been ruled on, kept or not — so the save paths below
+      // know these were left out on purpose rather than never asked about.
+      rows.forEach(r => { r.zeroDecided = true; });
+      close();
+      resolve(true);
+    };
+    document.body.appendChild(host);
+  });
+}
+
 function updateTotal(i) {
   items[i].total = calcTotal(items[i]);
   const el = document.getElementById('rowTotal' + i);
@@ -1246,6 +1344,7 @@ function updateTotal(i) {
 }
 
 function updateGrandTotal() {
+  renderBlankQtyWarning();
   const total = items.reduce((s, item) => s + (item.total || 0), 0);
   document.getElementById('grandTotal').textContent = '฿' + Utils.formatNumber(total);
   document.getElementById('totalWords').textContent = Utils.numberToThaiWords(total);
@@ -1379,7 +1478,7 @@ function checkVersionMismatch(customerId, activeItems) {
   return mismatches;
 }
 
-function previewInvoice() {
+async function previewInvoice() {
   const customerId     = document.getElementById('invCustomer').value;
   const shippingMethod = document.getElementById('invShipping').value;
   const dateVal        = document.getElementById('invDate').value;
@@ -1390,13 +1489,18 @@ function previewInvoice() {
     return;
   }
 
-  const activeItems = items.filter(item => {
-    if (!item.name) return false;
-    const qty = parseFloat(item.qty) || 0;
-    const rem = parseFloat(item.remainder) || 0;
-    return qty !== 0 || rem !== 0;
-  });
+  // ดูตัวอย่าง is the only route to the save buttons, so this is where the user is asked
+  // about rows with no quantity. Their answer is stored on the item objects, and the save
+  // paths below read it — they must not re-ask, because everything before their
+  // re-entrancy lock has to stay synchronous.
+  let split = _splitItems();
+  if (split.blank.length) {
+    if (!await askAboutBlankRows(split.blank)) { renderRows(); return; }
+    split = _splitItems();
+  }
+  const activeItems = split.active;
   if (activeItems.length === 0) { Utils.showAlert('กรุณากรอกรายการสินค้าอย่างน้อย 1 รายการ', 'warning'); return; }
+  renderRows();
 
   const cust        = DB.getCustomerById(customerId);
   const cfg         = DB.getSettings();
@@ -1502,12 +1606,16 @@ async function saveInvoice(shouldPrint = false) {
   if (!customerId) { Utils.showAlert('กรุณาเลือกลูกค้า', 'warning'); return; }
   if (!shippingMethod) { Utils.showAlert('กรุณาเลือกวิธีจัดส่ง', 'warning'); return; }
 
-  const activeItems = items.filter(item => {
-    if (!item.name) return false;
-    const qty = parseFloat(item.qty) || 0;   // '' → 0 intentionally
-    const rem = parseFloat(item.remainder) || 0;
-    return qty !== 0 || rem !== 0;
-  });
+  // previewInvoice() already asked about rows with no quantity and recorded the answer on
+  // each item. Re-asking here is not an option — everything above the re-entrancy lock
+  // must stay synchronous — so an unanswered row stops the save instead of being dropped
+  // in silence the way it was before v1.0.250.
+  const _split = _splitItems();
+  if (_split.undecided.length) {
+    Utils.showAlert('ยังไม่ได้ใส่จำนวน: ' + _split.undecided.map(it => it.name).join(', '), 'warning');
+    return;
+  }
+  const activeItems = _split.active;
   if (activeItems.length === 0) { Utils.showAlert('กรุณากรอกรายการสินค้าอย่างน้อย 1 รายการ', 'warning'); return; }
   // Defense-in-depth: previewInvoice() already blocks this, but the create-save path
   // had no check of its own (the one in saveInvoiceEdit is behind a dead `!editMode`).
@@ -1862,7 +1970,12 @@ async function loadEdit(invNum) {
     unitSize:  item.unitSize  || '',
     remainder: item.remainder || 0,
     price:     item.price     || '',
-    total:     item.total     || 0
+    total:     item.total     || 0,
+    // A saved row with no quantity is one the user was already asked about and chose to
+    // print (v1.0.250) — or predates that question. Either way it is on the invoice, so
+    // reopening it for an edit must not re-litigate it or quietly drop it.
+    keepZero:    true,
+    zeroDecided: true
   }));
   while (items.length < ROWS_PER_PAGE) items.push(emptyItem());
   renderRows();
@@ -1900,12 +2013,14 @@ async function saveInvoiceEdit(shouldPrint = false) {
     return;
   }
 
-  const activeItems = items.filter(item => {
-    if (!item.name) return false;
-    const qty = parseFloat(item.qty) || 0;   // '' → 0 intentionally
-    const rem = parseFloat(item.remainder) || 0;
-    return qty !== 0 || rem !== 0;
-  });
+  // Same contract as saveInvoice(): previewInvoice() asked, this path only reads the
+  // answer, and an unanswered row stops the save rather than vanishing from the invoice.
+  const _splitE = _splitItems();
+  if (_splitE.undecided.length) {
+    Utils.showAlert('ยังไม่ได้ใส่จำนวน: ' + _splitE.undecided.map(it => it.name).join(', '), 'warning');
+    return;
+  }
+  const activeItems = _splitE.active;
   if (!activeItems.length) { Utils.showAlert('กรุณากรอกรายการสินค้าอย่างน้อย 1 รายการ', 'warning'); return; }
 
   // Same re-entrancy lock as saveInvoice() — an edit doesn't mint a new invoice number,
