@@ -3982,3 +3982,78 @@ async function runCustPriceRestore() {
 }
 
 window.addEventListener('DOMContentLoaded', () => { try { renderCustPriceRestore(); } catch (e) {} });
+
+/* ─── Settings tabs (v1.0.249) ──────────────────────────────────────────────
+   23 cards used to sit in one ~1,000-line scroll. settings.html now groups them
+   into six tab panes; the cards themselves are unchanged. Every permission gate
+   in this file works by writing `el.style.display`, and those gates live in
+   several independent async functions (initZipSections, renderCustPriceRestore,
+   renderLocalFolderCard, …). So instead of calling _tabsRefresh() after each one
+   — and after every future gate someone adds — we watch for the attribute writes
+   the gates make. That keeps the permission rules in exactly one place.         */
+const _TAB_KEY = 'wt_settings_tab';
+
+function _tabShow(id) {
+  const btn = document.getElementById('tabBtn-' + id);
+  if (!btn) return;
+  if (window.bootstrap && bootstrap.Tab) bootstrap.Tab.getOrCreateInstance(btn).show();
+  else btn.click();
+}
+
+// Visible = not hidden by a gate. Only the card's own inline display matters:
+// cards are direct children of their pane, and a pane being inactive must NOT
+// count as hidden (otherwise every tab but the open one would report zero).
+function _tabCardVisible(card) {
+  return card.style.display !== 'none' && !card.classList.contains('d-none');
+}
+
+function _tabsRefresh() {
+  const content = document.getElementById('settingsTabContent');
+  if (!content) return;
+  let firstLive = null, activeLive = false;
+  content.querySelectorAll('[data-pane]').forEach(pane => {
+    const id = pane.dataset.pane;
+    const n = Array.from(pane.children)
+      .filter(c => c.classList.contains('card') && _tabCardVisible(c)).length;
+    const li    = document.querySelector('#settingsTabs [data-tab="' + id + '"]');
+    const badge = document.querySelector('#settingsTabs [data-tab-count="' + id + '"]');
+    if (badge) badge.textContent = n;
+    // 17 of the 23 cards are admin-only and 6 more are permission-gated, so a
+    // whole tab can legitimately be empty for a given user — hide it rather than
+    // offering a tab that opens onto nothing.
+    if (li) li.style.display = n ? '' : 'none';
+    if (!n) return;
+    if (!firstLive) firstLive = id;
+    if (pane.classList.contains('active')) activeLive = true;
+  });
+  // The default (or remembered) tab can be one this user sees nothing in.
+  if (!activeLive && firstLive) _tabShow(firstLive);
+}
+
+function _tabsInit() {
+  const content = document.getElementById('settingsTabContent');
+  if (!content) return;
+
+  document.querySelectorAll('#settingsTabs button[data-bs-target]').forEach(btn => {
+    btn.addEventListener('shown.bs.tab', () => {
+      try { sessionStorage.setItem(_TAB_KEY, btn.dataset.bsTarget.replace('#tab-', '')); } catch (e) {}
+    });
+  });
+
+  let last = '';
+  try { last = sessionStorage.getItem(_TAB_KEY) || ''; } catch (e) {}
+  if (last && document.getElementById('tabBtn-' + last)) _tabShow(last);
+
+  // Debounced: initZipSections alone writes a dozen display values. The nav <ul>
+  // is outside #settingsTabContent, so _tabsRefresh's own writes to the tab
+  // items cannot re-trigger this observer.
+  let t = null;
+  new MutationObserver(() => {
+    clearTimeout(t);
+    t = setTimeout(_tabsRefresh, 50);
+  }).observe(content, { attributes: true, attributeFilter: ['style', 'class'], subtree: true });
+
+  _tabsRefresh();
+}
+
+window.addEventListener('DOMContentLoaded', () => { try { _tabsInit(); } catch (e) {} });
