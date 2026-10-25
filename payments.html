@@ -736,7 +736,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.252"></script><script src="db.js?v=1.0.252"></script><script src="auth.js?v=1.0.252"></script><script src="nav.js?v=1.0.252"></script><script src="idb.js?v=1.0.252"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.253"></script><script src="db.js?v=1.0.253"></script><script src="auth.js?v=1.0.253"></script><script src="nav.js?v=1.0.253"></script><script src="idb.js?v=1.0.253"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -1267,7 +1267,11 @@ function render() {
   if (!list.length) {
     tbody.innerHTML = Utils.emptyTableRow(6, {
       hasDate:  !!(from || to),
-      hasOther: !!(q || fc || fs || fDestAcct || fDestBank || fSrcBank),
+      // fcId, not fc — the customer filter is held as an id (see the declaration and the
+      // row test above). `fc` has never existed here, so this line threw a ReferenceError
+      // on the one path that reaches it: a filter matching NO payments. The empty-state
+      // row then never rendered, leaving a blank table instead of "ไม่พบรายการ". v1.0.253.
+      hasOther: !!(q || fcId || fs || fDestAcct || fDestBank || fSrcBank),
     });
     return;
   }
