@@ -16,7 +16,13 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css">
 <style>
 .img-thumb     { max-height:140px; border-radius:6px; border:1px solid #dee2e6; cursor:pointer; }
-.pay-hist-img  { max-height:60px;  border-radius:4px; border:1px solid #dee2e6; cursor:pointer; }
+/* A5-shaped box (148:210 = 0.705 → 60 × 42). max-height alone left every thumbnail a
+   different width, so a row mixing signed invoices, slips and cheques never lined up.
+   A correctly captured A5 page now fills the box edge to edge; anything framed landscape
+   letterboxes against the grey, which makes a badly shot capture visible at a glance.
+   object-fit:contain — never crop or stretch a document we may have to show someone. */
+.pay-hist-img  { height:60px; width:42px; object-fit:contain; background:#f8f9fa;
+                 border-radius:4px; border:1px solid #dee2e6; cursor:pointer; }
 .img-fullscreen{ position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:zoom-out; }
 .img-fullscreen img { max-width:95vw;max-height:95vh;border-radius:8px; }
 .lightbox-inner { position:relative; cursor:default; }
@@ -730,7 +736,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.250"></script><script src="db.js?v=1.0.250"></script><script src="auth.js?v=1.0.250"></script><script src="nav.js?v=1.0.250"></script><script src="idb.js?v=1.0.250"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.251"></script><script src="db.js?v=1.0.251"></script><script src="auth.js?v=1.0.251"></script><script src="nav.js?v=1.0.251"></script><script src="idb.js?v=1.0.251"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -809,6 +815,18 @@ let payImages = { transfer: '', cheque: '', signed: '' };
 let _pendingPaymentData = null;   // holds data (array) while waiting for date confirmation
 let _pendingPayments    = [];     // staging list for multi-payment entry
 let _imgUpdateB64 = '';           // holds resized image for imgUpdateModal
+let _imgUpdateFile = null;        // the ORIGINAL file, so the final cap is applied once
+
+// Per-type image cap (v1.0.251). The signed invoice is the proof of delivery and has to
+// stay readable, so it gets more pixels than a slip or a cheque. Both upload paths read
+// this ONE map: uploadSignedInvoice used 1400 while the แก้ไขรูป path hard-coded 1200, so
+// replacing a signed invoice silently shrank it AND re-compressed an already-compressed
+// JPEG — a second generation loss on top of a smaller image. Not raised beyond 1400:
+// Images.store writes each one to a Firestore images/{id} DOCUMENT, capped at 1 MiB, and
+// base64 inflates a JPEG by about a third.
+const IMG_MAX_PX  = { transfer: 1200, cheque: 1200, signed: 1400 };
+const IMG_QUALITY = 0.82;
+function _imgMaxPx(type) { return IMG_MAX_PX[type] || 1200; }
 
 // ── Multi-invoice payment state ───────────────────────────────────────────────
 let multiPayModal;
@@ -1637,7 +1655,8 @@ function onMethodChange() {
 async function loadPayImage(input, previewId) {
   const file = input.files[0];
   if (!file) return;
-  const b64 = await Utils.compressImage(file, 1200, 0.82);
+  const _type = previewId === 'chequeImagePreview' ? 'cheque' : 'transfer';
+  const b64 = await Utils.compressImage(file, _imgMaxPx(_type), IMG_QUALITY);
   if (previewId === 'transferImagePreview') payImages.transfer = b64;
   else if (previewId === 'chequeImagePreview')  payImages.cheque  = b64;
   document.getElementById(previewId).innerHTML =
@@ -1930,13 +1949,19 @@ function openImageUpdateModal(payId, invNum) {
   document.getElementById('imgUpdateReason').value = '';
   document.getElementById('imgUpdateAlert').innerHTML  = '';
   _imgUpdateB64 = '';
+  _imgUpdateFile = null;   // never carry a file over from a previous open
   imgUpdateModal.show();
 }
 
 async function previewImgUpdate(input) {
   const file = input.files[0];
   if (!file) return;
-  _imgUpdateB64 = await Utils.compressImage(file, 1200, 0.82);
+  // Preview only. The type select can still be changed after a file is picked, so the
+  // stored copy is re-made from the ORIGINAL file in confirmImageUpdate() once the final
+  // type is known — compressing the preview again would stack a second generation loss.
+  _imgUpdateFile = file;
+  _imgUpdateB64 = await Utils.compressImage(
+    file, _imgMaxPx(document.getElementById('imgUpdateType').value), IMG_QUALITY);
   document.getElementById('imgUpdatePreview').innerHTML =
     `<img src="${_imgUpdateB64}" class="img-thumb">`;
 }
@@ -1966,7 +1991,14 @@ async function confirmImageUpdate() {
   const p = DB.getPayments().find(x => x.id === payId);
   if (!p) { alertEl.innerHTML = '<div class="alert alert-danger py-2">ไม่พบรายการชำระ</div>'; return; }
 
-  const imgSrc = await _drvUpload(_imgUpdateB64, `img_${type}_${payId}_${Date.now()}.jpg`);
+  // Re-made from the original file at the cap for the type actually chosen, so changing
+  // the select after picking the file cannot store a signed invoice at the slip's 1200.
+  let _finalB64 = _imgUpdateB64;
+  if (_imgUpdateFile) {
+    try { _finalB64 = await Utils.compressImage(_imgUpdateFile, _imgMaxPx(type), IMG_QUALITY); }
+    catch (e) { /* keep the preview copy rather than losing the user's upload */ }
+  }
+  const imgSrc = await _drvUpload(_finalB64, `img_${type}_${payId}_${Date.now()}.jpg`);
 
   const histEntry = {
     id:        Utils.uuid(),
@@ -2003,7 +2035,7 @@ async function uploadSignedInvoice(invNum, inputEl) {
   if (!file) return;
   try {
     Utils.showAlert('<i class="bi bi-hourglass-split me-1"></i>กำลังบันทึกรูป...', 'info');
-    let signedSrc = await Utils.compressImage(file, 1400, 0.82);
+    let signedSrc = await Utils.compressImage(file, _imgMaxPx('signed'), IMG_QUALITY);
     // Always offload via _drvUpload — Drive when configured, else the image-store
     // (so the base64 doesn't sit inside the invoice record / in-memory cache).
     if (signedSrc.startsWith('data:')) {
@@ -3092,7 +3124,7 @@ function onMultiChequeAcctChange() {
 async function loadMultiPayImage(input, type) {
   const file = input.files[0];
   if (!file) return;
-  const b64 = await Utils.compressImage(file, 1200, 0.82);
+  const b64 = await Utils.compressImage(file, _imgMaxPx(type), IMG_QUALITY);
   _multiImages[type] = b64;
   const previewId = type === 'transfer' ? 'multiTransferImgPreview' : 'multiChequeImgPreview';
   document.getElementById(previewId).innerHTML =
