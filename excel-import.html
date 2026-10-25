@@ -173,7 +173,7 @@ td.editable-cell input, td.editable-cell select { font-size: 13px; }
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.251"></script><script src="db.js?v=1.0.251"></script><script src="auth.js?v=1.0.251"></script><script src="nav.js?v=1.0.251"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.252"></script><script src="db.js?v=1.0.252"></script><script src="auth.js?v=1.0.252"></script><script src="nav.js?v=1.0.252"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -386,10 +386,9 @@ function matchInvoice(invNum, custName, amount) {
       // Only look at unpaid invoices for this customer (unique invoice numbers)
       const allCustInvs = invs.filter(i => i.customerId === bestC.id);
       const uniqNums = [...new Set(allCustInvs.map(i => i.invoiceNumber))];
-      const unpaidNums = uniqNums.filter(num => {
-        const pg = allCustInvs.find(i => i.invoiceNumber === num);
-        return DB.getInvoicePaidAmount(num, bestC.id) < (parseFloat(pg?.totalAmount) || 0);
-      });
+      // A settled invoice counted as unpaid here could steer an imported payment onto
+      // the wrong invoice when it was the only "unpaid" one. See DB._PAID_EPS.
+      const unpaidNums = uniqNums.filter(num => DB.isInvoiceUnpaid(num, bestC.id));
       const targetNums = unpaidNums.length ? unpaidNums : uniqNums;
       if (targetNums.length === 1) {
         const found     = allCustInvs.find(i => i.invoiceNumber === targetNums[0]);

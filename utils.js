@@ -165,9 +165,9 @@ const LZString = (function () {
 // ── End LZString ────────────────────────────────────────────────────────────
 
 const APP_VERSION = {
-  version: '1.0.251',
-  date: '2026-10-25T03:47:48.032Z',
-  label: 'v1.0.251 (25 ต.ค. 2569)',
+  version: '1.0.252',
+  date: '2026-10-25T04:25:03.471Z',
+  label: 'v1.0.252 (25 ต.ค. 2569)',
 };
 
 // Changelog — add new entry here when releasing a new version.
@@ -619,6 +619,25 @@ const Utils = {
 //             never upscaled (scale is capped at 1).
 //   quality — JPEG quality 0–1 (default 0.82; use 0.55 for thumbnail-only previews)
 //
+// ── Money rounding (v1.0.252) ───────────────────────────────────────────────
+// Line totals and invoice totals are computed in binary floating point, where
+// 16 * 156 * 1.35 is 3369.6000000000004 and 8057.14 + 3369.60 is 11426.740000000002.
+// Those residues were being STORED as the invoice total, while the payment was recorded
+// from the DISPLAYED figure (11426.74) — leaving the invoice a few e-12 short of settled
+// forever. 17 fully-paid invoices read as unpaid because of it.
+//
+// DB._PAID_EPS makes every reader tolerant of that gap; this stops it being written in
+// the first place. Round at the point money is COMPUTED, never only when displaying it.
+//
+// Sign-aware: return lines are stored as negative totals, and Math.round(-0.5) is -0,
+// which rounds the wrong way for money. Rounding the magnitude keeps -x the mirror of x.
+Utils.round2 = function (n) {
+  const v = parseFloat(n);
+  if (!isFinite(v)) return 0;
+  const r = Math.round((Math.abs(v) + Number.EPSILON) * 100) / 100;
+  return v < 0 ? -r : r;
+};
+
 // Usage:
 //   const b64 = await Utils.compressImage(file);
 //   const b64 = await Utils.compressImage(file, 900, 0.70);

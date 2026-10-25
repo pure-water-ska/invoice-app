@@ -27,7 +27,10 @@ const DIR = __dirname;
 
 const src = fs.readFileSync(path.join(DIR, 'invoice-create.html'), 'utf8');
 const start = src.indexOf('  const existingPages = DB.getInvoices().filter');
-const end   = src.indexOf('  const totalAmount = activeItems.reduce', start);
+// Anchored on the declaration, not on how the sum is built — v1.0.252 wrapped the
+// reduce in Utils.round2 and this marker stopped matching, failing the whole suite.
+// Still a real anchor: if the declaration moves or is renamed, this throws as intended.
+const end   = src.indexOf('  const totalAmount =', start);
 if (start < 0 || end < start) throw new Error('invoice-create.html structure changed — update this test\'s extraction markers');
 const block = src.slice(start, end);
 

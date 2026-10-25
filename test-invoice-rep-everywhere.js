@@ -90,11 +90,16 @@ section('no live file picks the representative by array order');
 
 section('the seven former sites now use the rule');
 {
+  // v1.0.252: a site may satisfy the rule EITHER by calling _isBetterInvoiceRep itself
+  // OR by going through DB.invoiceDue / DB.isInvoiceUnpaid, which apply it internally.
+  // invoice-create.html's payTerms loop moved to the helper and so dropped from 2 to 1 —
+  // that is the rule being centralised, not abandoned. The naive-pattern scan above is
+  // what actually guards against a regression here.
   const expect = [
     ['customers.html', 'render', 1],
-    ['invoice-create.html', 'checkCustomerBalance + payTerms', 2],
+    ['invoice-create.html', 'checkCustomerBalance (payTerms now via DB.isInvoiceUnpaid)', 1],
     ['payments.html', '_overpayOutstanding, showOutstandingPreview, multi-pay x2', 4],
-    ['db.js', 'findStaleFoldedBalances + getCustomerBalance', 2],
+    ['db.js', 'findStaleFoldedBalances + getCustomerBalance + invoiceDue', 3],
   ];
   for (const [f, what, atLeast] of expect) {
     const n = (read(f).match(/_isBetterInvoiceRep\(/g) || []).length;
@@ -103,6 +108,12 @@ section('the seven former sites now use the rule');
   // db.js must still DEFINE it exactly once.
   t('_isBetterInvoiceRep is defined once in db.js',
     (read('db.js').match(/_isBetterInvoiceRep\(cur, cand\) \{/g) || []).length === 1);
+  // The helper that now carries the rule for the sites above must itself apply it.
+  const due = read('db.js').slice(read('db.js').indexOf('  invoiceDue(invoiceNumber, customerId) {'));
+  t('DB.invoiceDue picks its representative with the rule',
+    /_isBetterInvoiceRep\(rep, i\)/.test(due.slice(0, 600)));
+  t('…and DB.isInvoiceUnpaid is built on invoiceDue, not its own scan',
+    /isInvoiceUnpaid\(invoiceNumber, customerId\) \{\s*return this\.invoiceDue\(/.test(read('db.js')));
 }
 
 section('the sweep now requires PROOF before deleting (v1.0.246)');

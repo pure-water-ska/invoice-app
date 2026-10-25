@@ -133,7 +133,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.251"></script><script src="db.js?v=1.0.251"></script><script src="auth.js?v=1.0.251"></script><script src="nav.js?v=1.0.251"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.252"></script><script src="db.js?v=1.0.252"></script><script src="auth.js?v=1.0.252"></script><script src="nav.js?v=1.0.252"></script><script src="bedate.js"></script>
 <script>
 Auth.require();
 DB.init();
@@ -686,7 +686,9 @@ function renderDetailInvoices(group) {
     const cust = customers.find(c=>c.id===inv.customerId);
     const paid = DB.getInvoicePaidAmount(inv.invoiceNumber, inv.customerId);
     const u    = (parseFloat(inv.totalAmount)||0) - paid;
-    const statusBadge = u <= 0
+    // `u <= 0` printed a red "ค้าง ฿0.00" badge for invoices settled to the satang,
+    // because the stored total carries a float residue. See DB._PAID_EPS.
+    const statusBadge = u <= DB._PAID_EPS
       ? '<span class="badge bg-success">ชำระครบ</span>'
       : `<span class="badge bg-danger">ค้าง ${fmt(u)}</span>`;
     const brands = (inv.items||[]).map(i=>i.brand).filter(Boolean);

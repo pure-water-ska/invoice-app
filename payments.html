@@ -736,7 +736,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.251"></script><script src="db.js?v=1.0.251"></script><script src="auth.js?v=1.0.251"></script><script src="nav.js?v=1.0.251"></script><script src="idb.js?v=1.0.251"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.252"></script><script src="db.js?v=1.0.252"></script><script src="auth.js?v=1.0.252"></script><script src="nav.js?v=1.0.252"></script><script src="idb.js?v=1.0.252"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -2317,7 +2317,8 @@ function renderPendingPayments() {
     'ยอดรวม: <strong>฿' + Utils.formatNumber(total) + '</strong> &nbsp;|&nbsp;' +
     'ชำระแล้ว: <strong class="text-success">฿' + Utils.formatNumber(alreadyPaid) + '</strong> &nbsp;|&nbsp;' +
     'รอบันทึก: <strong class="text-primary">฿' + Utils.formatNumber(pendingTotal) + '</strong> &nbsp;|&nbsp;' +
-    'ค้าง: <strong class="' + (rem > 0 ? 'text-danger' : 'text-success') + '">฿' + Utils.formatNumber(Math.max(0, rem)) + '</strong>';
+    // _PAID_EPS, not > 0: a float residue painted a red "฿0.00" on a settled invoice.
+    'ค้าง: <strong class="' + (rem > DB._PAID_EPS ? 'text-danger' : 'text-success') + '">฿' + Utils.formatNumber(Math.max(0, rem)) + '</strong>';
   if (rem > 0.005) document.getElementById('payAmount').value = rem.toFixed(2);
   else             document.getElementById('payAmount').value = '';
 }

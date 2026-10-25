@@ -1032,6 +1032,43 @@ const DB = {
     return ps.reduce((s, p) => s + this.effectivePaymentAmount(p), 0);
   },
 
+  // ── Is this invoice number still owed? (v1.0.252) ────────────────────────────
+  // Invoice totals are summed from line totals in binary floating point, so a total
+  // that is exactly 11426.74 in decimal can be stored as 11426.740000000002, while the
+  // payment is recorded from the DISPLAYED figure, 11426.74. A bare `paid < total` is
+  // then true by 1.8e-12 and the invoice shows as unpaid forever.
+  //
+  // Measured on live data: 17 fully-settled invoice numbers were "unpaid" this way,
+  // with gaps between 2e-13 and 1.2e-10 baht. reports.html even printed a red
+  // "ค้าง ฿0.00" badge for them, and customers.html disagreed with itself — the card's
+  // COUNT used a bare `<` while the list under it used `rem > 0.01`.
+  //
+  // getCustomerBalance, the payments screen and the dashboard already compared against
+  // _PAID_EPS; these helpers exist so every screen asks the SAME question, instead of
+  // each call site inventing its own tolerance or forgetting one.
+  //
+  // _PAID_EPS is half a satang: below any amount that can be invoiced or paid in THB,
+  // and far above the ~1e-10 that float arithmetic produces at these magnitudes.
+  _PAID_EPS: 0.005,
+
+  // Signed remainder for an invoice NUMBER: positive = still owed, negative = overpaid.
+  // Picks the representative page with _isBetterInvoiceRep — never find(page === 1),
+  // which returns whichever record sync loaded first and can be a stale pre-edit total.
+  invoiceDue(invoiceNumber, customerId) {
+    const pages = this.getInvoices().filter(i =>
+      i.invoiceNumber === invoiceNumber && !i.cancelled &&
+      (!customerId || i.customerId === customerId));
+    let rep = null;
+    for (const i of pages) if (this._isBetterInvoiceRep(rep, i)) rep = i;
+    if (!rep) return 0;
+    const total = parseFloat(rep.totalAmount) || 0;
+    return total - this.getInvoicePaidAmount(invoiceNumber, rep.customerId);
+  },
+
+  isInvoiceUnpaid(invoiceNumber, customerId) {
+    return this.invoiceDue(invoiceNumber, customerId) > this._PAID_EPS;
+  },
+
   // The invoice total that was live at version `ec`. editHistory[i].previous.totalAmount
   // is the total BEFORE edit i+1 — i.e. the total AT version i — and the record itself
   // holds the total at the latest version. See saveInvoiceEdit() in invoice-create.html.

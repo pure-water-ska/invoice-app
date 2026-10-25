@@ -48,12 +48,25 @@ const fnSrc = sliceBalanced(custSrc, 'function showOutstandingPreview(id) {');
 function render(customer, invoices, paidBy = {}) {
   let html = '';
   const el = { set innerHTML(v) { html = v; }, get innerHTML() { return html; } };
+  // v1.0.252: the statement now asks DB.invoiceDue whether a line is still owed, so a
+  // settled invoice can't be printed at ฿0.00. Lift the REAL helpers out of db.js rather
+  // than restating them here — a stub with its own arithmetic would pass while the
+  // shipped rule drifted.
   const DB = {
     getCustomerById: () => customer,
     getSettings: () => ({ companyName: 'น้ำดื่มบริสุทธิ์ สกา' }),
     getActiveInvoicesByCustomer: () => invoices,
+    getInvoices: () => invoices,
     getInvoicePaidAmount: num => paidBy[num] || 0,
   };
+  const dbSrc = fs.readFileSync(path.join(DIR, 'db.js'), 'utf8');
+  DB._PAID_EPS = parseFloat(/_PAID_EPS:\s*([\d.]+)/.exec(dbSrc)[1]);
+  for (const marker of ['_isBetterInvoiceRep(cur, cand) {', 'invoiceDue(invoiceNumber, customerId) {',
+                        'isInvoiceUnpaid(invoiceNumber, customerId) {']) {
+    const fnText = sliceBalanced(dbSrc, marker);
+    const name = marker.slice(0, marker.indexOf('('));
+    DB[name] = new Function(`return function ${fnText};`)();
+  }
   const document = { getElementById: () => el };
   const bootstrap = { Modal: function () { return { show() {} }; } };
   new Function('DB', 'Utils', 'document', 'bootstrap',

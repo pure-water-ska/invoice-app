@@ -931,10 +931,8 @@ function _checkOverdueAlert() {
     if (!pt || (!pt.maxBills && !pt.maxDays)) return;
     const custInvs = invoices.filter(i => i.customerId === c.id);
     const uniqNums = [...new Set(custInvs.map(i => i.invoiceNumber))];
-    const unpaidNums = uniqNums.filter(num => {
-      const inv = custInvs.find(i => i.invoiceNumber === num);
-      return inv && DB.getInvoicePaidAmount(num, c.id) < (parseFloat(inv.totalAmount)||0);
-    });
+    // A settled invoice must not count toward a payment-terms violation. See DB._PAID_EPS.
+    const unpaidNums = uniqNums.filter(num => DB.isInvoiceUnpaid(num, c.id));
     const msgs = [];
     if (pt.maxBills && unpaidNums.length > pt.maxBills)
       msgs.push(`ค้างชำระ ${unpaidNums.length} บิล (เกินกำหนด ${pt.maxBills} บิล)`);

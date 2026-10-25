@@ -420,7 +420,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="./vendor/html2canvas.min.js"></script>
-<script src="utils.js?v=1.0.251"></script><script src="db.js?v=1.0.251"></script><script src="auth.js?v=1.0.251"></script><script src="nav.js?v=1.0.251"></script>
+<script src="utils.js?v=1.0.252"></script><script src="db.js?v=1.0.252"></script><script src="auth.js?v=1.0.252"></script><script src="nav.js?v=1.0.252"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -685,10 +685,9 @@ function render() {
     const bal = DB.getCustomerBalance(c.id);   // { net, owed, over, owedCount, overCount }
     const uniqNums = [...new Set(invoices.map(i => i.invoiceNumber))];
     const totalBill = uniqNums.length;
-    const unpaid = uniqNums.filter(num => {
-      const inv = invoices.find(i => i.invoiceNumber === num);
-      return DB.getInvoicePaidAmount(num, c.id) < (inv ? parseFloat(inv.totalAmount)||0 : 0);
-    }).length;
+    // DB.isInvoiceUnpaid, not a bare `<` — see _PAID_EPS in db.js. This COUNT used to
+    // disagree with the list rendered below it, which already had a tolerance.
+    const unpaid = uniqNums.filter(num => DB.isInvoiceUnpaid(num, c.id)).length;
     // Last invoice date
     const lastInv = invoices.length
       ? invoices.reduce((a, b) => (a.createdAt||'') > (b.createdAt||'') ? a : b)
@@ -813,9 +812,11 @@ function render() {
               if (!unpaid) return '';
               const unpaidList = uniqNums
                 .map(num => {
-                  const iv = invoices.find(i => i.invoiceNumber === num);
-                  const rem = (parseFloat(iv?.totalAmount)||0) - DB.getInvoicePaidAmount(num, c.id);
-                  return rem > 0.01 ? { num, rem } : null;
+                  // Same question the count above asks, so the badge and the chips
+                  // can no longer differ by one. find(…) here also picked by array
+                  // order, which can be a stale pre-edit page.
+                  const rem = DB.invoiceDue(num, c.id);
+                  return rem > DB._PAID_EPS ? { num, rem } : null;
                 })
                 .filter(Boolean)
                 .sort((a, b) => b.rem - a.rem);
@@ -970,15 +971,10 @@ function copyOverdueMsg(id) {
   // invoice is worse than any display glitch. See DB.getActiveInvoicesByCustomer.
   const invoices  = DB.getActiveInvoicesByCustomer(id);
   const uniqNums  = [...new Set(invoices.map(i => i.invoiceNumber))];
-  const unpaidNums = uniqNums.filter(num => {
-    const inv = invoices.find(i => i.invoiceNumber === num);
-    return inv && DB.getInvoicePaidAmount(num, id) < (parseFloat(inv.totalAmount)||0);
-  });
-  const totalUnpaid = unpaidNums.reduce((sum, num) => {
-    const inv = invoices.find(i => i.invoiceNumber === num);
-    const paid = DB.getInvoicePaidAmount(num, id);
-    return sum + ((parseFloat(inv?.totalAmount)||0) - paid);
-  }, 0);
+  // This text is sent TO the customer, so a settled invoice must never appear in it —
+  // a bare `<` used to count one that was paid to the satang. See DB._PAID_EPS.
+  const unpaidNums  = uniqNums.filter(num => DB.isInvoiceUnpaid(num, id));
+  const totalUnpaid = unpaidNums.reduce((sum, num) => sum + DB.invoiceDue(num, id), 0);
   const msg = `เรียน ${c.name}\nมียอดค้างชำระ ${unpaidNums.length} ใบ รวม ${totalUnpaid.toLocaleString('th-TH',{minimumFractionDigits:2})} บาท\nกรุณาติดต่อชำระ ขอบคุณครับ/ค่ะ`;
   navigator.clipboard.writeText(msg).then(() => {
     Utils.showAlert('<i class="bi bi-check-circle me-1"></i>คัดลอกข้อความแจ้งเตือนแล้ว');
@@ -995,11 +991,15 @@ function showOutstandingPreview(id) {
   // Cancelled excluded — this is the printed ใบแจ้งยอดค้างชำระ handed to the customer.
   const invoices  = DB.getActiveInvoicesByCustomer(id);
   const uniqNums  = [...new Set(invoices.map(i => i.invoiceNumber))];
+  // `rem > 0` printed a settled invoice on the statement handed to the customer,
+  // showing ฿0.00 owed. See DB._PAID_EPS.
   const unpaidRows = uniqNums.map(num => {
     const inv  = invoices.find(i => i.invoiceNumber === num);
     const paid = DB.getInvoicePaidAmount(num, id);
-    const rem  = (parseFloat(inv?.totalAmount)||0) - paid;
-    return rem > 0 ? { num, date: inv?.createdAt, total: parseFloat(inv?.totalAmount)||0, paid, rem } : null;
+    const rem  = DB.invoiceDue(num, id);
+    return rem > DB._PAID_EPS
+      ? { num, date: inv?.createdAt, total: parseFloat(inv?.totalAmount)||0, paid, rem }
+      : null;
   }).filter(Boolean).sort((a,b) => new Date(a.date)-new Date(b.date));
 
   const totalRem = unpaidRows.reduce((s,r) => s+r.rem, 0);
@@ -1598,10 +1598,8 @@ function payTermsText(pt) {
 function getPayTermsViolations(c, invoices, uniqNums) {
   const pt = c.payTerms;
   if (!pt || (!pt.maxBills && !pt.maxDays)) return [];
-  const unpaidNums = uniqNums.filter(num => {
-    const inv = invoices.find(i => i.invoiceNumber === num);
-    return inv && DB.getInvoicePaidAmount(num, c.id) < (parseFloat(inv.totalAmount) || 0);
-  });
+  // A settled invoice must not count toward a payment-terms violation. See DB._PAID_EPS.
+  const unpaidNums = uniqNums.filter(num => DB.isInvoiceUnpaid(num, c.id));
   const result = [];
   if (pt.maxBills && unpaidNums.length > pt.maxBills)
     result.push(`ค้างชำระ ${unpaidNums.length} บิล (เกินกำหนด ${pt.maxBills} บิล)`);

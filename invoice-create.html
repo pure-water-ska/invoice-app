@@ -164,7 +164,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.251"></script><script src="db.js?v=1.0.251"></script><script src="auth.js?v=1.0.251"></script><script src="nav.js?v=1.0.251"></script><script src="idb.js?v=1.0.251"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.252"></script><script src="db.js?v=1.0.252"></script><script src="auth.js?v=1.0.252"></script><script src="nav.js?v=1.0.252"></script><script src="idb.js?v=1.0.252"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -1007,12 +1007,9 @@ function checkCustomerBalance(custId) {
   const payTermsViolHtml = (() => {
     const pt = cust && cust.payTerms;
     if (!pt || (!pt.maxBills && !pt.maxDays)) return '';
-    const unpaidNums = invNums.filter(num => {
-      let page1 = null;   // v1.0.243 — see checkCustomerBalance above
-      for (const i of allInvoices) if (i.invoiceNumber === num && DB._isBetterInvoiceRep(page1, i)) page1 = i;
-      if (!page1) return false;
-      return DB.getInvoicePaidAmount(num, page1.customerId) < (parseFloat(page1.totalAmount) || 0);
-    });
+    // DB.isInvoiceUnpaid picks the representative with _isBetterInvoiceRep and compares
+    // against _PAID_EPS — a bare `<` counted invoices settled to the satang.
+    const unpaidNums = invNums.filter(num => DB.isInvoiceUnpaid(num, cust.id));
     const viols = [];
     if (pt.maxBills && unpaidNums.length > pt.maxBills)
       viols.push(`ค้างชำระ <strong>${unpaidNums.length} บิล</strong> เกินกำหนด (สูงสุด ${pt.maxBills} บิล)`);
@@ -1239,7 +1236,10 @@ function calcTotal(item) {
   const unitSize = parseFloat(item.unitSize) || 0;
   const rem = parseFloat(item.remainder) || 0;
   const price = parseFloat(item.price) || 0;
-  return (qty * unitSize + rem) * price;
+  // Rounded here, not only where it is displayed — an unrounded line total is summed
+  // into totalAmount and STORED, which is what left settled invoices reading as unpaid.
+  // See Utils.round2 and DB._PAID_EPS. v1.0.252.
+  return Utils.round2((qty * unitSize + rem) * price);
 }
 
 // ── Rows with no quantity (v1.0.250) ───────────────────────────────────────────
@@ -1504,7 +1504,9 @@ async function previewInvoice() {
 
   const cust        = DB.getCustomerById(customerId);
   const cfg         = DB.getSettings();
-  const totalAmount = activeItems.reduce((s, item) => s + calcTotal(item), 0);
+  // Summing even exact 2-decimal values in floats can reintroduce a residue
+  // (8057.14 + 3369.60), so the SUM is rounded too, not just each line. v1.0.252.
+  const totalAmount = Utils.round2(activeItems.reduce((s, item) => s + calcTotal(item), 0));
   const dateValISO  = Utils.parseBEToISO(dateVal) || Utils.todayInputValue();
   const createdAt   = new Date(dateValISO).toISOString();
   const previewInvNum = editMode ? currentInvNum : DB.peekNextInvoiceNumberForDate(dateValISO);
@@ -1645,7 +1647,9 @@ async function saveInvoice(shouldPrint = false) {
     if (!await Utils.confirm(`⚠️ สต๊อกฝาขวดต่ำกว่าขั้นต่ำที่กำหนด!\n\n${lines}\n\nยืนยันบันทึกใบกำกับต่อไปหรือไม่?`)) { _releaseSaveLock(); return; }
   }
 
-  const totalAmount = activeItems.reduce((s, item) => s + calcTotal(item), 0);
+  // Summing even exact 2-decimal values in floats can reintroduce a residue
+  // (8057.14 + 3369.60), so the SUM is rounded too, not just each line. v1.0.252.
+  const totalAmount = Utils.round2(activeItems.reduce((s, item) => s + calcTotal(item), 0));
   const _dateISO  = Utils.parseBEToISO(dateVal) || Utils.todayInputValue();
   // Number prefix/run follows the chosen invoice DATE (continues that day's sequence).
   // The candidate is derived from LOCAL data, which covers only ARCHIVE_MONTHS and can be
@@ -2068,7 +2072,9 @@ async function saveInvoiceEdit(shouldPrint = false) {
     },
   }];
 
-  const totalAmount = activeItems.reduce((s, item) => s + calcTotal(item), 0);
+  // Summing even exact 2-decimal values in floats can reintroduce a residue
+  // (8057.14 + 3369.60), so the SUM is rounded too, not just each line. v1.0.252.
+  const totalAmount = Utils.round2(activeItems.reduce((s, item) => s + calcTotal(item), 0));
   const _editDateISO = Utils.parseBEToISO(dateVal) || Utils.todayInputValue();
   const createdAt    = new Date(_editDateISO).toISOString() || (meta.createdAt || new Date().toISOString());
   // issuedAt is preserved from the ORIGINAL creation — an edit changes the invoice's
