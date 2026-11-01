@@ -873,6 +873,31 @@
       </div>
     </div>
 
+    <!-- ── Collided invoice-number scan (v1.0.255) ──────────────────────────
+         The card above asks the server about ONE number you already suspect. Nothing
+         scanned for duplicates, and a same-customer duplicate is invisible everywhere
+         else — getCurrentPagesByNumber collapses a tie to first-seen, so the second
+         invoice is never displayed, printed or summed. This runs automatically on load
+         so a collision finds the user instead of waiting to be looked for.
+         Local-only: zero Firestore reads. -->
+    <!-- Shown to: Admin | invoice_edit -->
+    <div class="card mb-4" id="dupNumCard" style="display:none">
+      <div class="card-header fw-semibold py-2" style="background:#fd7e14;color:#fff">
+        <i class="bi bi-files me-1"></i>ตรวจหาเลขที่ใบกำกับซ้ำ
+      </div>
+      <div class="card-body">
+        <div class="text-muted small mb-3" style="line-height:1.7">
+          หาเลขที่ที่มีใบกำกับมากกว่า 1 ใบ โดยที่พิสูจน์ไม่ได้ว่าใบไหนเก่า — เกิดเมื่อเครื่องหนึ่งบันทึกและพิมพ์ไปแล้ว
+          ขณะที่อัปโหลดค้าง อีกเครื่องจึงได้เลขเดิมไป
+          <strong>ตรวจจากข้อมูลในเครื่องนี้เท่านั้น ไม่เสียโควต้าอ่านของเซิร์ฟเวอร์</strong>
+        </div>
+        <button class="btn btn-sm btn-outline-secondary mb-3" id="dupNumBtn" onclick="renderDupNumbers()">
+          <i class="bi bi-search me-1"></i>ตรวจอีกครั้ง
+        </button>
+        <div id="dupNumResult"></div>
+      </div>
+    </div>
+
     <!-- ── Stale folded-balance cleanup ──────────────────────────────────── -->
     <!-- Shown to: Admin | payment_edit -->
     <div class="card mb-4" id="staleBalCard" style="display:none">
@@ -1055,10 +1080,10 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-<script src="utils.js?v=1.0.254"></script><script src="db.js?v=1.0.254"></script><script src="auth.js?v=1.0.254"></script><script src="nav.js?v=1.0.254"></script><script src="idb.js?v=1.0.254"></script><script src="image-store.js?v=1.0.163"></script>
+<script src="utils.js?v=1.0.255"></script><script src="db.js?v=1.0.255"></script><script src="auth.js?v=1.0.255"></script><script src="nav.js?v=1.0.255"></script><script src="idb.js?v=1.0.255"></script><script src="image-store.js?v=1.0.163"></script>
 <script src="drive-config.js" onerror="window.GOOGLE_CLIENT_ID=''"></script>
 <script src="drive-store.js"></script>
-<script src="settings.js?v=1.0.254"></script>
+<script src="settings.js?v=1.0.255"></script>
 <script>Nav.render('settings');</script>
 </body>
 </html>

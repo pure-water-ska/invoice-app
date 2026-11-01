@@ -4088,3 +4088,136 @@ function _tabsInit() {
 }
 
 window.addEventListener('DOMContentLoaded', () => { try { _tabsInit(); } catch (e) {} });
+
+/* ─── Collided invoice-number scan (v1.0.255) ───────────────────────────────
+   lookupInvoiceNumber() asks the server about ONE number you already suspect, which
+   only helps if something made you suspect it. A CROSS-customer collision at least
+   shows its own row on the invoice list; a SAME-customer one is invisible everywhere,
+   because getCurrentPagesByNumber collapses (customerId|page) to the top editCount and
+   a tie keeps first-seen — so the other invoice is never displayed, printed or summed.
+
+   Runs automatically: a collision should find the user, not wait to be looked for.
+   That is affordable because DB.findCollidedInvoiceNumbers reads the records already
+   in memory — zero Firestore reads.                                                  */
+function _dupNumAllowed() {
+  return typeof Auth !== 'undefined' && Auth.isAdmin && (Auth.isAdmin() || Auth.can('invoice_edit'));
+}
+
+function renderDupNumbers() {
+  const card = document.getElementById('dupNumCard');
+  const box  = document.getElementById('dupNumResult');
+  if (!card || !box || !_dupNumAllowed()) return;
+  card.style.display = '';
+
+  const all  = DB.getInvoices();
+  const hits = DB.findCollidedInvoiceNumbers(all);
+  // State the window rather than implying the scan covers all history: only the last
+  // ARCHIVE_MONTHS are pulled into memory. Settings → สถานะข้อมูล is the full-server path.
+  const dates = all.map(i => (i.createdAt || '').slice(0, 10)).filter(Boolean).sort();
+  const span = dates.length
+    ? ` (${Utils.formatDateTH(dates[0])} – ${Utils.formatDateTH(dates[dates.length - 1])})`
+    : '';
+  const scope = `ตรวจ ${all.length} ใบกำกับ${span}`;
+
+  if (!hits.length) {
+    box.innerHTML = `
+      <div class="alert alert-success p-2 mb-0 small">
+        <i class="bi bi-check-circle me-1"></i>ไม่พบเลขที่ซ้ำ — ${scope}
+      </div>
+      <div class="text-muted mt-2" style="font-size:11.5px;line-height:1.7">
+        ตรวจเฉพาะใบกำกับที่โหลดไว้ในเครื่อง (ย้อนหลัง ${(window.Sync && Sync.ARCHIVE_MONTHS) || 6} เดือน) —
+        เก่ากว่านั้นต้องใช้ “สถานะข้อมูล” ซึ่งอ่านจากเซิร์ฟเวอร์
+      </div>`;
+    return;
+  }
+
+  const KIND = {
+    tie:   ['bg-warning text-dark', 'ลูกค้าเดียวกัน · ตัดสินไม่ได้'],
+    cross: ['bg-danger',            'คนละลูกค้าใช้เลขเดียวกัน'],
+    both:  ['bg-danger',            'ซ้ำทั้งสองแบบ'],
+  };
+
+  box.innerHTML = `
+    <div class="alert alert-danger p-2 mb-3 small">
+      <i class="bi bi-exclamation-triangle me-1"></i>พบ <strong>${hits.length}</strong> เลขที่ซ้ำ — ${scope}
+    </div>
+    ${hits.map(h => {
+      const [cls, label] = KIND[h.kind] || KIND.tie;
+      const rows = h.detail.map(d => {
+        const c = DB.getCustomerById(d.customerId);
+        return `<tr>
+          <td>${esc(c ? c.name : (d.customerId || '?'))}</td>
+          <td class="text-end">${Utils.formatNumber(d.totalAmount)}</td>
+          <td class="text-center">${d.printCount > 0
+            ? `<span class="badge bg-danger" style="font-size:9.5px">พิมพ์แล้ว ${d.printCount}</span>`
+            : '<span class="text-muted" style="font-size:11px">ยังไม่พิมพ์</span>'}</td>
+          <td style="font-size:11.5px">${d.createdAt ? Utils.formatDateTH(d.createdAt) : '-'}</td>
+          <td><code style="font-size:10.5px">${esc(d.by || '-')}</code></td>
+          <td class="text-center" style="font-size:11.5px">E${d.editCount}</td>
+        </tr>`;
+      }).join('');
+      // printCount decides which copy keeps the number — the printed one is already in a
+      // customer's hands. Never "whichever reached the server first".
+      const advice = h.printed === 0
+        ? 'ยังไม่มีใบไหนถูกพิมพ์ — เปลี่ยนเลขที่ใบไหนก็ได้'
+        : h.printed === 1
+        ? 'ใบที่ <strong>พิมพ์ให้ลูกค้าไปแล้ว</strong> ต้องคงเลขเดิมไว้ — เปลี่ยนเลขที่ใบที่ยังไม่พิมพ์แทน'
+        : `<strong>พิมพ์ไปแล้วทั้ง ${h.printed} ใบ</strong> — ต้องตัดสินใจเองว่าจะแก้ใบไหน และแจ้งลูกค้าด้วย`;
+      return `
+        <div class="border rounded mb-3">
+          <div class="px-2 py-2 d-flex align-items-center gap-2 flex-wrap" style="background:#f8f9fa">
+            <strong>${esc(h.invoiceNumber)}</strong>
+            <span class="badge ${cls}" style="font-size:9.5px">${label}</span>
+            <span class="text-muted" style="font-size:11.5px">${h.records} ใบ · พิมพ์ไปแล้ว ${h.printed} ใบ</span>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm mb-0" style="font-size:11.5px">
+              <thead class="table-light"><tr>
+                <th>ลูกค้า</th><th class="text-end">ยอด</th><th class="text-center">สถานะพิมพ์</th>
+                <th>วันที่</th><th>เครื่อง</th><th class="text-center">แก้</th>
+              </tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+          <div class="px-2 py-2 small" style="background:#fff3cd;color:#664d03;line-height:1.7">${advice}</div>
+          <div class="px-2 py-2 d-flex gap-2 flex-wrap">
+            <button class="btn btn-sm btn-outline-primary" onclick="_dupNumLookup('${esc(h.invoiceNumber)}')">
+              <i class="bi bi-hdd-network me-1"></i>ดูบนเซิร์ฟเวอร์
+            </button>
+            <a class="btn btn-sm btn-outline-secondary" target="_blank"
+               href="invoices.html?num=${encodeURIComponent(h.invoiceNumber)}">
+              <i class="bi bi-list-ul me-1"></i>เปิดในรายการใบกำกับ
+            </a>
+          </div>
+        </div>`;
+    }).join('')}`;
+}
+
+// Hands the number to the card above, which is the one that actually asks the server.
+function _dupNumLookup(num) {
+  const input = document.getElementById('invLookupNum');
+  const card  = document.getElementById('invLookupCard');
+  if (!input || !card) return;
+  card.style.display = '';
+  input.value = num;
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  lookupInvoiceNumber();
+}
+
+// Invoices arrive from the Firestore listener AFTER DB.ready resolves, so a scan that
+// only ran on DOMContentLoaded would report "ไม่พบ" against an empty local cache and
+// never correct itself. Re-run when sync delivers. See the sync:updated note in CLAUDE.md.
+let _dupNumT = null;
+function _dupNumScheduleRescan() {
+  clearTimeout(_dupNumT);
+  _dupNumT = setTimeout(() => { try { renderDupNumbers(); } catch (e) {} }, 400);
+}
+window.addEventListener('DOMContentLoaded', () => {
+  try { renderDupNumbers(); } catch (e) {}
+  if (DB.ready && typeof DB.ready.then === 'function') DB.ready.then(_dupNumScheduleRescan).catch(() => {});
+});
+window.addEventListener('sync:pulled', _dupNumScheduleRescan);
+window.addEventListener('sync:updated', e => {
+  const k = e && e.detail && e.detail.key;
+  if (!k || k === 'wt_invoices') _dupNumScheduleRescan();
+});

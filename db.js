@@ -1491,6 +1491,84 @@ const DB = {
     return (v > 1e12 && v < 2e13) ? v : null;
   },
 
+  // ── Collided invoice numbers (v1.0.255) ─────────────────────────────────────
+  // Nothing in the app SCANS for a number held by two different invoices — the
+  // settings lookup asks the server about one number you already type in, which only
+  // helps if something made you suspect it. A cross-customer collision at least shows
+  // its own row on the invoice list; a SAME-customer one is invisible everywhere,
+  // because getCurrentPagesByNumber collapses (customerId|page) to the top editCount
+  // and a tie keeps first-seen — so the other invoice is never displayed, printed or
+  // summed. That is the shape reported in production: device A saved and PRINTED while
+  // its uploads were stuck, nothing reserved the number, and device B was handed the
+  // same one legitimately.
+  //
+  // Local-only and read-only: it reads the records already in memory and costs ZERO
+  // Firestore reads, which matters given this project's quota history. It tells you
+  // WHICH numbers to investigate; the per-number lookup then asks the server.
+  //
+  // Reported, because neither record can be proven stale:
+  //   tie   — one customer+page holds 2+ records at the SAME top editCount
+  //   cross — one number is held by more than one customer
+  // NOT reported, because they are normal or already handled:
+  //   a real multi-page invoice (same customer, different page numbers)
+  //   a superseded edit page (strictly lower editCount) — that is the sweep's job
+  //   cancelled records
+  //
+  // printCount is carried per record because it is the deciding field: the copy that
+  // was printed is in a customer's hands and must keep its number, so the OTHER one is
+  // the one to renumber. Never pick by whichever reached the server first.
+  findCollidedInvoiceNumbers(invoices) {
+    const byNum = new Map();
+    for (const i of (invoices || this.getInvoices())) {
+      if (!i || i.cancelled || !i.invoiceNumber) continue;
+      if (!byNum.has(i.invoiceNumber)) byNum.set(i.invoiceNumber, []);
+      byNum.get(i.invoiceNumber).push(i);
+    }
+    const out = [];
+    for (const [num, recs] of byNum) {
+      if (recs.length < 2) continue;
+      const customers = new Set(recs.map(r => r.customerId || ''));
+      const groups = new Map();
+      for (const r of recs) {
+        const k = (r.customerId || '') + '|' + (r.page || 1);
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(r);
+      }
+      const tied = [];
+      let superseded = 0;
+      for (const g of groups.values()) {
+        const top = Math.max(...g.map(r => r.editCount || 0));
+        const atTop = g.filter(r => (r.editCount || 0) === top);
+        if (atTop.length > 1) tied.push(...atTop);
+        superseded += g.length - atTop.length;
+      }
+      const cross = customers.size > 1;
+      if (!tied.length && !cross) continue;
+      const detail = (tied.length ? tied : recs).map(r => ({
+        id: r.id,
+        customerId: r.customerId || '',
+        page: r.page || 1,
+        editCount: r.editCount || 0,
+        totalAmount: parseFloat(r.totalAmount) || 0,
+        createdAt: r.createdAt || '',
+        printCount: r.printCount || 0,
+        by: r._by || '',
+      }));
+      out.push({
+        invoiceNumber: num,
+        kind: cross && tied.length ? 'both' : (cross ? 'cross' : 'tie'),
+        records: recs.length,
+        customers: customers.size,
+        supersededPages: superseded,
+        // How many of the ambiguous copies were printed. 0 → safe to renumber either;
+        // 1 → renumber the other one; 2+ → both are on paper, a human must decide.
+        printed: detail.filter(d => d.printCount > 0).length,
+        detail,
+      });
+    }
+    return out.sort((a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber));
+  },
+
   findSupersededPages(invoices) {
     const groups = new Map();
     for (const i of (invoices || this.getInvoices())) {
