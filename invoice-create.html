@@ -164,7 +164,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.253"></script><script src="db.js?v=1.0.253"></script><script src="auth.js?v=1.0.253"></script><script src="nav.js?v=1.0.253"></script><script src="idb.js?v=1.0.253"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.254"></script><script src="db.js?v=1.0.254"></script><script src="auth.js?v=1.0.254"></script><script src="nav.js?v=1.0.254"></script><script src="idb.js?v=1.0.254"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -1697,6 +1697,35 @@ async function saveInvoice(shouldPrint = false) {
       _numWhy.push('server check threw: ' + ((e && e.message) || e));
     }
   }
+  // 'checked' means the server was ASKED and said the number was free — it does NOT mean
+  // the number was reserved. reserveFreeInvoiceNumber only reads (see its comment in
+  // sync.js); only the atomic transaction advances inv_counters. So when the atomic path
+  // failed and this one answered, nothing is holding the number and another device can
+  // still be handed it.
+  //
+  // That is the dangerous shape, because it is SILENT: a device that is online but cannot
+  // WRITE (stuck upload queue, quota, rules) fails the transaction while reads keep
+  // working, so it lands here instead of on 'local' and used to show no warning at all —
+  // quieter than being fully offline, which does warn. The invoice then gets printed and
+  // handed over, and the next device reserves the same number legitimately because this
+  // one never reached the server. Warn here too. v1.0.254.
+  if (_numSource === 'checked') {
+    // Always non-empty here — reaching 'checked' means the atomic path recorded why it
+    // did not produce a number — but fall back rather than print an empty reason.
+    const _why = _numWhy.join('; ') || 'จองแบบ atomic ไม่สำเร็จ';
+    try {
+      DB.logError('INV-NUMBER-NOT-RESERVED',
+        `เลขที่ ${invNumber} ตรวจแล้วว่าว่าง แต่ไม่ได้ถูกจอง: ${_why}`,
+        { invoiceNumber: invNumber, date: _dateISO, reason: _why });
+    } catch (e) {}
+    DB.logActivity(session.userId, session.username, 'ออกเลขที่โดยไม่ได้จองกับเซิร์ฟเวอร์',
+      { invoiceNumber: invNumber, reason: _why });
+    Utils.showAlert(
+      `⚠️ เลขที่ <strong>${invNumber}</strong> ตรวจแล้วว่ายังว่าง แต่ <strong>จองไม่สำเร็จ</strong> ` +
+      `— ถ้าเครื่องนี้อัปโหลดไม่ขึ้น เครื่องอื่นอาจได้เลขเดียวกัน ` +
+      `กรุณาตรวจ “สถานะข้อมูล” และอัปโหลดให้ขึ้นก่อนพิมพ์ให้ลูกค้า (${_why})`, 'warning');
+  }
+
   // An unverified number is the one case that can silently duplicate. Say so at save time
   // and record it, rather than letting it surface as a collision days later.
   if (_numSource === 'local') {

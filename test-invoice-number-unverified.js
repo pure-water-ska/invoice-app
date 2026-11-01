@@ -90,8 +90,15 @@ console.log('\nThe actual incident — Sync not connected yet, so BOTH tiers ret
   t('the local floor is captured for diagnosis', r.errors[0].detail.localFloor === 2);
 }
 
-console.log('\nAtomic throws, checked tier rescues it — verified, so no warning');
+console.log('\nAtomic throws, checked tier rescues it — checked is NOT reserved (v1.0.254)');
 {
+  // This block used to assert silence here. It is the wrong assertion: the checked tier
+  // only READS (sync.js: "reserveFreeInvoiceNumber() only *checks*"), so nothing holds
+  // the number and another device can still be handed it. Worse, this is the path a
+  // device takes when it is ONLINE but cannot WRITE — a stuck upload queue fails the
+  // transaction while reads keep working — so it was quieter than being fully offline,
+  // which does warn. Reported live: a device saved and PRINTED on this path, and another
+  // device was then legitimately given the same number.
   const sync = {
     ready: true,
     reserveInvoiceNumberAtomic: async () => { throw new Error('transaction aborted'); },
@@ -99,8 +106,16 @@ console.log('\nAtomic throws, checked tier rescues it — verified, so no warnin
   };
   const r = await allocate({ sync });
   t('checked tier supplies the number', r.invNumber === '310869-005' && r._numSource === 'checked');
-  t('no unverified error, because it WAS verified', r.errors.length === 0);
+  // The two states stay distinguishable in the log: "never checked" vs "checked, not held".
+  t('it is NOT logged as unverified — the server did answer',
+    r.errors.filter(e => e.type === 'INV-NUMBER-UNVERIFIED').length === 0);
   t('no unverified warning', unverifiedAlerts(r.alerts).length === 0);
+  t('but it IS logged as not reserved',
+    r.errors.filter(e => e.type === 'INV-NUMBER-NOT-RESERVED').length === 1, r.errors.map(e => e.type));
+  t('…carrying the reason the atomic path failed',
+    /transaction aborted/.test(r.errors.find(e => e.type === 'INV-NUMBER-NOT-RESERVED').msg));
+  t('…and the user is warned before printing',
+    r.alerts.some(a => /จองไม่สำเร็จ/.test(a.m) && a.kind === 'warning'));
 }
 
 console.log('\nAtomic returns null, checked cannot verify — warned, and both reasons kept');

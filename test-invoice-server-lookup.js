@@ -20,6 +20,30 @@ const fs = require('fs');
 const path = require('path');
 const DIR = __dirname;
 
+// The lookup's row classifier, lifted from the shipped settings.js so these cases
+// exercise the real rule rather than a copy. v1.0.254 renamed the block (groups ->
+// byGroup) and moved it ABOVE the verdict, so the classifier and the row builder are no
+// longer adjacent — take the two pieces separately rather than one span, which would drag
+// in the verdict's own variables (missing, owners, localOnly). Defined once: this used to
+// be copy-pasted into each case, so one rename in settings.js broke it in two places.
+function lookupClassifier() {
+  const src = fs.readFileSync(path.join(DIR, 'settings.js'), 'utf8');
+  const fnAt = src.indexOf('async function lookupInvoiceNumber');
+  const gS = src.indexOf('  const byGroup = new Map();', fnAt);
+  const gE = src.indexOf('\n', src.indexOf('  const staleCount =', gS));
+  const rS = src.indexOf('  const rows = docs.map', gE);
+  const rE = src.indexOf("}).join('');", rS) + 12;
+  if (gS < 0 || gE < 0 || rS < 0 || rE < 12) {
+    throw new Error('lookup row block not found — update extraction markers in lookupClassifier()');
+  }
+  const body = src.slice(gS, gE) + '\n' + src.slice(rS, rE);
+  return (docs) => new Function('docs', 'localIds', 'DB', 'Utils', 'esc',
+    body + '\n return { rows, currentIds, tiedIds, staleCount };')(
+      docs, new Set(), { getCustomerById: () => ({ name: 'ทดสอบ' }) },
+      { formatNumber: n => String(n) }, x => String(x));
+}
+
+
 let pass = 0, fail = 0;
 const t = (label, cond, detail) => { cond ? pass++ : fail++; console.log(`  ${cond ? 'PASS' : 'FAIL'}  ${label}${detail ? '  → ' + detail : ''}`); };
 
@@ -190,20 +214,12 @@ console.log('invoiceNumberServerDetail() — the date-unfiltered server query');
       // one's delete never landed, so both sit on the server under the same customer+page.
       // Deleting ALL docs for the number would take the corrected record too, so the row
       // selection must default to the stale one only.
-      const src = fs.readFileSync(path.join(DIR, 'settings.js'), 'utf8');
-      const s = src.indexOf('  const groups = new Map();', src.indexOf('async function lookupInvoiceNumber'));
-      const e = src.indexOf('}).join(\'\');', src.indexOf('const rows = docs.map', s)) + 12;
-      if (s < 0) throw new Error('lookup row block not found — update extraction marker');
 
       const docs = [
         { id: 'stale', by: 'PC', ts: 1, rec: { customerId: 'c1', page: 1, totalAmount: 12500, editCount: 0, createdAt: '2026-08-15T07:00:00.000Z' } },
         { id: 'fixed', by: 'PC', ts: 2, rec: { customerId: 'c1', page: 1, totalAmount: 9800, editCount: 1, createdAt: '2026-08-15T07:00:00.000Z' } },
       ];
-      const out = new Function('docs', 'localIds', 'DB', 'Utils', 'esc', `
-        ${src.slice(s, e)}
-        return { rows, currentIds, staleCount };
-      `)(docs, new Set(), { getCustomerById: () => ({ name: 'ทดสอบ' }) },
-         { formatNumber: n => String(n) }, x => String(x));
+      const out = lookupClassifier()(docs);
 
       t('the higher-editCount record is the current one', out.currentIds.has('fixed') && !out.currentIds.has('stale'));
       t('exactly 1 stale row counted', out.staleCount === 1, String(out.staleCount));
@@ -219,18 +235,11 @@ console.log('invoiceNumberServerDetail() — the date-unfiltered server query');
     {
       // Two customers legitimately hold one record each: neither is a stale edit, so
       // nothing may be pre-ticked for deletion.
-      const src = fs.readFileSync(path.join(DIR, 'settings.js'), 'utf8');
-      const s = src.indexOf('  const groups = new Map();', src.indexOf('async function lookupInvoiceNumber'));
-      const e = src.indexOf('}).join(\'\');', src.indexOf('const rows = docs.map', s)) + 12;
       const docs = [
         { id: 'a', by: 'PC', ts: 1, rec: { customerId: 'c1', page: 1, totalAmount: 9640, editCount: 0 } },
         { id: 'b', by: 'PC', ts: 1, rec: { customerId: 'c2', page: 1, totalAmount: 9112, editCount: 0 } },
       ];
-      const out = new Function('docs', 'localIds', 'DB', 'Utils', 'esc', `
-        ${src.slice(s, e)}
-        return { rows, currentIds, staleCount };
-      `)(docs, new Set(), { getCustomerById: () => ({ name: 'x' }) },
-         { formatNumber: n => String(n) }, x => String(x));
+      const out = lookupClassifier()(docs);
 
       t('both are current (different customers)', out.currentIds.size === 2);
       t('nothing pre-ticked for deletion', out.staleCount === 0);

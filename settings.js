@@ -3546,44 +3546,68 @@ async function lookupInvoiceNumber() {
     return;
   }
 
+  // Which server doc is the CURRENT one per (customer, page) — same rule as
+  // DB.getCurrentPagesByNumber/currentInvoiceRowMap: highest editCount wins. An edit
+  // writes a new record and deletes the old; when that delete doesn't land both survive,
+  // and only the stale one should be removed. Computed here from the SERVER's docs, not
+  // local, because local may not even hold them.
+  //
+  // A TIE at the top editCount is NOT a stale edit page (v1.0.254). Two devices can issue
+  // the same number — device A saves and PRINTS while its uploads are stuck, so nothing
+  // reserves the number, then device B reserves it atomically and gets the same one. Both
+  // records are editCount 0 for the same customer and page: neither is a previous version
+  // of the other, they are two different invoices, and one of them is on paper in a
+  // customer's hands. This used to label whichever the server returned second "เก่า/ซ้ำ"
+  // and PRE-TICK it for deletion under a caption asserting it was a failed-delete edit
+  // page. That is the same mistake the v1.0.246 sweep incident was about: deleting needs
+  // proof, and an editCount tie is never proof. Ties are now shown unticked, for a human.
+  const byGroup = new Map();
+  for (const d of docs) {
+    const key = (d.rec.customerId || '') + '|' + (d.rec.page || 1);
+    if (!byGroup.has(key)) byGroup.set(key, []);
+    byGroup.get(key).push(d);
+  }
+  const currentIds = new Set();   // sole holder of the top editCount — safe to keep
+  const tiedIds    = new Set();   // several at the top — ambiguous, never pre-ticked
+  for (const list of byGroup.values()) {
+    const top = Math.max(...list.map(d => d.rec.editCount || 0));
+    const atTop = list.filter(d => (d.rec.editCount || 0) === top);
+    if (atTop.length === 1) currentIds.add(atTop[0].id);
+    else atTop.forEach(d => tiedIds.add(d.id));
+  }
+  // Only docs strictly BELOW their group's top are provably superseded.
+  const staleCount = docs.length - currentIds.size - tiedIds.size;
+
   const cls = (!docs.length) ? 'warning'
-            : (missing.length || localOnly.length || owners.length > 1) ? 'danger' : 'success';
+            : (missing.length || localOnly.length || owners.length > 1 || tiedIds.size) ? 'danger' : 'success';
   const verdict = !docs.length
     ? `เซิร์ฟเวอร์ไม่มีเลขนี้ แต่เครื่องนี้มี <strong>${localRecs.length}</strong> รายการ — ยังไม่ถูกอัปโหลด หรือถูกลบจากอีกเครื่อง`
     : `<strong>เซิร์ฟเวอร์มี ${docs.length} รายการ · เครื่องนี้มี ${localRecs.length}</strong>`
       + (owners.length > 1 ? ` — เลขนี้ยังชนกันอยู่บนเซิร์ฟเวอร์ (${owners.length} ลูกค้า)` : '')
+      + (tiedIds.size ? ` — <strong>เลขซ้ำของลูกค้าเดียวกัน ${tiedIds.size} รายการ ยังตัดสินไม่ได้</strong>` : '')
       + (missing.length ? ` — เครื่องนี้ดึงลงมาไม่ได้ ${missing.length} รายการ` : '')
       + (localOnly.length ? ` — มีในเครื่องแต่ไม่มีบนเซิร์ฟเวอร์ ${localOnly.length} รายการ` : '');
-
-  // Which server doc is the CURRENT one per (customer, page) — same rule as
-  // DB.getCurrentPagesByNumber/currentInvoiceRowMap: highest editCount wins, ties keep
-  // first-seen. An edit writes a new record and deletes the old; when that delete doesn't
-  // land both survive, and only the stale one should be removed. Computed here from the
-  // SERVER's docs, not local, because local may not even hold them.
-  const groups = new Map();
-  for (const d of docs) {
-    const key = (d.rec.customerId || '') + '|' + (d.rec.page || 1);
-    const cur = groups.get(key);
-    if (!cur || (d.rec.editCount || 0) > (cur.rec.editCount || 0)) groups.set(key, d);
-  }
-  const currentIds = new Set([...groups.values()].map(d => d.id));
-  const staleCount = docs.length - currentIds.size;
 
   const rows = docs.map(d => {
     const c = DB.getCustomerById(d.rec.customerId);
     const inLocal = localIds.has(d.id);
     const isCurrent = currentIds.has(d.id);
+    const isTied    = tiedIds.has(d.id);
     const dt = d.rec.createdAt ? String(d.rec.createdAt).slice(0, 10) : '<span class="text-danger">(ไม่มีวันที่)</span>';
-    // Pre-tick the stale rows only — never the current one. Deleting is destructive, so
+    // Pre-tick ONLY rows proven superseded — never the current one, and never a tie,
+    // which may be a second real invoice that was printed. Deleting is destructive, so
     // the default selection must be the safe one; the confirm lists exactly what goes.
-    return `<tr${isCurrent ? '' : ' style="background:#fdece9"'}>
-      <td class="text-center"><input type="checkbox" class="inv-doc-chk form-check-input" data-id="${esc(d.id)}" ${isCurrent ? '' : 'checked'} onchange="updateInvDelBtn()"></td>
+    const bg = isCurrent ? '' : (isTied ? ' style="background:#fff3cd"' : ' style="background:#fdece9"');
+    return `<tr${bg}>
+      <td class="text-center"><input type="checkbox" class="inv-doc-chk form-check-input" data-id="${esc(d.id)}" ${(isCurrent || isTied) ? '' : 'checked'} onchange="updateInvDelBtn()"></td>
       <td>${esc(c ? c.name : (d.rec.customerId || '?'))}</td>
       <td>${d.rec.page || 1}</td>
       <td class="text-end">${Utils.formatNumber(parseFloat(d.rec.totalAmount) || 0)}</td>
       <td>${dt}</td>
       <td>${isCurrent
             ? '<span class="badge bg-success" style="font-size:9.5px">ปัจจุบัน</span>'
+            : isTied
+            ? `<span class="badge bg-warning text-dark" style="font-size:9.5px">ซ้ำ — ต้องตรวจสอบ</span> <span class="text-muted" style="font-size:10px">E${d.rec.editCount || 0}</span>`
             : `<span class="badge bg-danger" style="font-size:9.5px">เก่า/ซ้ำ</span> <span class="text-muted" style="font-size:10px">E${d.rec.editCount || 0}</span>`}</td>
       <td><code style="font-size:10.5px">${esc(d.by || '?')}</code></td>
       <td>${d.ts ? new Date(d.ts).toLocaleString('th-TH') : '-'}</td>
@@ -3617,7 +3641,14 @@ async function lookupInvoiceNumber() {
     </div>
     ${staleCount ? `<div class="small mt-2 p-2 rounded" style="background:#fdece9;color:#842029;line-height:1.55">
       <i class="bi bi-clock-history me-1"></i>แถวสีแดงอ่อน = หน้าเก่าที่ค้างอยู่ (แก้ไขแล้วแต่ลบไม่สำเร็จ) —
-      ติ๊กไว้ให้แล้ว ${staleCount} รายการ ส่วนแถว “ปัจจุบัน” ไม่ติ๊กไว้ ตรวจยอดให้แน่ใจก่อนลบ</div>` : ''}` : ''}
+      ติ๊กไว้ให้แล้ว ${staleCount} รายการ ส่วนแถว “ปัจจุบัน” ไม่ติ๊กไว้ ตรวจยอดให้แน่ใจก่อนลบ</div>` : ''}
+    ${tiedIds.size ? `<div class="small mt-2 p-2 rounded" style="background:#fff3cd;color:#664d03;line-height:1.55">
+      <i class="bi bi-exclamation-triangle me-1"></i><strong>แถวสีเหลือง ${tiedIds.size} รายการ = เลขซ้ำของลูกค้าเดียวกัน
+      ที่ยังตัดสินไม่ได้</strong> — แก้ไขเท่ากัน (E เท่ากัน) จึงไม่ใช่ “หน้าเก่าที่ลบไม่สำเร็จ”
+      แต่เป็นคนละใบที่ได้เลขเดียวกัน เกิดเมื่อเครื่องหนึ่งบันทึกและพิมพ์ไปแล้วขณะที่อัปโหลดค้าง
+      อีกเครื่องจึงได้เลขเดิมไป <strong>ไม่ติ๊กไว้ให้ และห้ามลบจนกว่าจะรู้ว่าใบไหนพิมพ์ให้ลูกค้าไปแล้ว</strong>
+      — ดูคอลัมน์ “เขียนโดยเครื่อง” และ “เมื่อ” เพื่อแยก แล้วใช้ปุ่มเปลี่ยนเลขที่ในหน้ารายการใบกำกับ
+      กับใบที่ <em>ยังไม่ได้</em> พิมพ์</div>` : ''}` : ''}
     ${localOnly.length ? `<div class="small mt-2 p-2 rounded" style="background:#fdece9;color:#842029;line-height:1.55">
       <i class="bi bi-exclamation-triangle me-1"></i>มีในเครื่องนี้แต่ไม่มีบนเซิร์ฟเวอร์ ${localOnly.length} รายการ
       (${esc(localOnly.map(r => (DB.getCustomerById(r.customerId)||{}).name || r.customerId || '?').join(', '))})
