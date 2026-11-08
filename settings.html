@@ -898,6 +898,38 @@
       </div>
     </div>
 
+    <!-- ── Recover images missing from the server (v1.0.257) ────────────────
+         Images.store writes IDB first and pushes to Firestore best-effort; when that
+         push fails the "img:<id>" ref still syncs everywhere while the image exists
+         only on the uploading device. Nothing retried it. This finds images THIS
+         device holds that the server is missing and pushes them up under the same id.
+         Must be run on each device — only the one that did the upload has the file. -->
+    <!-- Shown to: Admin -->
+    <div class="card mb-4 admin-only" id="imgRecoverCard">
+      <div class="card-header fw-semibold py-2" style="background:#6f42c1;color:#fff">
+        <i class="bi bi-cloud-arrow-up me-1"></i>กู้คืนรูปที่หายจากเซิร์ฟเวอร์
+      </div>
+      <div class="card-body">
+        <div class="text-muted small mb-3" style="line-height:1.7">
+          หารูป (ใบกำกับเซ็น/สลิป/เช็ค) ที่ <strong>มีอยู่ในเครื่องนี้</strong> แต่ <strong>ไม่มีบนเซิร์ฟเวอร์</strong>
+          แล้วอัปขึ้นให้ด้วยรหัสเดิม — เกิดเมื่อตอนอัปโหลดครั้งแรกเขียนขึ้นเซิร์ฟเวอร์ไม่สำเร็จ
+          <div class="mt-1">
+            <i class="bi bi-info-circle me-1"></i>ต้องรันบน<strong>เครื่องที่อัปรูปนั้นไว้</strong> —
+            เครื่องอื่นจะไม่มีไฟล์ให้กู้ ตรวจทีละเครื่องได้เลย
+          </div>
+        </div>
+        <div class="d-flex gap-2 flex-wrap mb-3">
+          <button class="btn btn-sm" style="background:#6f42c1;color:#fff" id="imgRecScanBtn" onclick="scanMissingImages()">
+            <i class="bi bi-search me-1"></i>ตรวจหา
+          </button>
+          <button class="btn btn-sm btn-outline-success d-none" id="imgRecUpBtn" onclick="recoverMissingImages()">
+            <i class="bi bi-cloud-arrow-up me-1"></i>อัปโหลดที่กู้ได้
+          </button>
+        </div>
+        <div id="imgRecResult"></div>
+      </div>
+    </div>
+
     <!-- ── Stale folded-balance cleanup ──────────────────────────────────── -->
     <!-- Shown to: Admin | payment_edit -->
     <div class="card mb-4" id="staleBalCard" style="display:none">
@@ -1080,10 +1112,10 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-<script src="utils.js?v=1.0.256"></script><script src="db.js?v=1.0.256"></script><script src="auth.js?v=1.0.256"></script><script src="nav.js?v=1.0.256"></script><script src="idb.js?v=1.0.256"></script><script src="image-store.js?v=1.0.163"></script>
+<script src="utils.js?v=1.0.257"></script><script src="db.js?v=1.0.257"></script><script src="auth.js?v=1.0.257"></script><script src="nav.js?v=1.0.257"></script><script src="idb.js?v=1.0.257"></script><script src="image-store.js?v=1.0.163"></script>
 <script src="drive-config.js" onerror="window.GOOGLE_CLIENT_ID=''"></script>
 <script src="drive-store.js"></script>
-<script src="settings.js?v=1.0.256"></script>
+<script src="settings.js?v=1.0.257"></script>
 <script>Nav.render('settings');</script>
 </body>
 </html>

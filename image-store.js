@@ -87,6 +87,55 @@
       return '';
     },
 
+    // ── Recovery: push a local-only image up under its EXISTING id (v1.0.257) ──
+    // store() writes IDB first and pushes to Firestore BEST-EFFORT (see its comment).
+    // When that push fails — offline, quota, or a device that is online but cannot
+    // write — the "img:<id>" ref still goes into the record and syncs everywhere, while
+    // the image itself exists only in that one device's IndexedDB. Nothing ever retried
+    // it, so the comment's promise that "cross-device will fill in once it syncs" was
+    // never true. Found live: 12 signed invoices (210969-001 … 240969-002) whose image
+    // docs are absent from Firestore, all minted in a 3-minute window on 25 Sep 2026.
+    //
+    // The id MUST be preserved — every record points at this exact ref, so minting a
+    // new one would leave the invoice pointing at nothing. And an existing server copy
+    // is never overwritten: this device's copy could be the stale one, and clobbering a
+    // good image to fix a missing one is a bad trade. Checks, then writes only the gap.
+    async pushLocalToServer(ref) {
+      if (!this.isRef(ref)) return { status: 'not-a-ref' };
+      const id = ref.slice(PREFIX.length);
+      const col = _orgCol();
+      if (!col) return { status: 'no-conn' };
+
+      let local = null;
+      try { if (typeof IDB !== 'undefined' && IDB.images) local = await IDB.images.get(id); }
+      catch (e) { return { status: 'failed', error: 'IDB: ' + (e.message || e) }; }
+      if (!local) return { status: 'no-local' };   // nothing this device can contribute
+
+      try {
+        const doc = await col.doc(id).get();
+        if (doc.exists && doc.data() && doc.data().data) return { status: 'already' };
+      } catch (e) { return { status: 'failed', error: 'read: ' + (e.message || e) }; }
+
+      try {
+        await col.doc(id).set({
+          data: local, _ts: Date.now(),
+          _by: (window.Sync && Sync._deviceId) || '',
+          _recovered: true,     // so a later audit can tell these from original uploads
+        });
+        return { status: 'uploaded', bytes: local.length };
+      } catch (e) { return { status: 'failed', error: 'write: ' + (e.message || e) }; }
+    },
+
+    // Is this ref's image present in THIS device's IndexedDB? Local and free — used to
+    // narrow a recovery scan before spending any Firestore reads.
+    async hasLocal(ref) {
+      if (!this.isRef(ref)) return false;
+      try {
+        if (typeof IDB === 'undefined' || !IDB.images) return false;
+        return !!(await IDB.images.get(ref.slice(PREFIX.length)));
+      } catch (e) { return false; }
+    },
+
     // Remove an image (local + Firestore). Safe on refs only; ignores inline/empty.
     async del(value) {
       if (!this.isRef(value)) return;

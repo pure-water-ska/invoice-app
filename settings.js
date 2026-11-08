@@ -4221,3 +4221,123 @@ window.addEventListener('sync:updated', e => {
   const k = e && e.detail && e.detail.key;
   if (!k || k === 'wt_invoices') _dupNumScheduleRescan();
 });
+
+/* ─── Recover images the server is missing (v1.0.257) ───────────────────────
+   Images.store writes the local IDB copy first and pushes to Firestore BEST-EFFORT.
+   When that push fails — offline, quota, or a device that is online but cannot write —
+   the "img:<id>" ref still lands in the record and syncs to every device, while the
+   image exists only in the uploading device's IndexedDB. Nothing ever retried it.
+   Found live: 12 signed invoices (210969-001 … 240969-002) whose image docs are absent
+   from Firestore, all minted in a 3-minute window on 25 Sep 2026.
+
+   Order matters for cost. Every ref is checked against LOCAL IndexedDB first (free);
+   only the ones this device actually holds are then checked against Firestore. On a
+   device holding few images that is a handful of reads instead of one per ref.        */
+let _imgRecFound = [];
+
+function _imgRecRefs() {
+  const out = [];
+  const add = (ref, label) => {
+    if (window.Images && Images.isRef(ref)) out.push({ ref, label });
+  };
+  DB.getInvoices().forEach(i => add(i.signedImage, 'ใบกำกับเซ็น ' + i.invoiceNumber));
+  DB.getPayments().forEach(p => {
+    add(p.transferImage, 'สลิปโอน ' + p.invoiceNumber);
+    add(p.chequeImage,   'รูปเช็ค ' + p.invoiceNumber);
+    add(p.signedImage,   'ใบกำกับเซ็น ' + p.invoiceNumber);
+    (p.imageHistory || []).forEach(h => add(h.image, 'ประวัติรูป ' + p.invoiceNumber));
+  });
+  // One ref can be shared by several records (a multi-invoice payment reuses one
+  // upload), so collapse to distinct refs and keep the labels for the report.
+  const byRef = new Map();
+  out.forEach(x => {
+    if (!byRef.has(x.ref)) byRef.set(x.ref, { ref: x.ref, labels: [] });
+    byRef.get(x.ref).labels.push(x.label);
+  });
+  return [...byRef.values()];
+}
+
+async function scanMissingImages() {
+  const box = document.getElementById('imgRecResult');
+  const btn = document.getElementById('imgRecScanBtn');
+  const up  = document.getElementById('imgRecUpBtn');
+  if (!box) return;
+  if (typeof Images === 'undefined' || !Images.hasLocal) {
+    box.innerHTML = '<div class="alert alert-warning p-2 mb-0 small">image-store.js ยังไม่โหลด</div>'; return;
+  }
+  btn.disabled = true; up.classList.add('d-none'); _imgRecFound = [];
+  const all = _imgRecRefs();
+  box.innerHTML = `<div class="small text-muted"><span class="spinner-border spinner-border-sm me-2"></span>
+    กำลังตรวจในเครื่อง… (${all.length} รูป)</div>`;
+
+  // Phase 1 — local only, free.
+  const held = [];
+  for (const x of all) { if (await Images.hasLocal(x.ref)) held.push(x); }
+
+  if (!held.length) {
+    btn.disabled = false;
+    box.innerHTML = `<div class="alert alert-secondary p-2 mb-0 small">
+      <i class="bi bi-info-circle me-1"></i>เครื่องนี้ไม่มีไฟล์รูปเก็บไว้เลย (${all.length} รูปที่อ้างถึง) —
+      ลองรันบนเครื่องที่อัปรูปไว้</div>`;
+    return;
+  }
+
+  // Phase 2 — only the ones this device could actually contribute cost a read.
+  box.innerHTML = `<div class="small text-muted"><span class="spinner-border spinner-border-sm me-2"></span>
+    กำลังเทียบกับเซิร์ฟเวอร์… (${held.length} รูปที่มีในเครื่องนี้)</div>`;
+  const missing = [];
+  for (const x of held) {
+    try {
+      const id = x.ref.slice(4);
+      const doc = await Sync._orgRef().collection('images').doc(id).get();
+      if (!doc.exists || !(doc.data() || {}).data) missing.push(x);
+    } catch (e) { /* a read failure is not proof of absence — skip, never upload blind */ }
+  }
+  _imgRecFound = missing;
+  btn.disabled = false;
+
+  if (!missing.length) {
+    box.innerHTML = `<div class="alert alert-success p-2 mb-0 small">
+      <i class="bi bi-check-circle me-1"></i>ไม่พบรูปที่ขาด — ตรวจ ${all.length} รูป
+      (เครื่องนี้มีไฟล์ ${held.length} รูป อยู่บนเซิร์ฟเวอร์ครบ)</div>`;
+    return;
+  }
+
+  up.classList.remove('d-none');
+  box.innerHTML = `
+    <div class="alert alert-danger p-2 mb-2 small">
+      <i class="bi bi-exclamation-triangle me-1"></i>พบ <strong>${missing.length}</strong> รูปที่มีในเครื่องนี้
+      แต่หายจากเซิร์ฟเวอร์ — กดปุ่มอัปโหลดเพื่อกู้คืน (ใช้รหัสเดิม ใบกำกับจะกลับมาเห็นรูปทันที)
+    </div>
+    <ul class="small mb-0 ps-3">${missing.map(m => `<li>${esc(m.labels.join(', '))}</li>`).join('')}</ul>`;
+}
+
+async function recoverMissingImages() {
+  const box = document.getElementById('imgRecResult');
+  const up  = document.getElementById('imgRecUpBtn');
+  if (!_imgRecFound.length) return;
+  if (!(await Utils.confirm(`อัปโหลด ${_imgRecFound.length} รูปขึ้นเซิร์ฟเวอร์ด้วยรหัสเดิม?`))) return;
+  up.disabled = true;
+  const res = { uploaded: 0, already: 0, failed: [] };
+  for (let i = 0; i < _imgRecFound.length; i++) {
+    const m = _imgRecFound[i];
+    box.innerHTML = `<div class="small text-muted"><span class="spinner-border spinner-border-sm me-2"></span>
+      กำลังอัปโหลด ${i + 1}/${_imgRecFound.length}…</div>`;
+    const r = await Images.pushLocalToServer(m.ref);
+    if (r.status === 'uploaded') res.uploaded++;
+    else if (r.status === 'already') res.already++;
+    else res.failed.push(m.labels[0] + ' — ' + (r.error || r.status));
+  }
+  up.disabled = false; up.classList.add('d-none');
+  try {
+    DB.logActivity(session.userId, session.username, 'กู้คืนรูปขึ้นเซิร์ฟเวอร์',
+      { uploaded: res.uploaded, already: res.already, failed: res.failed.length });
+  } catch (e) {}
+  box.innerHTML = `
+    <div class="alert alert-${res.failed.length ? 'warning' : 'success'} p-2 mb-0 small" style="line-height:1.7">
+      <i class="bi bi-cloud-check me-1"></i>อัปโหลดสำเร็จ <strong>${res.uploaded}</strong> รูป
+      ${res.already ? ` · มีอยู่แล้ว ${res.already}` : ''}
+      ${res.failed.length ? `<div class="mt-1">ไม่สำเร็จ ${res.failed.length}: ${esc(res.failed.join('; '))}</div>` : ''}
+    </div>`;
+  _imgRecFound = [];
+}

@@ -27,8 +27,9 @@ const js   = fs.readFileSync(path.join(__dirname, 'settings.js'), 'utf8');
 const L    = html.split('\n');
 
 const TABS = ['general', 'backup', 'sync', 'repair', 'check', 'danger'];
-// v1.0.255 added the collided-number scan to ซ่อมข้อมูล: repair 5 -> 6, total 23 -> 24.
-const EXPECTED = { general: 3, backup: 7, sync: 4, repair: 6, check: 3, danger: 1 };
+// v1.0.255 added the collided-number scan and v1.0.257 the image-recovery card to
+// ซ่อมข้อมูล: repair 5 -> 7, total 23 -> 25.
+const EXPECTED = { general: 3, backup: 7, sync: 4, repair: 7, check: 3, danger: 1 };
 
 // ── walk the panes with a div-depth counter; a card is a depth-1 pane child ──
 const panes = {};
@@ -61,10 +62,10 @@ section('all six tabs exist, each with the cards it was given');
     total += n;
     t('tab "' + id + '" holds ' + EXPECTED[id] + ' cards', n === EXPECTED[id], n);
   });
-  t('all 24 cards are accounted for, none orphaned', total === 24, total);
+  t('all 25 cards are accounted for, none orphaned', total === 25, total);
   // A card left outside every pane would render above the tabs and be uncounted.
   const allCards = (html.match(/<div [^>]*class="card mb-4/g) || []).length;
-  t('…and settings.html contains no card outside a pane', allCards === 24, allCards);
+  t('…and settings.html contains no card outside a pane', allCards === 25, allCards);
 }
 
 section('exactly one tab opens by default, and it is the first');
@@ -81,7 +82,8 @@ section('every permission gate survived the move');
 {
   // If a gate were lost in the paste, a non-admin would suddenly see an admin tool.
   const adminCards = (html.match(/<div class="card mb-4 admin-only/g) || []).length;
-  t('17 admin-only cards still carry the class', adminCards === 17, adminCards);
+  // v1.0.257 added the admin-only image-recovery card: 17 -> 18.
+  t('18 admin-only cards still carry the class', adminCards === 18, adminCards);
   ['backupCard', 'custPriceRestoreCard', 'importCard', 'invLookupCard', 'staleBalCard', 'driveCard', 'dupNumCard']
     .forEach(id => {
       const line = L.find(l => l.includes('id="' + id + '"') && /class="card/.test(l));
