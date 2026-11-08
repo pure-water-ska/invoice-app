@@ -736,7 +736,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.255"></script><script src="db.js?v=1.0.255"></script><script src="auth.js?v=1.0.255"></script><script src="nav.js?v=1.0.255"></script><script src="idb.js?v=1.0.255"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.256"></script><script src="db.js?v=1.0.256"></script><script src="auth.js?v=1.0.256"></script><script src="nav.js?v=1.0.256"></script><script src="idb.js?v=1.0.256"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -827,6 +827,90 @@ let _imgUpdateFile = null;        // the ORIGINAL file, so the final cap is appl
 const IMG_MAX_PX  = { transfer: 1200, cheque: 1200, signed: 1400 };
 const IMG_QUALITY = 0.82;
 function _imgMaxPx(type) { return IMG_MAX_PX[type] || 1200; }
+
+// ── Signed-invoice framing check (v1.0.256) ─────────────────────────────────
+// Measured across all 593 stored signed invoices: 87% sit at A5's 0.705, but 13% do
+// not — 53 portrait crops between 0.644 and 0.78, and 22 landscape between 1.09 and
+// 1.47. July 2026 alone ran at 37%. compressImage cannot be the cause (it scales both
+// axes by one factor, so the ratio out is the ratio in) and the off-values form a
+// continuous smear rather than a few repeated ones, which is what framing at capture
+// time looks like. Auto-rotating would not help either: inverting those landscape
+// ratios gives 0.81/0.78/0.85, not 0.705 — they are crops, not sideways pages.
+//
+// Nothing can be done retroactively (the paper is long gone), so the only fix is to
+// catch it while the document is still on the desk. Warn, never block: a deliberate
+// partial photo is sometimes all that is available, and a missing proof of delivery is
+// worse than a badly framed one.
+//
+// 0.06 flags every landscape shot plus the heavy crops (0.644, 0.774, 0.781) — 40 of
+// the 581 measured, ~6.9% — while staying quiet on the mild 0.726–0.763 ones that a
+// hand-held shot produces normally. A tighter 0.02 would have flagged 13% and become
+// noise people click through; 0.08 would have let the tightest real crop pass.
+// Any threshold on a continuum has a boundary: 0.644 clears it by 0.0008, so a slightly
+// looser crop will not warn. That is accepted — this nudges the obvious cases, it is not
+// a measurement standard.
+const A5_RATIO     = 148 / 210;   // 0.7048
+const A5_RATIO_TOL = 0.06;
+
+function _measureDataUrl(dataUrl) {
+  return new Promise(resolve => {
+    const im = new Image();
+    im.onload  = () => resolve({ w: im.naturalWidth, h: im.naturalHeight });
+    im.onerror = () => resolve(null);
+    im.src = dataUrl;
+  });
+}
+
+// Resolves true to keep the photo, false to pick another. Hand-rolled rather than
+// Utils.confirm: the desktop confirm is a native dialog and cannot show the preview,
+// and seeing the shape is the whole point.
+function _confirmFraming(dataUrl, dim) {
+  return new Promise(resolve => {
+    const r = dim.w / dim.h;
+    // The invoice is portrait whichever way it was shot, so the resolution that matters
+    // is the one running DOWN the page — dim.h — against the 1400 a correctly framed
+    // page gets. Comparing the short edge to 987 (a correct image's WIDTH) instead
+    // reported a landscape 1400×951 as a 4% loss when it really loses 32% of the
+    // detail on the text, which is the one case the warning most needs to land.
+    // A tight PORTRAIT crop keeps the full 1400 and loses no detail — it risks cutting
+    // the page edges off instead, so it gets a different sentence rather than a number.
+    const vLoss = Math.max(0, Math.round(100 * (1 - dim.h / 1400)));
+    const host = document.createElement('div');
+    host.style.cssText = 'position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px';
+    host.innerHTML = `
+      <div class="bg-white rounded-3 shadow" style="width:100%;max-width:480px;max-height:92vh;overflow:auto">
+        <div class="px-3 py-2 border-bottom fw-semibold">
+          <i class="bi bi-exclamation-triangle text-warning me-2"></i>สัดส่วนรูปไม่ตรงกับกระดาษ A5
+        </div>
+        <div class="px-3 py-3">
+          <div class="d-flex gap-3 align-items-start flex-wrap mb-3">
+            <img class="js-prev" style="height:150px;object-fit:contain;background:#f8f9fa;border:1px solid #dee2e6;border-radius:4px">
+            <table class="small mb-0">
+              <tr><td class="text-muted pe-3">ขนาดที่จะบันทึก</td><td class="fw-semibold">${dim.w} × ${dim.h}</td></tr>
+              <tr><td class="text-muted pe-3">สัดส่วน</td><td class="fw-semibold text-danger">${r.toFixed(3)}</td></tr>
+              <tr><td class="text-muted pe-3">A5 ควรเป็น</td><td>0.705</td></tr>
+            </table>
+          </div>
+          <div class="alert alert-warning py-2 px-3 mb-0 small" style="line-height:1.75">
+            ${r > 1
+              ? `รูปนี้<strong>เป็นแนวนอน</strong> — ความละเอียดตามแนวตั้งของใบเหลือ ${dim.h}px
+                 จาก 1400px${vLoss ? ` (น้อยกว่าถ่ายเต็มใบ ~${vLoss}%)` : ''} ตัวหนังสืออาจอ่านยากเมื่อขยาย`
+              : `รูปนี้<strong>ถูกครอบตัดแคบกว่าใบจริง</strong> — ขอบใบบางส่วนอาจไม่ติดมาในรูป`}
+            <div class="mt-1">ถ่ายใหม่ให้เห็น<strong>ทั้งใบ</strong> ตรงๆ จากด้านบน ไม่ต้องครอบตัด</div>
+          </div>
+        </div>
+        <div class="d-flex gap-2 justify-content-end px-3 py-2 border-top">
+          <button class="btn btn-primary btn-sm js-retake">ถ่ายใหม่</button>
+          <button class="btn btn-outline-secondary btn-sm js-keep">ใช้รูปนี้</button>
+        </div>
+      </div>`;
+    host.querySelector('.js-prev').src = dataUrl;
+    const close = () => { try { document.body.removeChild(host); } catch (e) {} };
+    host.querySelector('.js-retake').onclick = () => { close(); resolve(false); };
+    host.querySelector('.js-keep').onclick   = () => { close(); resolve(true); };
+    document.body.appendChild(host);
+  });
+}
 
 // ── Multi-invoice payment state ───────────────────────────────────────────────
 let multiPayModal;
@@ -2040,6 +2124,23 @@ async function uploadSignedInvoice(invNum, inputEl) {
   try {
     Utils.showAlert('<i class="bi bi-hourglass-split me-1"></i>กำลังบันทึกรูป...', 'info');
     let signedSrc = await Utils.compressImage(file, _imgMaxPx('signed'), IMG_QUALITY);
+
+    // Check the framing BEFORE anything is uploaded or written, so declining costs
+    // nothing and the paper is still on the desk. A failed measure never blocks the
+    // save — the image matters more than the check. See A5_RATIO_TOL.
+    const _dim = await _measureDataUrl(signedSrc);
+    if (_dim && _dim.h > 0 && Math.abs(_dim.w / _dim.h - A5_RATIO) > A5_RATIO_TOL) {
+      const keep = await _confirmFraming(signedSrc, _dim);
+      if (!keep) {
+        // Clear the input or picking the SAME file again fires no change event.
+        if (inputEl) inputEl.value = '';
+        Utils.showAlert('ยกเลิกแล้ว — ถ่ายใหม่ให้เห็นทั้งใบ แล้วเลือกรูปอีกครั้ง', 'info');
+        return;
+      }
+      DB.logActivity(session.userId, session.username, 'บันทึกรูปใบกำกับเซ็น (สัดส่วนไม่ตรง A5)',
+        { invoiceNumber: invNum, width: _dim.w, height: _dim.h, ratio: +(_dim.w / _dim.h).toFixed(3) });
+    }
+
     // Always offload via _drvUpload — Drive when configured, else the image-store
     // (so the base64 doesn't sit inside the invoice record / in-memory cache).
     if (signedSrc.startsWith('data:')) {
