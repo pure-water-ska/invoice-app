@@ -165,9 +165,9 @@ const LZString = (function () {
 // ── End LZString ────────────────────────────────────────────────────────────
 
 const APP_VERSION = {
-  version: '1.0.258',
-  date: '2026-11-15T08:50:59.997Z',
-  label: 'v1.0.258 (15 พ.ย. 2569)',
+  version: '1.0.259',
+  date: '2026-11-15T09:23:53.869Z',
+  label: 'v1.0.259 (15 พ.ย. 2569)',
 };
 
 // Changelog — add new entry here when releasing a new version.
@@ -755,26 +755,61 @@ Utils.compressImage = function(file, maxPx, quality) {
         }
       } catch (err) { meta = null; }
 
-      const img    = new Image();
-      img.onerror  = () => reject(new Error('Image decode failed for ' + file.name));
-      img.onload   = function() {
-        const w = img.width, h = img.height;
-        const orient = Utils._orientationToApply(meta, w, h);
-        const tr = Utils._orientTransform(orient, w, h);
-        const scale  = Math.min(1, maxPx / tr.w, maxPx / tr.h);
+      // `source` is whatever we draw; sw/sh are ITS true pixel dimensions. Keeping the
+      // two together is the whole point: v1.0.258 sized the canvas from one thing and
+      // drew at the size of another, which cropped an ordinary photo and squeezed a
+      // rotated one out of shape.
+      const render = (source, sw, sh, orient) => {
+        const tr = Utils._orientTransform(orient, sw, sh);
+        const scale = Math.min(1, maxPx / tr.w, maxPx / tr.h);
         const canvas = document.createElement('canvas');
         canvas.width  = Math.round(tr.w * scale);
         canvas.height = Math.round(tr.h * scale);
         const ctx = canvas.getContext('2d');
-        if (orient !== 1) {
-          const t = tr.t;
-          ctx.setTransform(t[0] * scale, t[1] * scale, t[2] * scale, t[3] * scale, t[4] * scale, t[5] * scale);
-        }
-        ctx.drawImage(img, 0, 0, w, h);
+        // ALWAYS set the transform, identity included. Leaving it unset for orientation
+        // 1 while still drawing at natural size is exactly how v1.0.258 cropped every
+        // photo larger than maxPx.
+        const t = tr.t;
+        ctx.setTransform(t[0] * scale, t[1] * scale, t[2] * scale, t[3] * scale, t[4] * scale, t[5] * scale);
+        ctx.drawImage(source, 0, 0, sw, sh);
         ctx.setTransform(1, 0, 0, 1, 0, 0);
-        resolve(canvas.toDataURL('image/jpeg', quality));
+        return canvas.toDataURL('image/jpeg', quality);
       };
-      img.src = e.target.result;
+
+      // Preferred path: an ImageBitmap decoded with imageOrientation 'none' carries RAW
+      // pixels and RAW dimensions, and has no EXIF of its own — so drawImage cannot
+      // silently orient it. That removes the guesswork entirely. WebView2 was reporting
+      // oriented dimensions on an <img> while drawImage painted the unrotated pixels, so
+      // no dimension-based test on an <img> can be trusted.
+      const viaBitmap = async () => {
+        if (typeof createImageBitmap !== 'function' || !meta) return null;
+        let bmp;
+        try { bmp = await createImageBitmap(file, { imageOrientation: 'none' }); }
+        catch (err) { return null; }
+        // Verify the option was actually honoured: if the engine oriented it anyway, the
+        // bitmap is already upright and must not be rotated again.
+        const raw = (bmp.width === meta.rawW && bmp.height === meta.rawH);
+        const upright = (bmp.width === meta.rawH && bmp.height === meta.rawW);
+        let orient = 1;
+        if (raw) orient = meta.orientation;
+        else if (!upright) { try { bmp.close(); } catch (e) {} return null; }  // unrecognised — fall back
+        const out = render(bmp, bmp.width, bmp.height, orient);
+        try { bmp.close(); } catch (e) {}
+        return out;
+      };
+
+      viaBitmap().then(out => {
+        if (out) { resolve(out); return; }
+        // Fallback: the original <img> path, for engines without createImageBitmap
+        // options or for non-JPEGs where there is no EXIF to honour anyway.
+        const img = new Image();
+        img.onerror = () => reject(new Error('Image decode failed for ' + file.name));
+        img.onload  = function () {
+          const w = img.width, h = img.height;
+          resolve(render(img, w, h, Utils._orientationToApply(meta, w, h)));
+        };
+        img.src = e.target.result;
+      }).catch(err => reject(err));
     };
     reader.readAsDataURL(file);
   });

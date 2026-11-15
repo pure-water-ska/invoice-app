@@ -194,19 +194,79 @@ section('it must not rotate twice — the decision, exercised');
     [1, 6].includes(U._orientationToApply({ orientation: 6, rawW: 900, rawH: 900 }, 900, 900)));
 
   const fn = src.slice(src.indexOf('Utils.compressImage = function'));
-  t('compressImage uses that decision rather than its own copy',
+  t('the <img> fallback uses that decision rather than its own copy',
     /Utils\._orientationToApply\(meta, w, h\)/.test(fn));
-  t('orientation 1 costs nothing — no transform is set', /if \(orient !== 1\) \{/.test(fn));
+}
+
+section('the drawn image must exactly fill the canvas (v1.0.258 regression)');
+{
+  // v1.0.258 skipped setTransform when no rotation was needed but still drew at the
+  // source's NATURAL size, so a 2400×3400 photo was painted at 2400px into a 988px
+  // canvas: the page came out cropped, and on WebView2 a landscape frame was squeezed
+  // into a portrait canvas — the "stretched" report. The old test asserted the opposite
+  // ("orientation 1 costs nothing — no transform is set"), i.e. it pinned the bug.
+  //
+  // The invariant: transform the source rectangle and it must land exactly on the
+  // canvas. That holds only if the scale is applied exactly once, for every orientation.
+  const fits = (o, sw, sh, maxPx) => {
+    const tr = U._orientTransform(o, sw, sh);
+    const scale = Math.min(1, maxPx / tr.w, maxPx / tr.h);
+    const cw = Math.round(tr.w * scale), ch = Math.round(tr.h * scale);
+    const m = tr.t.map((v, i) => i < 4 ? v * scale : v * scale);
+    const pt = (x, y) => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+    const cs = [pt(0, 0), pt(sw, 0), pt(0, sh), pt(sw, sh)];
+    const xs = cs.map(p => p[0]), ys = cs.map(p => p[1]);
+    return Math.abs(Math.min(...xs)) < 1 && Math.abs(Math.min(...ys)) < 1 &&
+           Math.abs(Math.max(...xs) - cw) < 1 && Math.abs(Math.max(...ys) - ch) < 1;
+  };
+  [1, 2, 3, 4, 5, 6, 7, 8].forEach(o => {
+    t('orientation ' + o + ': a downscaled photo fills the canvas exactly',
+      fits(o, 2400, 3400, 1400));
+  });
+  t('orientation 1 is included — it is the case that broke', fits(1, 2400, 3400, 1400));
+  t('an image under the cap also fits exactly', fits(6, 900, 600, 1400));
+
+  // The model above proves the MATHS. These check the shipped call actually uses it —
+  // mutating the real setTransform could not affect a model that rebuilds the matrix
+  // itself, so without these three the scale could be dropped and the suite stay green.
+  const fn = src.slice(src.indexOf('Utils.compressImage = function'));
+  t('setTransform is never guarded by an orientation check',
+    !/if \(orient !== 1\)[\s\S]{0,80}setTransform/.test(fn));
+  t('the canvas size and the draw size come from the same source dims',
+    /canvas\.width  = Math\.round\(tr\.w \* scale\)/.test(fn) &&
+    /ctx\.drawImage\(source, 0, 0, sw, sh\)/.test(fn));
+  t('all four matrix terms carry the scale',
+    /setTransform\(t\[0\] \* scale, t\[1\] \* scale, t\[2\] \* scale, t\[3\] \* scale,/.test(fn));
+  // The translation positions a rotated image; unscaled, it lands off the canvas.
+  t('…and so does the translation', /t\[4\] \* scale, t\[5\] \* scale\);/.test(fn));
+  // Without createImageBitmap options there must still be a working path.
+  t('the <img> fallback still exists and is drawn through the same helper',
+    /const img = new Image\(\);/.test(fn) && /render\(img, w, h,/.test(fn));
 }
 
 section('a parse failure can never cost an upload');
 {
   const fn = src.slice(src.indexOf('Utils.compressImage = function'));
   t('the header read is wrapped', /catch \(err\) \{ meta = null; \}/.test(fn));
-  // meta === null is the fallback: the decision returns 1 and the draw is the identity,
-  // i.e. exactly the pre-v1.0.258 behaviour.
-  t('…and falls back to the old behaviour', U._orientationToApply(null, 1200, 900) === 1 &&
-    /const orient = Utils\._orientationToApply\(meta, w, h\);/.test(fn));
+  // meta === null means no rotation is applied and the draw is the identity — the
+  // pre-v1.0.258 behaviour, minus the crop.
+  t('…and falls back to drawing the image unrotated',
+    U._orientationToApply(null, 1200, 900) === 1 &&
+    /Utils\._orientationToApply\(meta, w, h\)/.test(fn));
+  // createImageBitmap gives RAW pixels AND raw dimensions, and a bitmap carries no EXIF
+  // of its own — so drawImage cannot silently orient it. That is what removes the
+  // WebView2 ambiguity, where an <img> reported oriented dimensions while drawImage
+  // painted the unrotated pixels, squeezing the frame out of shape.
+  t('the preferred path decodes with imageOrientation "none"',
+    /createImageBitmap\(file, \{ imageOrientation: 'none' \}\)/.test(fn));
+  t('…and verifies the option was honoured against the SOF size',
+    /bmp\.width === meta\.rawW && bmp\.height === meta\.rawH/.test(fn));
+  t('…treating an already-upright bitmap as needing no rotation',
+    /bmp\.width === meta\.rawH && bmp\.height === meta\.rawW/.test(fn));
+  t('…and falling back when the bitmap matches neither', /return null;\}  \/\/ unrecognised|unrecognised — fall back/.test(fn));
+  t('the bitmap is released either way', (fn.match(/bmp\.close\(\)/g) || []).length >= 2);
+  t('an engine without createImageBitmap still works',
+    /typeof createImageBitmap !== 'function'/.test(fn));
   // Decoding a whole multi-megabyte photo to base64 twice would be wasteful; the header
   // is all that is needed.
   t('only the header is scanned, not the whole file', /256 \* 1024/.test(fn));
