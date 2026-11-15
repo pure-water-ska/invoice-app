@@ -165,9 +165,9 @@ const LZString = (function () {
 // ── End LZString ────────────────────────────────────────────────────────────
 
 const APP_VERSION = {
-  version: '1.0.257',
-  date: '2026-11-08T08:50:12.138Z',
-  label: 'v1.0.257 (8 พ.ย. 2569)',
+  version: '1.0.258',
+  date: '2026-11-15T08:50:59.997Z',
+  label: 'v1.0.258 (15 พ.ย. 2569)',
 };
 
 // Changelog — add new entry here when releasing a new version.
@@ -641,6 +641,99 @@ Utils.round2 = function (n) {
 // Usage:
 //   const b64 = await Utils.compressImage(file);
 //   const b64 = await Utils.compressImage(file, 900, 0.70);
+// ── JPEG orientation (v1.0.258) ─────────────────────────────────────────────
+// A phone held upright usually records the sensor frame LANDSCAPE and sets an EXIF
+// Orientation tag saying "rotate this to display". Chrome applies that tag when it
+// decodes an <img>; the desktop app's WebView2 does NOT. So the same photo that came
+// out portrait on the web came out rotated 90° AND landscape in the .exe — stored
+// sideways, not merely mislabelled. Confirmed from the desktop app: the preview in the
+// framing dialog showed the invoice lying on its side. 1.333 in the ratio census is
+// exactly 4:3 — a phone frame on its side.
+//
+// So the orientation is applied HERE rather than trusted to the engine. Both halves
+// matter: apply it when the decoder did not, and DON'T when it did, or correct photos
+// on Chrome would be rotated a second time.
+//
+// Returns { orientation, rawW, rawH } or null when it is not an orientable JPEG.
+// rawW/rawH come from the SOF marker — the true encoded frame, before any rotation —
+// which is what lets the caller tell whether the decoder already rotated the image.
+Utils._jpegOrientation = function (bytes) {
+  if (!bytes || bytes.length < 4 || bytes[0] !== 0xFF || bytes[1] !== 0xD8) return null;
+  let orientation = 1, rawW = 0, rawH = 0, i = 2;
+  while (i + 3 < bytes.length) {
+    if (bytes[i] !== 0xFF) { i++; continue; }          // resync on padding
+    const marker = bytes[i + 1];
+    if (marker === 0xD8 || marker === 0x01 || (marker >= 0xD0 && marker <= 0xD7)) { i += 2; continue; }
+    if (marker === 0xDA || marker === 0xD9) break;      // start of scan / end — done
+    const len = (bytes[i + 2] << 8) | bytes[i + 3];
+    if (len < 2 || i + 2 + len > bytes.length) break;   // malformed — stop, never guess
+    const seg = i + 4;
+
+    // SOF0..SOF15 (skipping DHT/JPG/DAC at C4/C8/CC) carry the encoded frame size.
+    if (marker >= 0xC0 && marker <= 0xCF && marker !== 0xC4 && marker !== 0xC8 && marker !== 0xCC) {
+      rawH = (bytes[seg + 1] << 8) | bytes[seg + 2];
+      rawW = (bytes[seg + 3] << 8) | bytes[seg + 4];
+    } else if (marker === 0xE1 && len >= 14 &&
+               bytes[seg] === 0x45 && bytes[seg + 1] === 0x78 &&
+               bytes[seg + 2] === 0x69 && bytes[seg + 3] === 0x66) {   // "Exif"
+      const tiff = seg + 6;
+      const le = bytes[tiff] === 0x49 && bytes[tiff + 1] === 0x49;
+      const be = bytes[tiff] === 0x4D && bytes[tiff + 1] === 0x4D;
+      if (le || be) {
+        const u16 = o => le ? (bytes[o] | (bytes[o + 1] << 8)) : ((bytes[o] << 8) | bytes[o + 1]);
+        // Built by addition, not bit-OR: `|` with a shifted high byte goes negative,
+        // and `>>>` binds tighter than `|` so a trailing `>>> 0` does not fix it.
+        const u32 = o => le
+          ? (bytes[o] + bytes[o+1] * 256 + bytes[o+2] * 65536 + bytes[o+3] * 16777216)
+          : (bytes[o] * 16777216 + bytes[o+1] * 65536 + bytes[o+2] * 256 + bytes[o+3]);
+        const ifd = tiff + u32(tiff + 4);
+        if (ifd + 2 <= bytes.length) {
+          const n = u16(ifd);
+          for (let k = 0; k < n; k++) {
+            const ent = ifd + 2 + k * 12;
+            if (ent + 12 > bytes.length) break;
+            if (u16(ent) === 0x0112) { orientation = u16(ent + 8) || 1; break; }
+          }
+        }
+      }
+    }
+    i += 2 + len;
+  }
+  if (!rawW || !rawH) return null;                      // no frame size → cannot decide
+  return { orientation, rawW, rawH };
+};
+
+// Which orientation must WE apply, given what the decoder handed back? 1 means none.
+// Pulled out as its own function so the decision can be tested directly: asserting on
+// the source text inside compressImage's onload passed even when the branch had been
+// disabled, because the text was still there.
+//
+// Chrome rotates while decoding, so its width/height come back swapped relative to the
+// SOF frame — applying the tag again would turn every correct photo sideways. WebView2
+// hands back the raw frame, so the rotation is ours. Mirror-only tags (2/4) never change
+// the dimensions, so this test cannot see them and they are always applied.
+Utils._orientationToApply = function (meta, decodedW, decodedH) {
+  if (!meta || !(meta.orientation > 1)) return 1;
+  const swaps = meta.orientation >= 5 && meta.orientation <= 8;
+  if (!swaps) return meta.orientation;
+  const decoderApplied = decodedW === meta.rawH && decodedH === meta.rawW;
+  return decoderApplied ? 1 : meta.orientation;
+};
+
+// Canvas transform for an EXIF orientation. 1 is the identity; 2/4/5/7 are mirrored.
+Utils._orientTransform = function (o, w, h) {
+  switch (o) {
+    case 2: return { w, h, t: [-1, 0, 0, 1, w, 0] };
+    case 3: return { w, h, t: [-1, 0, 0, -1, w, h] };
+    case 4: return { w, h, t: [1, 0, 0, -1, 0, h] };
+    case 5: return { w: h, h: w, t: [0, 1, 1, 0, 0, 0] };
+    case 6: return { w: h, h: w, t: [0, 1, -1, 0, h, 0] };
+    case 7: return { w: h, h: w, t: [0, -1, -1, 0, h, w] };
+    case 8: return { w: h, h: w, t: [0, -1, 1, 0, 0, w] };
+    default: return { w, h, t: [1, 0, 0, 1, 0, 0] };   // identity (orientation 1)
+  }
+};
+
 Utils.compressImage = function(file, maxPx, quality) {
   maxPx   = (maxPx   !== undefined) ? maxPx   : 1200;
   quality = (quality !== undefined) ? quality : 0.82;
@@ -648,14 +741,37 @@ Utils.compressImage = function(file, maxPx, quality) {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error('FileReader failed for ' + file.name));
     reader.onload  = function(e) {
+      let meta = null;
+      // Reading the bytes must never cost us the upload — on any parse trouble we fall
+      // back to exactly the old behaviour.
+      try {
+        const b64 = String(e.target.result || '');
+        const comma = b64.indexOf(',');
+        if (comma > 0 && /^data:image\/jpe?g/i.test(b64)) {
+          const bin = atob(b64.slice(comma + 1));
+          const bytes = new Uint8Array(Math.min(bin.length, 256 * 1024));   // header only
+          for (let k = 0; k < bytes.length; k++) bytes[k] = bin.charCodeAt(k);
+          meta = Utils._jpegOrientation(bytes);
+        }
+      } catch (err) { meta = null; }
+
       const img    = new Image();
       img.onerror  = () => reject(new Error('Image decode failed for ' + file.name));
       img.onload   = function() {
-        const scale  = Math.min(1, maxPx / img.width, maxPx / img.height);
+        const w = img.width, h = img.height;
+        const orient = Utils._orientationToApply(meta, w, h);
+        const tr = Utils._orientTransform(orient, w, h);
+        const scale  = Math.min(1, maxPx / tr.w, maxPx / tr.h);
         const canvas = document.createElement('canvas');
-        canvas.width  = Math.round(img.width  * scale);
-        canvas.height = Math.round(img.height * scale);
-        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.width  = Math.round(tr.w * scale);
+        canvas.height = Math.round(tr.h * scale);
+        const ctx = canvas.getContext('2d');
+        if (orient !== 1) {
+          const t = tr.t;
+          ctx.setTransform(t[0] * scale, t[1] * scale, t[2] * scale, t[3] * scale, t[4] * scale, t[5] * scale);
+        }
+        ctx.drawImage(img, 0, 0, w, h);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
         resolve(canvas.toDataURL('image/jpeg', quality));
       };
       img.src = e.target.result;

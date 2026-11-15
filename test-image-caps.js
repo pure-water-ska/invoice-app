@@ -34,12 +34,16 @@ const utils = fs.readFileSync(path.join(__dirname, 'utils.js'), 'utf8');
 
 // ── run the real compressImage maths ───────────────────────────────────────
 // Lifted from utils.js so the property is tested, not a restatement of it.
-const scaleSrc = /const scale\s+= (Math\.min\(1, maxPx \/ img\.width, maxPx \/ img\.height\));/.exec(utils);
+// v1.0.258 moved the scale onto the ORIENTED size (tr.w/tr.h) so an EXIF-rotated photo
+// is capped on the edges it will actually have. The property under test is unchanged —
+// one factor for both axes — so the match follows the rename rather than pinning the
+// old variable names.
+const scaleSrc = /const scale\s+= (Math\.min\(1, maxPx \/ \w+\.w(?:idth)?, maxPx \/ \w+\.h(?:eight)?\));/.exec(utils);
 const scaleOf = scaleSrc
-  ? new Function('maxPx', 'img', 'return ' + scaleSrc[1] + ';')
+  ? new Function('maxPx', 'tr', 'return ' + scaleSrc[1].replace(/\b(img|tr)\./g, 'tr.') + ';')
   : null;
 const resize = (w, h, maxPx) => {
-  const s = scaleOf(maxPx, { width: w, height: h });
+  const s = scaleOf(maxPx, { w, h, width: w, height: h });
   return { w: Math.round(w * s), h: Math.round(h * s) };
 };
 
