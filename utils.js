@@ -165,9 +165,9 @@ const LZString = (function () {
 // ── End LZString ────────────────────────────────────────────────────────────
 
 const APP_VERSION = {
-  version: '1.0.259',
-  date: '2026-11-15T09:23:53.869Z',
-  label: 'v1.0.259 (15 พ.ย. 2569)',
+  version: '1.0.260',
+  date: '2026-11-15T10:14:20.534Z',
+  label: 'v1.0.260 (15 พ.ย. 2569)',
 };
 
 // Changelog — add new entry here when releasing a new version.
@@ -712,12 +712,25 @@ Utils._jpegOrientation = function (bytes) {
 // SOF frame — applying the tag again would turn every correct photo sideways. WebView2
 // hands back the raw frame, so the rotation is ours. Mirror-only tags (2/4) never change
 // the dimensions, so this test cannot see them and they are always applied.
-Utils._orientationToApply = function (meta, decodedW, decodedH) {
+// v1.0.260 — the stored image keeps the FILE's own width x height, by request.
+// v1.0.258/259 applied the EXIF rotation, which turns a 4:3 landscape frame into a 3:4
+// portrait one. That is a change of shape, and the user wants what they hand over kept
+// as-is. So nothing is rotated on purpose any more.
+//
+// One thing still has to be undone: some engines (Chrome) apply the tag while decoding,
+// which would change the shape behind our back. When the decoded size comes back swapped
+// relative to the SOF frame, this returns the rotation that UNDOES it, so the result
+// matches the file either way.
+//
+// Only dimension-changing tags (5-8) are undone. A 180° or a mirror leaves width and
+// height alone, so the shape already matches the file and there is nothing to restore.
+Utils._INVERSE_ORIENT = { 5: 5, 6: 8, 7: 7, 8: 6 };
+Utils._orientationToRestoreInput = function (meta, decodedW, decodedH) {
   if (!meta || !(meta.orientation > 1)) return 1;
   const swaps = meta.orientation >= 5 && meta.orientation <= 8;
-  if (!swaps) return meta.orientation;
-  const decoderApplied = decodedW === meta.rawH && decodedH === meta.rawW;
-  return decoderApplied ? 1 : meta.orientation;
+  if (!swaps) return 1;
+  const decoderRotated = decodedW === meta.rawH && decodedH === meta.rawW;
+  return decoderRotated ? (Utils._INVERSE_ORIENT[meta.orientation] || 1) : 1;
 };
 
 // Canvas transform for an EXIF orientation. 1 is the identity; 2/4/5/7 are mirrored.
@@ -786,13 +799,12 @@ Utils.compressImage = function(file, maxPx, quality) {
         let bmp;
         try { bmp = await createImageBitmap(file, { imageOrientation: 'none' }); }
         catch (err) { return null; }
-        // Verify the option was actually honoured: if the engine oriented it anyway, the
-        // bitmap is already upright and must not be rotated again.
+        // 'none' asks for the file's own pixels. Verify it was honoured: if the engine
+        // rotated anyway, undo it so the stored shape still matches the file.
         const raw = (bmp.width === meta.rawW && bmp.height === meta.rawH);
-        const upright = (bmp.width === meta.rawH && bmp.height === meta.rawW);
-        let orient = 1;
-        if (raw) orient = meta.orientation;
-        else if (!upright) { try { bmp.close(); } catch (e) {} return null; }  // unrecognised — fall back
+        const rotated = (bmp.width === meta.rawH && bmp.height === meta.rawW);
+        if (!raw && !rotated) { try { bmp.close(); } catch (e) {} return null; }  // unrecognised — fall back
+        const orient = raw ? 1 : Utils._orientationToRestoreInput(meta, bmp.width, bmp.height);
         const out = render(bmp, bmp.width, bmp.height, orient);
         try { bmp.close(); } catch (e) {}
         return out;
@@ -806,7 +818,8 @@ Utils.compressImage = function(file, maxPx, quality) {
         img.onerror = () => reject(new Error('Image decode failed for ' + file.name));
         img.onload  = function () {
           const w = img.width, h = img.height;
-          resolve(render(img, w, h, Utils._orientationToApply(meta, w, h)));
+          // <img> always auto-orients where the engine does so; restore the file's shape.
+          resolve(render(img, w, h, Utils._orientationToRestoreInput(meta, w, h)));
         };
         img.src = e.target.result;
       }).catch(err => reject(err));

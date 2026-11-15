@@ -164,38 +164,44 @@ section('the geometry — verified in a browser against corner pixels');
   t('orientation 1 leaves the top-left where it is', TL(1) === [0, 0].join());
 }
 
-section('it must not rotate twice — the decision, exercised');
+section('the stored image keeps the FILE\'s own shape (v1.0.260, by request)');
 {
-  // These assertions used to match source text inside compressImage's onload, and
-  // passed with the branch disabled. The decision is its own function now, so drive it.
-  const meta = { orientation: 6, rawW: 1200, rawH: 900 };
-  // WebView2: hands back the raw frame → the rotation is ours.
-  t('decoder did NOT rotate → we apply the tag',
-    U._orientationToApply(meta, 1200, 900) === 6);
-  // Chrome: already rotated → applying it again would turn a correct photo sideways.
-  t('decoder DID rotate → we apply nothing',
-    U._orientationToApply(meta, 900, 1200) === 1);
-  t('the same holds for orientation 8',
-    U._orientationToApply({ orientation: 8, rawW: 1200, rawH: 900 }, 1200, 900) === 8 &&
-    U._orientationToApply({ orientation: 8, rawW: 1200, rawH: 900 }, 900, 1200) === 1);
-  // 180° does not change the dimensions, so it can never look "already applied".
-  t('a 180° tag is applied regardless of the decoded size',
-    U._orientationToApply({ orientation: 3, rawW: 1200, rawH: 900 }, 1200, 900) === 3);
-  // Mirror-only tags leave the dimensions alone, so the dimension test cannot see them.
-  t('mirror-only tags are always applied',
-    U._orientationToApply({ orientation: 2, rawW: 1200, rawH: 900 }, 1200, 900) === 2 &&
-    U._orientationToApply({ orientation: 4, rawW: 1200, rawH: 900 }, 1200, 900) === 4);
-  t('no tag means no rotation',
-    U._orientationToApply({ orientation: 1, rawW: 1200, rawH: 900 }, 1200, 900) === 1);
-  t('no metadata at all means no rotation', U._orientationToApply(null, 100, 200) === 1);
-  // A square frame is ambiguous — both tests match — but rotating a square is harmless
-  // either way, so the only requirement is that it does not throw.
+  // v1.0.258/259 applied the EXIF tag, which turns a 4:3 landscape frame into a 3:4
+  // portrait one. The user asked for the opposite: keep what they hand over. So nothing
+  // is rotated on purpose — and anything the DECODER rotates behind our back is undone,
+  // or the shape would change anyway on engines that auto-orient.
+  const meta6 = { orientation: 6, rawW: 1200, rawH: 900 };
+  t('decoder gave us the file\'s own frame → nothing to do',
+    U._orientationToRestoreInput(meta6, 1200, 900) === 1);
+  // Chrome auto-orients: 8 is the inverse of 6, so this puts the shape back.
+  t('decoder rotated it → we rotate back',
+    U._orientationToRestoreInput(meta6, 900, 1200) === 8);
+  const meta8 = { orientation: 8, rawW: 1200, rawH: 900 };
+  t('…and the inverse of 8 is 6', U._orientationToRestoreInput(meta8, 900, 1200) === 6);
+  t('the inverse table is a true involution',
+    [5, 6, 7, 8].every(o => U._INVERSE_ORIENT[U._INVERSE_ORIENT[o]] === o),
+    U._INVERSE_ORIENT);
+  // 180° and mirrors leave width x height alone, so the shape already matches the file.
+  t('a 180° tag needs no restoring',
+    U._orientationToRestoreInput({ orientation: 3, rawW: 1200, rawH: 900 }, 1200, 900) === 1);
+  t('mirror tags need no restoring',
+    U._orientationToRestoreInput({ orientation: 2, rawW: 1200, rawH: 900 }, 1200, 900) === 1 &&
+    U._orientationToRestoreInput({ orientation: 4, rawW: 1200, rawH: 900 }, 1200, 900) === 1);
+  t('no tag means nothing to do',
+    U._orientationToRestoreInput({ orientation: 1, rawW: 1200, rawH: 900 }, 1200, 900) === 1);
+  t('no metadata at all means nothing to do', U._orientationToRestoreInput(null, 100, 200) === 1);
+  // A square frame matches both tests; either answer leaves a square square.
   t('a square frame does not break the decision',
-    [1, 6].includes(U._orientationToApply({ orientation: 6, rawW: 900, rawH: 900 }, 900, 900)));
+    [1, 8].includes(U._orientationToRestoreInput({ orientation: 6, rawW: 900, rawH: 900 }, 900, 900)));
 
   const fn = src.slice(src.indexOf('Utils.compressImage = function'));
-  t('the <img> fallback uses that decision rather than its own copy',
-    /Utils\._orientationToApply\(meta, w, h\)/.test(fn));
+  t('the <img> fallback restores the file\'s shape too',
+    /Utils\._orientationToRestoreInput\(meta, w, h\)/.test(fn));
+  // The point of asking for raw pixels is that there is then nothing to undo.
+  t('the bitmap path asks for the file\'s own pixels',
+    /imageOrientation: 'none'/.test(fn));
+  t('…and only restores when the engine ignored that',
+    /const orient = raw \? 1 : Utils\._orientationToRestoreInput/.test(fn));
 }
 
 section('the drawn image must exactly fill the canvas (v1.0.258 regression)');
@@ -248,11 +254,11 @@ section('a parse failure can never cost an upload');
 {
   const fn = src.slice(src.indexOf('Utils.compressImage = function'));
   t('the header read is wrapped', /catch \(err\) \{ meta = null; \}/.test(fn));
-  // meta === null means no rotation is applied and the draw is the identity — the
-  // pre-v1.0.258 behaviour, minus the crop.
-  t('…and falls back to drawing the image unrotated',
-    U._orientationToApply(null, 1200, 900) === 1 &&
-    /Utils\._orientationToApply\(meta, w, h\)/.test(fn));
+  // meta === null means nothing is rotated and the draw is the identity — the image is
+  // stored exactly as the file holds it, which is the v1.0.260 contract anyway.
+  t('…and falls back to drawing the image untouched',
+    U._orientationToRestoreInput(null, 1200, 900) === 1 &&
+    /Utils\._orientationToRestoreInput\(meta, w, h\)/.test(fn));
   // createImageBitmap gives RAW pixels AND raw dimensions, and a bitmap carries no EXIF
   // of its own — so drawImage cannot silently orient it. That is what removes the
   // WebView2 ambiguity, where an <img> reported oriented dimensions while drawImage
