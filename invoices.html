@@ -85,7 +85,7 @@
   <!-- Summary -->
   <div class="row g-2 mb-3">
     <div class="col-4"><div class="card text-center py-2"><div class="fw-bold text-primary" id="sumTotal">฿0</div><div class="small text-muted">ยอดรวม</div></div></div>
-    <div class="col-4"><div class="card text-center py-2"><div class="fw-bold text-success" id="sumPaid">฿0</div><div class="small text-muted">ชำระแล้ว</div></div></div>
+    <div class="col-4"><div class="card text-center py-2"><div class="fw-bold text-success" id="sumPaid">฿0</div><div class="small text-muted">ชำระแล้ว</div><div class="small" id="sumNonCash" style="display:none;color:#664d03;font-size:11px"></div></div></div>
     <div class="col-4"><div class="card text-center py-2"><div class="fw-bold text-danger" id="sumUnpaid">฿0</div><div class="small text-muted">ค้างชำระ</div></div></div>
   </div>
 
@@ -169,7 +169,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.260"></script><script src="db.js?v=1.0.260"></script><script src="auth.js?v=1.0.260"></script><script src="nav.js?v=1.0.260"></script><script src="idb.js?v=1.0.260"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.261"></script><script src="db.js?v=1.0.261"></script><script src="auth.js?v=1.0.261"></script><script src="nav.js?v=1.0.261"></script><script src="idb.js?v=1.0.261"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -424,12 +424,27 @@ async function viewPdfInvoice(num) {
   }
 }
 
-function statusInfo(paid, total, cancelled) {
+function statusInfo(paid, total, cancelled, nonCash) {
   if (cancelled) return { key:'cancelled', label:'ยกเลิก', cls:'badge-cancelled' };
   // Half-satang epsilon: item totals sum to a full float (e.g. 1234.5600000000002)
   // while a full payment is parseFloat(rem.toFixed(2)) = 1234.56, so a plain
   // paid >= total comparison wrongly yields "partial" on an exact full payment.
-  if (paid >= total - 0.005 && total > 0) return { key:'paid', label:'ชำระแล้ว', cls:'badge-paid' };
+  if (paid >= total - 0.005 && total > 0) {
+    // Settled by moving the debt to another invoice, not by money arriving (v1.0.261).
+    // The key stays 'paid' on purpose: these ARE settled, so the ชำระแล้ว filter must
+    // keep showing them and nothing disappears from the list. Only the label differs.
+    if (DB.isCarriedForward(total, nonCash)) {
+      // The colour is inline, not only in .badge-carried. style.css is precached by the
+      // service worker and its <link> carries no ?v= (bump-version.js only rewrites
+      // .html), so a BRAND-NEW css class can arrive late on a device that already has
+      // the old stylesheet — and a badge whose class has no rule renders with no
+      // background at all, i.e. unreadable white. Verified in the browser: the computed
+      // background was rgba(0,0,0,0) while the served file already had the rule.
+      return { key:'paid', carried:true, label:'ยกยอด → ' + nonCash.carriedTo,
+               cls:'badge-carried', style:'background:#fd7e14;color:#fff' };
+    }
+    return { key:'paid', label:'ชำระแล้ว', cls:'badge-paid' };
+  }
   if (paid > 0) return { key:'partial', label:'ชำระบางส่วน', cls:'badge-partial' };
   return { key:'pending', label:'ค้างชำระ', cls:'badge-pending' };
 }
@@ -474,6 +489,9 @@ function render() {
   // Shared with payments.html so the two lists can't diverge again — see DB.invoicePaidMap().
   const paidMap = DB.invoicePaidMap();
   const paidFor = inv => DB.paidForInvoice(paidMap, inv);
+  // Built once per render, not per row — see DB.invoiceNonCashMap. v1.0.261.
+  const nonCashMap = DB.invoiceNonCashMap();
+  const nonCashFor = inv => DB.nonCashForInvoice(nonCashMap, inv);
   // page count map: invoiceNumber → number of pages
   const pageCountMap = {};
   for (const inv of allInvoices) pageCountMap[inv.invoiceNumber] = (pageCountMap[inv.invoiceNumber] || 0) + 1;
@@ -502,7 +520,7 @@ function render() {
     const cust  = custMap[inv.customerId];
     const paid  = paidFor(inv);
     const total = parseFloat(inv.totalAmount) || 0;
-    const si    = statusInfo(paid, total, inv.cancelled);
+    const si    = statusInfo(paid, total, inv.cancelled, nonCashFor(inv));
     const d     = new Date(inv.createdAt);
     if (q && !inv.invoiceNumber.toLowerCase().includes(q) && !(cust && cust.name.toLowerCase().includes(q))) return false;
     if (fc && inv.customerId !== fc) return false;
@@ -532,7 +550,7 @@ function render() {
       case 'total':  cmp = ta - tb; break;
       case 'paid':   cmp = pa - pb; break;
       case 'rem':    cmp = (ta - pa) - (tb - pb); break;
-      case 'status': cmp = statusInfo(pa,ta,a.cancelled).key.localeCompare(statusInfo(pb,tb,b.cancelled).key); break;
+      case 'status': cmp = statusInfo(pa,ta,a.cancelled,nonCashFor(a)).key.localeCompare(statusInfo(pb,tb,b.cancelled,nonCashFor(b)).key); break;
       default:       cmp = new Date(a.createdAt) - new Date(b.createdAt);
     }
     return cmp * _sortDir;
@@ -544,16 +562,32 @@ function render() {
   // Summary totals (all filtered, not just current page) — voided invoices are no
   // longer real revenue, so they're excluded here even though the row still shows
   // (with a ยกเลิก badge) unless the user filters status = cancelled.
-  let sumTotal = 0, sumPaid = 0;
+  // ชำระแล้ว counts money that actually ARRIVED (v1.0.261). A carry-forward or a
+  // write-off settles the invoice without any, and counting it here overstated
+  // collections — live data had ฿29,299.10 of it. It is reported on its own line
+  // instead of being folded into either figure.
+  //
+  // ค้างชำระ still derives from the SETTLED amount, not from cash. Subtracting only
+  // cash would show the carried debt as outstanding here while the invoice it moved
+  // to shows it too — the same money counted twice. So the three add up as
+  // cash + non-cash + outstanding = total.
+  let sumTotal = 0, sumPaid = 0, sumNonCash = 0;
   for (const inv of list) {
     if (inv.cancelled) continue;
-    const total = parseFloat(inv.totalAmount) || 0;
-    const paid  = paidFor(inv);
-    sumTotal += total; sumPaid += Math.min(paid, total);
+    const total   = parseFloat(inv.totalAmount) || 0;
+    const paid    = Math.min(paidFor(inv), total);
+    const nonCash = Math.min(nonCashFor(inv).amount, paid);
+    sumTotal += total; sumPaid += paid - nonCash; sumNonCash += nonCash;
   }
   document.getElementById('sumTotal').textContent   = '฿' + Utils.formatNumber(sumTotal);
   document.getElementById('sumPaid').textContent    = '฿' + Utils.formatNumber(sumPaid);
-  document.getElementById('sumUnpaid').textContent  = '฿' + Utils.formatNumber(Math.max(0, sumTotal - sumPaid));
+  const _nc = document.getElementById('sumNonCash');
+  if (_nc) {
+    _nc.textContent = sumNonCash > 0.005 ? 'ยกยอด/ตัดหนี้ ฿' + Utils.formatNumber(sumNonCash) : '';
+    _nc.style.display = sumNonCash > 0.005 ? '' : 'none';
+  }
+  document.getElementById('sumUnpaid').textContent  =
+    '฿' + Utils.formatNumber(Math.max(0, sumTotal - sumPaid - sumNonCash));
 
   // Save full filtered list so cross-page "select all" and count work correctly
   _filteredList = list;
@@ -582,7 +616,7 @@ function render() {
     const total     = parseFloat(inv.totalAmount) || 0;
     const paid      = paidFor(inv);
     const remaining = Math.max(0, total - paid);
-    const si        = statusInfo(paid, total, inv.cancelled);
+    const si        = statusInfo(paid, total, inv.cancelled, nonCashFor(inv));
     const pages     = pageCountMap[inv.invoiceNumber] || 1;
     const allPages  = allPagesMap.get(inv.invoiceNumber) || [inv];
     const isExp     = _expandedNums.has(inv.invoiceNumber);
@@ -612,7 +646,7 @@ function render() {
       <td class="text-end d-none d-md-table-cell">฿${Utils.formatNumber(total)}</td>
       <td class="text-end text-success d-none d-md-table-cell">฿${Utils.formatNumber(paid)}</td>
       <td class="text-end ${remaining>0?'text-danger fw-semibold':'text-muted'}">฿${Utils.formatNumber(remaining)}</td>
-      <td class="text-center"><span class="badge ${si.cls}">${si.label}</span></td>
+      <td class="text-center"><span class="badge ${si.cls}"${si.style ? ` style="${si.style}"` : ''}>${si.label}</span></td>
       <td class="text-center sel-action-cell${_selMode ? ' d-none' : ''}">
         <div class="btn-group btn-group-sm">
           <button class="btn btn-outline-primary" onclick="printInvoice('${inv.invoiceNumber}')" title="พิมพ์"><i class="bi bi-printer"></i></button>

@@ -36,6 +36,11 @@ body {
 .badge-partial  { background: #17a2b8; color: #fff; }
 .badge-paid     { background: #28a745; color: #fff; }
 .badge-cancelled{ background: #6c757d; color: #fff; }
+/* Settled by moving the debt to another invoice, not by money arriving (v1.0.261).
+   Deliberately not green — it is closed, but nothing was received — and deliberately
+   not #ffc107 either, which is .badge-pending: a solid orange that cannot be mistaken
+   for "ค้างชำระ" at a glance, and is opaque so the label stays readable. */
+.badge-carried  { background: #fd7e14; color: #fff; }
 .badge-overdue  { background: #dc3545; color: #fff; }
 
 /* ── Login page ── */

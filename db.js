@@ -735,6 +735,39 @@ const DB = {
   },
   paidForInvoice(map, inv) { return map[inv.invoiceNumber + '|' + (inv.customerId || '')] || 0; },
 
+  // ── Non-cash settlement per invoice (v1.0.261) ──────────────────────────────
+  // Carry-forwards and write-offs CLOSE an invoice without any money arriving (see
+  // isNonCashPayment). The list showed them as plain "ชำระแล้ว", indistinguishable
+  // from a cash payment: live data has 141169-006 reading ชำระแล้ว at ฿29,299.10 with
+  // ฿0 actually received, the whole debt having moved to 241169-005.
+  //
+  // Keyed exactly like invoicePaidMap so a render can read both without rescanning the
+  // payments array per row — the O(rows x payments) trap documented in CLAUDE.md.
+  // carriedTo names the invoice the debt moved to, for the badge.
+  invoiceNonCashMap() {
+    const map = {};
+    for (const p of this.getPayments()) {
+      if (p.cancelled || this.isChequePending(p) || !this.isNonCashPayment(p)) continue;
+      const key = p.invoiceNumber + '|' + (p.customerId || '');
+      const e = map[key] || (map[key] = { amount: 0, carriedTo: null });
+      e.amount += this.effectivePaymentAmount(p);
+      if (p.carryForwardTo && !e.carriedTo) e.carriedTo = p.carryForwardTo;
+    }
+    return map;
+  },
+  nonCashForInvoice(map, inv) {
+    return map[inv.invoiceNumber + '|' + (inv.customerId || '')] || { amount: 0, carriedTo: null };
+  },
+
+  // A few satang carried as a rounding remainder is effectively paid — labelling that
+  // as a carry-forward would be noise on five of the six in live data. Only a real
+  // share of the invoice earns the distinct badge.
+  _CARRY_MIN_FRAC: 0.01,
+  isCarriedForward(total, nonCash) {
+    return !!(nonCash && nonCash.carriedTo && total > 0 &&
+              nonCash.amount > total * this._CARRY_MIN_FRAC);
+  },
+
   addInvoice(v) { const a = this.getInvoices(); a.unshift(v); this.saveInvoices(a); },
   updateInvoice(id, patch) {
     const a = this.getInvoices();
