@@ -61,6 +61,18 @@ patch('utils.js', s =>
 // the new query misses the cached entry and falls through to the network/bundle,
 // guaranteeing a FRESH copy on the very first launch of the new version.
 const BUST_FILES = ['utils.js', 'db.js', 'auth.js', 'idb.js', 'nav.js', 'settings.js', 'connection-status.js'];
+
+// CSS had exactly the same problem and none of the protection: style.css is precached
+// by the SW and its <link> carried NO query at all, so a brand-new rule could arrive
+// late on a device still holding the old stylesheet. A badge whose class has no rule
+// draws with no background — unreadable white, reported live in v1.0.261 and measured
+// in the browser as computed background rgba(0,0,0,0) while the served file had the rule.
+//
+// Vendor CSS is deliberately NOT busted: bootstrap and its icons never change between
+// releases, so a per-release query would force a pointless re-download of the largest
+// assets every time. Only files this project edits belong here.
+const BUST_CSS = ['style.css'];
+
 for (const f of fs.readdirSync(ROOT)) {
   if (!f.endsWith('.html')) continue;
   patch(f, s => {
@@ -68,6 +80,10 @@ for (const f of fs.readdirSync(ROOT)) {
     for (const js of BUST_FILES) {
       const re = new RegExp(`(src=")((?:\\./)?)${js.replace('.', '\\.')}(?:\\?v=[\\d.]+)?(")`, 'g');
       out = out.replace(re, `$1$2${js}?v=${ver}$3`);
+    }
+    for (const css of BUST_CSS) {
+      const re = new RegExp(`(href=")((?:\\./)?)${css.replace('.', '\\.')}(?:\\?v=[\\d.]+)?(")`, 'g');
+      out = out.replace(re, `$1$2${css}?v=${ver}$3`);
     }
     return out;
   });
