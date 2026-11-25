@@ -164,7 +164,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.264"></script><script src="db.js?v=1.0.264"></script><script src="auth.js?v=1.0.264"></script><script src="nav.js?v=1.0.264"></script><script src="idb.js?v=1.0.264"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.265"></script><script src="db.js?v=1.0.265"></script><script src="auth.js?v=1.0.265"></script><script src="nav.js?v=1.0.265"></script><script src="idb.js?v=1.0.265"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -653,26 +653,55 @@ async function loadView(invNum) {
 
   await renderPreview(pages);
 
-  // Auto-print if flagged by saveInvoice(true) / saveInvoiceEdit(true) / invoices.html
-  // printInvoice().  Consumed unconditionally and expiring after AUTOPRINT_TTL_MS: the
-  // flag used to be a bare invoice number removed ONLY on a matching view, so an arm
-  // that never reached this view (interrupted navigation, Back, another row clicked)
-  // stayed in sessionStorage for the whole session and then fired on a later
-  // save-only edit of that same invoice — bumping printCount and writing a
-  // printHistory entry for a print nobody asked for.  Legacy bare-string values throw
-  // in JSON.parse, so they are ignored and cleared rather than firing.
-  const AUTOPRINT_TTL_MS = 30000;
-  let _ap = null;
-  try { _ap = JSON.parse(sessionStorage.getItem('autoPrint') || 'null'); } catch(e) {}
-  sessionStorage.removeItem('autoPrint');
-  if (_ap && _ap.num === invNum && Date.now() - (_ap.at || 0) < AUTOPRINT_TTL_MS) {
-    setTimeout(() => doPrint(), 800);
+  // Auto-print if armed by saveInvoice(true) / saveInvoiceEdit(true) / invoices.html
+  // printInvoice(). Utils.armAutoPrint/takeAutoPrint own the rules — see the long
+  // comment there for the two bugs this shape exists to avoid, and why there is no
+  // longer a wall-clock TTL.
+  let _apToken = null;
+  try { _apToken = new URLSearchParams(location.search).get('ap'); } catch (e) {}
+  const _ap = Utils.takeAutoPrint(invNum, _apToken);
+
+  // Why the hand-off did or did not print, recorded where it can be read: DevTools is
+  // disabled in release Tauri builds, so Settings → Troubleshoot is the only channel.
+  // A silent failure here is what made this bug cost four releases — three of them
+  // bisecting the wrong thing entirely, because nothing said the print was never
+  // attempted. wt_errors is a 200-entry ring, so routine outcomes are opt-in
+  // (localStorage.__apTrace = '1') and only genuine faults log unconditionally.
+  const _apTrace = (() => { try { return localStorage.__apTrace === '1'; } catch (e) { return false; } })();
+  if (_ap.notable || (_apTrace && _apToken)) {
+    try {
+      DB.logError('AUTOPRINT', (_ap.fire ? 'จะพิมพ์: ' : 'ไม่พิมพ์: ') + _ap.why,
+        { invoiceNumber: invNum, fire: _ap.fire, why: _ap.why, waitedMs: _ap.waitedMs });
+    } catch (e) {}
   }
+
+  if (_ap.fire) setTimeout(() => doPrint({ auto: true }), 800);
 }
 
-async function doPrint() {
-  const pages = DB.getCurrentPagesByNumber(currentInvNum);
-  if (!pages.length) return;
+async function doPrint(opts = {}) {
+  let pages = DB.getCurrentPagesByNumber(currentInvNum);
+  // The auto-print path fires 800 ms after loadView, and a Firestore snapshot landing
+  // in between can briefly replace DB._cache (the same reason loadView itself retries).
+  // An empty read there used to `return` with no trace, which is indistinguishable from
+  // a print that silently failed — so wait for the cache rather than give up, and say
+  // so if it never comes back. The manual button keeps the plain single read: the user
+  // is looking at the rendered invoice, so the cache is populated.
+  if (!pages.length && opts.auto) {
+    for (let i = 0; i < 10 && !pages.length; i++) {
+      await new Promise(r => setTimeout(r, 300));
+      pages = DB.getCurrentPagesByNumber(currentInvNum);
+    }
+  }
+  if (!pages.length) {
+    if (opts.auto) {
+      try {
+        DB.logError('AUTOPRINT', 'ไม่พิมพ์: ไม่พบข้อมูลใบกำกับใน cache ตอนจะพิมพ์ (รอ 3 วินาทีแล้ว)',
+          { invoiceNumber: currentInvNum });
+      } catch (e) {}
+      Utils.showAlert('พิมพ์อัตโนมัติไม่สำเร็จ — กดปุ่ม <strong>พิมพ์</strong> อีกครั้งได้เลย', 'warning');
+    }
+    return;
+  }
 
   const reprintCount = pages[0].printCount || 0;  // count BEFORE this print
   const editCount    = pages[0].editCount    || 0;
@@ -1868,9 +1897,10 @@ async function saveInvoice(shouldPrint = false) {
   }
 
   if (shouldPrint) {
-    // "บันทึก & พิมพ์" — navigate to view mode to trigger auto-print
-    try { sessionStorage.setItem('autoPrint', JSON.stringify({ num: invNumber, at: Date.now() })); } catch(e) {}
-    setTimeout(() => { location.href = 'invoice-create.html?view=' + invNumber; }, 1500);
+    // "บันทึก & พิมพ์" — navigate to view mode to trigger auto-print. The token in the
+    // returned URL is what ties the arm to THIS navigation (see Utils.armAutoPrint).
+    const _apUrl = Utils.armAutoPrint(invNumber);
+    setTimeout(() => { location.href = _apUrl; }, 1500);
   } else {
     // "บันทึก PDF" — go straight to invoice list to avoid race condition
     // where Tauri HDD write hasn't completed when ?view= calls DB.getInvoices()
@@ -2224,9 +2254,10 @@ async function saveInvoiceEdit(shouldPrint = false) {
   Utils.showAlert('<i class="bi bi-hourglass-split me-1"></i>กำลังสร้าง PDF...', 'info');
   await PdfGen.run(_ePdfBody, _eFn);
   try { sessionStorage.setItem('freshPdf', JSON.stringify({ inv: currentInvNum, file: _eFn })); } catch(e) {}
-  if (shouldPrint) { try { sessionStorage.setItem('autoPrint', JSON.stringify({ num: currentInvNum, at: Date.now() })); } catch(e) {} }
-
-  setTimeout(() => { location.href = 'invoice-create.html?view=' + currentInvNum; }, 1500);
+  const _eUrl = shouldPrint
+    ? Utils.armAutoPrint(currentInvNum)
+    : 'invoice-create.html?view=' + encodeURIComponent(currentInvNum);
+  setTimeout(() => { location.href = _eUrl; }, 1500);
 }
 
 function buildHistorySection(page) {

@@ -165,9 +165,9 @@ const LZString = (function () {
 // ── End LZString ────────────────────────────────────────────────────────────
 
 const APP_VERSION = {
-  version: '1.0.264',
-  date: '2026-11-25T06:04:44.136Z',
-  label: 'v1.0.264 (25 พ.ย. 2569)',
+  version: '1.0.265',
+  date: '2026-11-25T11:09:25.472Z',
+  label: 'v1.0.265 (25 พ.ย. 2569)',
 };
 
 // Changelog — add new entry here when releasing a new version.
@@ -433,6 +433,64 @@ const Utils = {
   debounce(fn, delay = 200) {
     let t;
     return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), delay); };
+  },
+
+  // ── "บันทึก & พิมพ์" hand-off (v1.0.265) ────────────────────────────────────
+  // The save path cannot print: it navigates to the view page, which prints on
+  // arrival. The hand-off therefore has to survive a page load, and getting it
+  // wrong has now cost two separate bugs in opposite directions:
+  //
+  //   1. A bare invoice number in sessionStorage, removed only on a MATCHING view.
+  //      An arm that never reached that view (interrupted navigation, Back, another
+  //      row clicked) survived the whole session and then fired on a later save-only
+  //      edit of the same invoice — a print nobody asked for, plus a printHistory
+  //      entry for it.
+  //   2. The fix for (1) was a 30 s TTL on the arm, stamped BEFORE a 1.5 s navigation
+  //      delay and a full app boot. On a device holding ~1,000 invoices the Tauri HDD
+  //      load plus loadView's 4 s cache-settle retry plus renderPreview can exceed
+  //      that budget, so the flag was consumed and dropped: saved, view opened, no
+  //      dialog, nothing logged. Reported on the desktop app; a near-empty sandbox
+  //      build of the SAME code printed fine, which is what gave the timing away.
+  //
+  // A wall-clock deadline is the wrong instrument for (1) anyway — what actually
+  // needs checking is "does this arm belong to THIS navigation", not "is it recent".
+  // So the arm carries a one-shot token that is also put in the view URL, and is
+  // consumed on the first read. An interrupted navigation never reaches a URL
+  // carrying the token, a later visit to the same invoice has no token, and a reload
+  // finds the arm already consumed. No clock, so a slow boot cannot lose the print.
+  armAutoPrint(num) {
+    const token = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    try {
+      sessionStorage.setItem('autoPrint', JSON.stringify({ num, token, at: Date.now() }));
+    } catch (e) {}
+    return 'invoice-create.html?view=' + encodeURIComponent(num) + '&ap=' + token;
+  },
+
+  // Consume the arm. ALWAYS removes it, whatever the verdict — a surviving arm is
+  // bug (1) above. Returns { fire, why, waitedMs, notable }; `notable` marks the
+  // cases that mean something is wrong, as opposed to the ordinary "this view was
+  // not reached from บันทึก & พิมพ์".
+  takeAutoPrint(num, urlToken) {
+    let armed = null;
+    try { armed = JSON.parse(sessionStorage.getItem('autoPrint') || 'null'); } catch (e) {}
+    try { sessionStorage.removeItem('autoPrint'); } catch (e) {}
+
+    if (!urlToken) {
+      return { fire: false, notable: false,
+               why: armed ? 'armed, but this navigation carries no token' : 'not armed' };
+    }
+    // A token in the URL with no arm is a reload or a shared/revisited link, not a fault.
+    if (!armed || typeof armed !== 'object' || !armed.token) {
+      return { fire: false, notable: false, why: 'no arm to consume (reload or revisit)' };
+    }
+    if (armed.num !== num) {
+      return { fire: false, notable: true,
+               why: 'armed for ' + armed.num + ' but viewing ' + num };
+    }
+    if (armed.token !== urlToken) {
+      return { fire: false, notable: true, why: 'token mismatch — stale arm' };
+    }
+    return { fire: true, notable: false, why: 'ok', waitedMs: Date.now() - (armed.at || 0) };
   },
 
   // Cross-platform confirm. ⚠️ In the Tauri desktop app window.confirm() is
