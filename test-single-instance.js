@@ -1,4 +1,4 @@
-// test-single-instance.js — v1.0.248
+// test-single-instance.js — v1.0.248, extended v1.0.264 (derived port)
 //
 // Two copies of the desktop app must never run at once: both mount the same HDD store
 // in %APPDATA%\<app>\data\, and DB._tauri.write rewrites each wt_*.json WHOLE-FILE, so
@@ -27,14 +27,14 @@ const code = src.split('\n').filter(l => !l.trim().startsWith('//')).join('\n');
 
 section('the lock exists and runs before any window is created');
 {
-  t('a lock is taken in main()', /TcpListener::bind\(lock_addr\(\)\)/.test(code));
+  t('a lock is taken in main()', /TcpListener::bind\(lock_addr\(port\)\)/.test(code));
   // If the guard ran after Builder, the second copy would already have opened a window
   // before discovering it should not exist.
   t('the guard runs BEFORE tauri::Builder',
     code.indexOf('TcpListener::bind') < code.indexOf('tauri::Builder::default()'));
   t('the second copy returns from main instead of building an app',
-    /hand_off_to_running_instance\(\) \{\s*return;/.test(code.replace(/\s+/g, ' ').replace(/ \{ /g, ' { ')) ||
-    /if lock\.is_err\(\) && hand_off_to_running_instance\(\)/.test(code));
+    /hand_off_to_running_instance\(port\) \{\s*return;/.test(code.replace(/\s+/g, ' ').replace(/ \{ /g, ' { ')) ||
+    /if lock\.is_err\(\) && hand_off_to_running_instance\(port\)/.test(code));
   t('the console-window guard is still present (do-not-remove line)',
     /windows_subsystem = "windows"/.test(src));
 }
@@ -44,7 +44,7 @@ section('it FAILS OPEN — a foreign occupant must never stop the app starting')
   // The port is in the ephemeral range, so an unrelated program could hold it. Refusing
   // to launch the invoicing app over that would be far worse than losing the guard.
   t('a failed bind alone does not exit — our reply is required too',
-    /lock\.is_err\(\) && hand_off_to_running_instance\(\)/.test(code));
+    /lock\.is_err\(\) && hand_off_to_running_instance\(port\)/.test(code));
   t('no answer → returns false (start anyway)', /return false; \/\/|return false;/.test(code));
   t('the handshake reply is compared before exiting', /reply\.trim\(\) == PONG/.test(code));
   t('a wrong/foreign reply is not treated as our app',
@@ -70,6 +70,52 @@ section('handshake robustness');
     /const PING: &str = "([^"]+)"/.exec(code)[1] !== /const PONG: &str = "([^"]+)"/.exec(code)[1]);
 }
 
+// The lock port is derived from the bundle identifier in main.rs (v1.0.264). Mirror
+// that derivation here so the suite can reason about real port numbers; the section
+// below proves this copy and the Rust one agree, so a change to either is caught.
+const fnvPort = id => {
+  let h = 2166136261 >>> 0;
+  for (const b of Buffer.from(id, 'utf8')) {
+    h = (h ^ b) >>> 0;
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return 49152 + (h % 16384);
+};
+const PROD_ID = 'com.wt.invoice';
+
+section('the lock port is DERIVED from the bundle identifier (v1.0.264)');
+{
+  // A fixed port meant every build shared one lock. The side-by-side TEST build would
+  // then have found the production app holding it, received a valid PONG, focused the
+  // PRODUCTION window and exited — so the sandbox could not be launched at all while
+  // the real app ran, which is exactly when it is wanted.
+  t('no fixed port constant remains', !/const LOCK_PORT/.test(code));
+  t('the port comes from the identifier', /port_for\(&ctx\.config\(\)\.tauri\.bundle\.identifier\)/.test(code));
+  t('…and is computed BEFORE the bind', code.indexOf('port_for(') < code.indexOf('TcpListener::bind'));
+
+  // Pin the constants rather than trusting the comment: a different multiplier or
+  // offset would silently move every port.
+  t('FNV-1a offset basis', /let mut h: u32 = 2166136261;/.test(code));
+  t('FNV-1a prime', /wrapping_mul\(16777619\)/.test(code));
+  t('mapped into the ephemeral range', /49152 \+ \(h % 16384\)/.test(code));
+  // wrapping_mul, not *: a plain multiply panics on overflow in a debug build, and FNV
+  // overflows by design on almost every byte.
+  t('the hash wraps instead of panicking on overflow', !/h = h \* 16777619/.test(code));
+
+  // The two identifiers that actually ship must not land on the same port — that is
+  // the entire reason for this change.
+  const prod = fnvPort(PROD_ID), test = fnvPort(PROD_ID + '.test');
+  t('production and sandbox get DIFFERENT ports', prod !== test, { prod, test });
+  t('both are inside the ephemeral range',
+    prod >= 49152 && prod <= 65535 && test >= 49152 && test <= 65535, { prod, test });
+  // Stability matters as much as distinctness: the second copy connects to the port it
+  // computes itself, so a derivation that varied per run would never find the first.
+  t('the same identifier always gives the same port', fnvPort(PROD_ID) === prod);
+  t('the live tauri.conf.json identifier is the production one',
+    JSON.parse(fs.readFileSync(path.join(__dirname, 'src-tauri', 'tauri.conf.json'), 'utf8'))
+      .tauri.bundle.identifier === PROD_ID);
+}
+
 section('it listens on LOOPBACK only');
 {
   // 0.0.0.0 would expose the lock port to the network and can trigger a Windows
@@ -77,7 +123,7 @@ section('it listens on LOOPBACK only');
   t('binds Ipv4Addr::LOCALHOST', /Ipv4Addr::LOCALHOST/.test(code));
   t('does not bind UNSPECIFIED / 0.0.0.0',
     !/UNSPECIFIED/.test(code) && !/0\.0\.0\.0/.test(code));
-  const port = parseInt(/const LOCK_PORT: u16 = (\d+)/.exec(code)[1], 10);
+  const port = fnvPort(PROD_ID);
   t('the port is in the ephemeral range (not a well-known service)', port >= 49152 && port <= 65535, port);
 }
 
@@ -103,7 +149,7 @@ section('no new dependency was added for this');
 
 section('the OS behaviour the lock relies on');
 (async () => {
-  const port = parseInt(/const LOCK_PORT: u16 = (\d+)/.exec(code)[1], 10);
+  const port = fnvPort(PROD_ID);
   const first = net.createServer();
   const bound = await new Promise(res => {
     first.once('error', () => res(false));
