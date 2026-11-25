@@ -71,7 +71,20 @@ const BUST_FILES = ['utils.js', 'db.js', 'auth.js', 'idb.js', 'nav.js', 'setting
 // Vendor CSS is deliberately NOT busted: bootstrap and its icons never change between
 // releases, so a per-release query would force a pointless re-download of the largest
 // assets every time. Only files this project edits belong here.
-const BUST_CSS = ['style.css'];
+// TEMPORARILY EMPTY — diagnostic revert, v1.0.263.
+//
+// v1.0.262 added style.css to this list. "บันทึก & พิมพ์" then stopped producing a
+// print dialog on the DESKTOP app; v1.0.260 was the last version that printed. Across
+// 260 → 262 invoice-create.html's own code is byte-identical — the only change reaching
+// that page is this stylesheet query (plus the script ?v= it already had). So the list
+// is emptied to isolate it: if printing returns, this is the cause and the fix is to
+// version the SW cache name in the desktop bundle instead of the asset URL (pages.yml
+// bumps that cache only for the WEB deploy, so the desktop cache name never changes —
+// which is why the asset query was reached for in the first place).
+//
+// Putting 'style.css' back re-enables it. The white-badge problem this originally fixed
+// does NOT return meanwhile: v1.0.261 also sets that colour inline on the badge.
+const BUST_CSS = [];
 
 for (const f of fs.readdirSync(ROOT)) {
   if (!f.endsWith('.html')) continue;

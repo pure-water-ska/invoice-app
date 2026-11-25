@@ -31,7 +31,12 @@ const version = JSON.parse(read('package.json')).version;
 section('the bump script versions stylesheets, not only scripts');
 {
   t('there is a CSS list', /const BUST_CSS = \[/.test(bump));
-  t('style.css is in it', /const BUST_CSS = \[[^\]]*'style\.css'/.test(bump));
+  // Deliberately NOT asserting style.css is in it: the list is empty during the
+  // v1.0.263 print bisect. The machinery below must stay intact either way, so that
+  // re-enabling is one word rather than a rebuild — the section further down checks
+  // the list and the pages agree with each other.
+  t('the machinery is still in place for when it is re-enabled',
+    /for \(const css of BUST_CSS\)/.test(bump));
   // The two rewrites differ by attribute — a script is src=, a stylesheet is href=.
   // Reusing the src= regex for CSS silently matches nothing, which is how this was missed.
   t('scripts are matched on src=', /\(src="\)\(\(\?:\\\\\.\/\)\?\)/.test(bump));
@@ -41,14 +46,37 @@ section('the bump script versions stylesheets, not only scripts');
     bump.indexOf('for (const css of BUST_CSS)') < bump.indexOf("if (!f.endsWith('.html')) continue;") + 2000);
 }
 
-section('every page links a VERSIONED style.css');
+section('style.css versioning is HELD while the print fault is bisected (v1.0.263)');
 {
+  // v1.0.262 versioned the stylesheet; "บันทึก & พิมพ์" then stopped producing a print
+  // dialog on the desktop app, where v1.0.260 was the last working version. Across
+  // 260 → 262 invoice-create.html's own code is byte-identical, so this query is the
+  // only change reaching the print page. It is reverted to isolate it.
+  //
+  // Whichever way the experiment lands, the state must be CONSISTENT — every page
+  // versioned or none — because a half-reverted set would make the next result
+  // meaningless. That is what this section pins.
   const linking = htmlFiles.filter(f => /href="(?:\.\/)?style\.css/.test(read(f)));
   t('the pages were found', linking.length >= 20, linking.length);
+  const versioned = linking.filter(f => /href="(?:\.\/)?style\.css\?v=/.test(read(f)));
   const bare = linking.filter(f => /href="(?:\.\/)?style\.css"/.test(read(f)));
-  t('none links it without a version', bare.length === 0, bare);
-  const stale = linking.filter(f => !new RegExp('href="(?:\\./)?style\\.css\\?v=' + version.replace(/\./g, '\\.') + '"').test(read(f)));
-  t('every link carries the CURRENT version', stale.length === 0, stale);
+  t('no page is left half-reverted', versioned.length === 0 || bare.length === 0,
+    { versioned: versioned.length, bare: bare.length });
+
+  const bustList = /const BUST_CSS = \[([^\]]*)\]/.exec(bump)[1].trim();
+  const enabled = bustList.length > 0;
+  t('the bump list and the pages agree',
+    enabled ? bare.length === 0 : versioned.length === 0, { enabled, bare: bare.length });
+  if (enabled) {
+    const stale = linking.filter(f => !new RegExp('href="(?:\\./)?style\\.css\\?v=' + version.replace(/\./g, '\\.') + '"').test(read(f)));
+    t('every link carries the CURRENT version', stale.length === 0, stale);
+  } else {
+    // The reason for the hold must stay written down, or someone re-enables it blind.
+    t('the hold explains itself in the bump script', /diagnostic revert/.test(bump));
+    // This is what makes the revert safe: the badge keeps its colour without the CSS.
+    t('the badge colour does not depend on the stylesheet reaching the device',
+      /style:'background:#fd7e14;color:#fff'/.test(read('invoices.html')));
+  }
 }
 
 section('vendor CSS is deliberately left alone');
