@@ -1,0 +1,98 @@
+name: Release TEST (sandbox) Desktop App
+
+# Builds a SANDBOX copy of the desktop app that installs BESIDE the real one, so a
+# release can be tried on the actual machine before it reaches the business.
+#
+# Trigger: push a test tag, e.g.
+#     git tag test-v1.0.264 && git push origin test-v1.0.264
+#
+# Why this cannot disturb production:
+#   * scripts/make-test-build.js rewrites the checkout first — different bundle
+#     identifier (so its own %APPDATA% data folder), Firestore orgId "test" (so
+#     orgs/test/… , never orgs/main/…), updater switched OFF;
+#   * published as a PRERELEASE, so "releases/latest" — the endpoint every installed
+#     production app polls — keeps pointing at the last real release;
+#   * no latest.json is generated or uploaded here. That file IS the production
+#     update channel; writing one from this workflow is the one mistake that would
+#     push a test build onto every device. Do not add that step.
+#
+# Secrets: FIREBASE_TEAM_PASSWORD only. The updater signing key is deliberately not
+# used — an unsigned sandbox build cannot be served as an update even by accident.
+
+on:
+  push:
+    tags:
+      - 'test-v*'
+  workflow_dispatch:
+
+jobs:
+  release-test:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Inject Firebase teamPassword
+        shell: bash
+        env:
+          FIREBASE_TEAM_PASSWORD: ${{ secrets.FIREBASE_TEAM_PASSWORD }}
+        run: |
+          if [ -n "$FIREBASE_TEAM_PASSWORD" ]; then
+            sed -i "s|teamPassword: \"\"|teamPassword: \"$FIREBASE_TEAM_PASSWORD\"|" firebase-config.js
+            echo "Firebase teamPassword injected"
+          else
+            echo "No FIREBASE_TEAM_PASSWORD secret — the sandbox will not sync"
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Must run AFTER the password injection (it rewrites the same file) and BEFORE
+      # the build, which reads tauri.conf.json.
+      - name: Turn this checkout into a sandbox build
+        run: node scripts/make-test-build.js test
+
+      - name: Verify the sandbox is isolated
+        shell: bash
+        run: |
+          set -e
+          grep -q '"identifier": "com.wt.invoice.test"' src-tauri/tauri.conf.json
+          grep -q '"active": false' src-tauri/tauri.conf.json
+          grep -q 'orgId:        "test"' firebase-config.js
+          echo "OK — identifier, updater and orgId are all sandboxed"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build & publish prerelease
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'ทดสอบ — ระบบใบกำกับสินค้า ${{ github.ref_name }}'
+          releaseBody: |
+            **รุ่นทดสอบ (sandbox) — ไม่ใช่รุ่นใช้งานจริง**
+
+            ติดตั้งแยกจากโปรแกรมจริงได้เลย โปรแกรมจริงไม่ถูกแตะต้อง:
+            * ข้อมูลอยู่ในโฟลเดอร์ของตัวเอง (ไม่ใช้ไฟล์เดียวกับโปรแกรมจริง)
+            * ซิงค์ไปที่ `orgs/test` ไม่ใช่ข้อมูลจริง — ใบกำกับ ลูกค้า ราคา ของจริงไม่เปลี่ยน
+            * ปิดการอัปเดตอัตโนมัติ และรุ่นนี้ไม่ปรากฏในตัวอัปเดตของโปรแกรมจริง
+
+            ลองให้ครบแล้วค่อยปล่อยรุ่นจริงด้วย tag `v…`
+          releaseDraft: false
+          prerelease: true

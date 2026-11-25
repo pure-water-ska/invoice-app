@@ -28,19 +28,38 @@ use tauri::Manager;
 //
 // The handshake is newline-delimited and read with read_line rather than a
 // single read() so a partial TCP delivery cannot truncate it into a mismatch.
-const LOCK_PORT: u16 = 49731;
 const PING: &str = "WTINV-FOCUS";
 const PONG: &str = "WTINV-OK";
 const IO_TIMEOUT: Duration = Duration::from_millis(600);
 
-fn lock_addr() -> SocketAddr {
-    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, LOCK_PORT))
+/// The lock port is DERIVED FROM THE BUNDLE IDENTIFIER rather than fixed (v1.0.264).
+///
+/// A fixed port meant every build of this app shared one lock, so the side-by-side
+/// TEST build (com.wt.invoice.test) would have found the production app holding it,
+/// answered its own handshake, focused the production window and exited — making the
+/// test build impossible to launch while the real one runs. Deriving the port means
+/// two different identifiers can never collide, and two copies of the SAME identifier
+/// still do, which is the whole point of the lock.
+///
+/// FNV-1a over the identifier, mapped into the ephemeral range. Stable across runs,
+/// because it depends only on the identifier string.
+fn port_for(identifier: &str) -> u16 {
+    let mut h: u32 = 2166136261;
+    for b in identifier.as_bytes() {
+        h ^= *b as u32;
+        h = h.wrapping_mul(16777619);
+    }
+    49152 + (h % 16384) as u16 // 49152..=65535
+}
+
+fn lock_addr(port: u16) -> SocketAddr {
+    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port))
 }
 
 /// Ask an already-running copy to show itself.
 /// Returns true ONLY when our app answered — i.e. this process should now exit.
-fn hand_off_to_running_instance() -> bool {
-    let addr = lock_addr();
+fn hand_off_to_running_instance(port: u16) -> bool {
+    let addr = lock_addr(port);
     let Ok(stream) = TcpStream::connect_timeout(&addr, IO_TIMEOUT) else {
         return false; // nothing listening any more (e.g. mid-update relaunch)
     };
@@ -93,8 +112,13 @@ fn serve_focus_requests(listener: TcpListener, handle: tauri::AppHandle) {
 }
 
 fn main() {
-    let lock = TcpListener::bind(lock_addr());
-    if lock.is_err() && hand_off_to_running_instance() {
+    // The context is built first so the identifier can pick the lock port; it is then
+    // handed to run() unchanged.
+    let ctx = tauri::generate_context!();
+    let port = port_for(&ctx.config().tauri.bundle.identifier);
+
+    let lock = TcpListener::bind(lock_addr(port));
+    if lock.is_err() && hand_off_to_running_instance(port) {
         return; // another copy is up and has been brought to the front
     }
 
@@ -105,6 +129,6 @@ fn main() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
+        .run(ctx)
         .expect("error while running tauri application");
 }
