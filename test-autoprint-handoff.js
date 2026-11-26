@@ -46,12 +46,19 @@ const store = {
   setItem(k, v) { this._d[k] = String(v); },
   removeItem(k) { delete this._d[k]; },
 };
+// The slice must start at apTrace, not at armAutoPrint: arming traces itself now, and a
+// slice that omitted apTrace threw "this.apTrace is not a function" rather than testing
+// anything. `performance` is stubbed because navType reads it.
+const traced = [];
 const U = (() => {
-  const s = utilsSrc.indexOf('armAutoPrint(num) {');
+  const s = utilsSrc.indexOf('apTrace(msg, extra) {');
   const e = utilsSrc.indexOf('// Cross-platform confirm');
   if (s < 0 || e < 0 || e < s) throw new Error('autoprint helpers not found in utils.js');
   const body = utilsSrc.slice(s, e).trim().replace(/,\s*$/, '');
-  return new Function('sessionStorage', 'return {' + body + '};')(store);
+  const fakePerf = { getEntriesByType: () => [{ type: 'navigate' }] };
+  const o = new Function('sessionStorage', 'performance', 'DB',
+    'return {' + body + '};')(store, fakePerf, { logError: (k, m, x) => traced.push(m) });
+  return o;
 })();
 const tokenOf = url => new URLSearchParams(url.slice(url.indexOf('?'))).get('ap');
 const numOf = url => new URLSearchParams(url.slice(url.indexOf('?'))).get('view');
@@ -194,12 +201,38 @@ section('the decision is recorded where it can actually be read');
   // is the only channel. A silent hand-off is what cost four releases.
   t('the outcome is logged', /DB\.logError\('AUTOPRINT'/.test(createSrc));
   t('both verdicts are distinguishable in the log',
-    /จะพิมพ์: /.test(createSrc) && /ไม่พิมพ์: /.test(createSrc));
+    /\? 'จะพิมพ์' : 'ไม่พิมพ์: ' \+ _ap\.why/.test(createSrc));
   t('the reason is carried, not just the verdict', /why: _ap\.why/.test(createSrc));
   t('the wait is carried, so a slow boot is visible', /waitedMs: _ap\.waitedMs/.test(createSrc));
-  // wt_errors is a 200-entry ring and was once 85% success noise, covering under a day.
-  t('routine outcomes are opt-in', /localStorage\.__apTrace === '1'/.test(createSrc));
-  t('…but faults log unconditionally', /if \(_ap\.notable \|\| \(_apTrace && _apToken\)\)/.test(createSrc));
+  // v1.0.265 gated routine lines behind localStorage.__apTrace — unreadable on the
+  // desktop app, because DB.init()'s Tauri branch wipes every localStorage key but a
+  // short keep-list on each launch. The flag was gone before any page ran, so the
+  // release shipped silence. Nothing about this trace may depend on localStorage.
+  // Comments-stripped: utils.js and this file both MENTION the dead gate to explain why
+  // it is gone, and matching that prose would pass while the gate was still in force.
+  const noComments = s => s.split(/\r?\n/).filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  t('the trace does NOT depend on localStorage',
+    !/localStorage\.__apTrace/.test(noComments(createSrc) + noComments(utilsSrc)));
+  t('the keep-list really does not carry such a flag',
+    !/__apTrace/.test(read('db.js')));
+  t('every hand-off is traced, not just faults', /Utils\.apTrace\('view /.test(createSrc));
+  t('…including how the page was entered, to catch a reload', /nav=' \+ Utils\.navType\(\)/.test(createSrc));
+  t('…and the url as actually seen', /search: location\.search/.test(createSrc));
+  t('arming is traced too, so a missing arm is distinguishable from a lost one',
+    /apTrace\('arm /.test(utilsSrc));
+  t('…and a silent sessionStorage failure is detected by reading back',
+    /stored = !!sessionStorage\.getItem\('autoPrint'\)/.test(utilsSrc));
+
+  // The decisive measurement: window.print() blocks until the dialog is dismissed, so
+  // ~0 ms is proof of suppression. printCount cannot show this — the manual button
+  // bumps it too, which is how it was misread as proof the print had been reached.
+  t('window.print() is timed',
+    /const _t0 = Date\.now\(\);\s+window\.print\(\);\s+const _printMs = Date\.now\(\) - _t0;/.test(createSrc));
+  t('…and the elapsed time is logged', /print\(\) ' \+ _printMs \+ 'ms/.test(createSrc));
+  t('…with an immediate return called out explicitly',
+    /RETURNED IMMEDIATELY \(no dialog shown\)/.test(createSrc));
+  t('…for the manual path as well, so the two are comparable',
+    /via=' \+ \(opts\.auto \? 'auto' : 'button'\)/.test(createSrc));
 }
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');

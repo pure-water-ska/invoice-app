@@ -165,9 +165,9 @@ const LZString = (function () {
 // ── End LZString ────────────────────────────────────────────────────────────
 
 const APP_VERSION = {
-  version: '1.0.266',
-  date: '2026-11-26T07:34:24.951Z',
-  label: 'v1.0.266 (26 พ.ย. 2569)',
+  version: '1.0.267',
+  date: '2026-11-26T08:18:32.935Z',
+  label: 'v1.0.267 (26 พ.ย. 2569)',
 };
 
 // Changelog — add new entry here when releasing a new version.
@@ -458,11 +458,42 @@ const Utils = {
   // consumed on the first read. An interrupted navigation never reaches a URL
   // carrying the token, a later visit to the same invoice has no token, and a reload
   // finds the arm already consumed. No clock, so a slow boot cannot lose the print.
+  // Trace the hand-off into wt_errors (Settings → Troubleshoot). UNCONDITIONAL, and
+  // deliberately so: v1.0.265 gated the routine lines behind localStorage.__apTrace,
+  // which can never be read on the desktop app — DB.init()'s Tauri branch wipes every
+  // localStorage key but a short keep-list on each launch, so the flag is gone before
+  // any page runs. The result was five releases of silence on a bug whose whole
+  // difficulty is that nothing is reported. Three lines per "บันทึก & พิมพ์" at ~10
+  // invoices a day leaves the 200-entry ring about six days of coverage, which is the
+  // right trade until this is understood. Remove once it is.
+  apTrace(msg, extra) {
+    try { if (typeof DB !== 'undefined') DB.logError('AUTOPRINT', msg, extra || {}); } catch (e) {}
+  },
+
+  // How this page was entered. 'reload' is the answer to a specific suspicion: the view
+  // page consumes the arm on load and prints 800 ms later, so a reload in between — and
+  // nav.js reloads on a service-worker controllerchange — would leave the arm consumed,
+  // the timer dead, and nothing logged.
+  navType() {
+    try {
+      const e = performance.getEntriesByType('navigation')[0];
+      if (e && e.type) return e.type;
+      if (performance.navigation) {
+        return ['navigate', 'reload', 'back_forward', 'reserved'][performance.navigation.type] || '?';
+      }
+    } catch (e) {}
+    return '?';
+  },
+
   armAutoPrint(num) {
     const token = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    let stored = false;
     try {
       sessionStorage.setItem('autoPrint', JSON.stringify({ num, token, at: Date.now() }));
-    } catch (e) {}
+      stored = !!sessionStorage.getItem('autoPrint');   // read back: a silent quota
+    } catch (e) {}                                      // failure would look identical
+    this.apTrace('arm ' + num + ' tok=' + token.slice(-6) + (stored ? '' : ' STORE FAILED'),
+      { invoiceNumber: num, stored });
     return 'invoice-create.html?view=' + encodeURIComponent(num) + '&ap=' + token;
   },
 

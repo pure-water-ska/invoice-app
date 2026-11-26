@@ -164,7 +164,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.266"></script><script src="db.js?v=1.0.266"></script><script src="auth.js?v=1.0.266"></script><script src="nav.js?v=1.0.266"></script><script src="idb.js?v=1.0.266"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.267"></script><script src="db.js?v=1.0.267"></script><script src="auth.js?v=1.0.267"></script><script src="nav.js?v=1.0.267"></script><script src="idb.js?v=1.0.267"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -661,19 +661,15 @@ async function loadView(invNum) {
   try { _apToken = new URLSearchParams(location.search).get('ap'); } catch (e) {}
   const _ap = Utils.takeAutoPrint(invNum, _apToken);
 
-  // Why the hand-off did or did not print, recorded where it can be read: DevTools is
-  // disabled in release Tauri builds, so Settings → Troubleshoot is the only channel.
-  // A silent failure here is what made this bug cost four releases — three of them
-  // bisecting the wrong thing entirely, because nothing said the print was never
-  // attempted. wt_errors is a 200-entry ring, so routine outcomes are opt-in
-  // (localStorage.__apTrace = '1') and only genuine faults log unconditionally.
-  const _apTrace = (() => { try { return localStorage.__apTrace === '1'; } catch (e) { return false; } })();
-  if (_ap.notable || (_apTrace && _apToken)) {
-    try {
-      DB.logError('AUTOPRINT', (_ap.fire ? 'จะพิมพ์: ' : 'ไม่พิมพ์: ') + _ap.why,
-        { invoiceNumber: invNum, fire: _ap.fire, why: _ap.why, waitedMs: _ap.waitedMs });
-    } catch (e) {}
-  }
+  // Recorded UNCONDITIONALLY — see Utils.apTrace for why the v1.0.265 opt-in gate could
+  // never fire on the desktop app. `nav` is the load type: 'reload' here would mean the
+  // page was re-entered after the arm had already been consumed, which kills the 800 ms
+  // timer silently and is one of the two mechanisms still in play.
+  Utils.apTrace('view ' + invNum + ' nav=' + Utils.navType() +
+                ' ap=' + (_apToken ? _apToken.slice(-6) : 'NONE') +
+                ' → ' + (_ap.fire ? 'จะพิมพ์' : 'ไม่พิมพ์: ' + _ap.why),
+    { invoiceNumber: invNum, nav: Utils.navType(), hadToken: !!_apToken,
+      search: location.search.slice(0, 120), fire: _ap.fire, why: _ap.why, waitedMs: _ap.waitedMs });
 
   if (_ap.fire) setTimeout(() => doPrint({ auto: true }), 800);
 }
@@ -723,7 +719,19 @@ async function doPrint(opts = {}) {
   // Print first — immediately, no waiting for PDF
   document.getElementById('printArea').innerHTML = html;
   _fitPrintPages();   // scale any overflowing page down to fit one A5 (14-row pages)
+
+  // Chromium's window.print() BLOCKS until the dialog is dismissed, so the elapsed time
+  // IS the evidence: seconds mean a dialog appeared and was dealt with, ~0 ms means the
+  // print was suppressed and never shown. Nothing in the DOM or in printCount can tell
+  // those apart, which is why "printCount incremented" was misread as proof the print
+  // had been reached — the manual button bumps it too. Measured for both paths.
+  const _t0 = Date.now();
   window.print();
+  const _printMs = Date.now() - _t0;
+  Utils.apTrace('print() ' + _printMs + 'ms pages=' + pages.length +
+                ' via=' + (opts.auto ? 'auto' : 'button') +
+                (_printMs < 150 ? ' — RETURNED IMMEDIATELY (no dialog shown)' : ''),
+    { invoiceNumber: currentInvNum, printMs: _printMs, pages: pages.length, auto: !!opts.auto });
 
   // Count the print only once the dialog has been dismissed — window.print() blocks
   // until then wherever the browser implements it synchronously. Counting BEFORE the
