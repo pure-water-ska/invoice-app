@@ -164,7 +164,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.267"></script><script src="db.js?v=1.0.267"></script><script src="auth.js?v=1.0.267"></script><script src="nav.js?v=1.0.267"></script><script src="idb.js?v=1.0.267"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.268"></script><script src="db.js?v=1.0.268"></script><script src="auth.js?v=1.0.268"></script><script src="nav.js?v=1.0.268"></script><script src="idb.js?v=1.0.268"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 try { DB.init(); } catch(e) {
@@ -255,16 +255,43 @@ body{margin:0;padding:0;background:#fff;font-family:'Sarabun','TH Sarabun New',s
   },
 
   async _saveToLocalFolder(blob, filename) {
-    try {
-      const handle = await IDB.get('pdf_dir');
-      if (!handle) return false;
-      const perm = await handle.requestPermission({ mode: 'readwrite' });
-      if (perm !== 'granted') return false;
-      const fh = await handle.getFileHandle(filename, { create: true });
-      const w  = await fh.createWritable();
-      await w.write(blob); await w.close();
+    const handle = await Utils.withTimeout(IDB.get('pdf_dir'), 3000, 'pdf_dir read');
+    if (!handle.ok || !handle.value) return false;
+    const dir = handle.value;
+
+    // queryPermission() only REPORTS; it never prompts, so it cannot hang waiting for a
+    // gesture. requestPermission() is deliberately NOT called here: it requires a live
+    // user gesture, and this runs inside an async save long after the click. In the
+    // Tauri WebView that call never settled — no prompt, no rejection — so the await
+    // below it never returned and the whole save stopped dead just before arming the
+    // print. That was the "บันทึก & พิมพ์ saves but never prints" bug, confirmed on the
+    // user's machine 26 Nov 2026: the production app has a PDF folder saved and hangs,
+    // a fresh sandbox install has none, returns here, and prints fine.
+    // Re-granting belongs on a real click — the PDF folder card in Settings.
+    const q = await Utils.withTimeout(dir.queryPermission({ mode: 'readwrite' }), 3000, 'queryPermission');
+    if (!q.ok || q.value !== 'granted') {
+      const why = q.timedOut ? 'query timed out' : (q.ok ? q.value : 'query failed');
+      Utils.apTrace('pdf folder: not granted (' + why + ') — skipped, save continues',
+        { filename, why });
+      Utils.showAlert('ใบกำกับบันทึกแล้ว แต่ยังไม่ได้เซฟไฟล์ PDF ลงโฟลเดอร์ ' +
+        '— ไปอนุญาตโฟลเดอร์ PDF อีกครั้งที่ <strong>ตั้งค่า</strong>', 'warning');
+      return false;
+    }
+
+    // The write itself can also stall on a disconnected or busy folder. Time-boxed for
+    // the same reason: a save must always reach its end.
+    const w = await Utils.withTimeout((async () => {
+      const fh = await dir.getFileHandle(filename, { create: true });
+      const ws = await fh.createWritable();
+      await ws.write(blob); await ws.close();
       return true;
-    } catch(e) { console.warn('PDF folder save:', e); return false; }
+    })(), 15000, 'pdf folder write');
+    if (!w.ok) {
+      Utils.apTrace('pdf folder: write ' + (w.timedOut ? 'timed out' : 'failed') + ' — save continues',
+        { filename, error: w.error ? String(w.error.message || w.error).slice(0, 120) : '' });
+      return false;
+    }
+    return true;
   },
 
   async run(bodyHtml, filename, invoiceNumber) {
@@ -1893,27 +1920,32 @@ async function saveInvoice(shouldPrint = false) {
   // so it's uploaded before we navigate away; the upload bar shows progress.
   try { if (window.Sync && typeof Sync.flushNow === 'function') Sync.flushNow(); } catch (e) {}
 
+  // Arm the print BEFORE the PDF step. Printing an invoice must not depend on a PDF file
+  // write succeeding — it did, and a hang inside PdfGen meant the arming code below was
+  // never reached at all. An arm that goes unused is harmless: it only fires on a
+  // navigation carrying its token, so it cannot leak into a later view.
+  const _apUrl = shouldPrint ? Utils.armAutoPrint(invNumber) : null;
+
   Utils.showAlert('<i class="bi bi-hourglass-split me-1"></i>กำลังสร้าง PDF...', 'info');
   // The invoice is already committed at this point — a PDF failure must not abort the
-  // navigation (and must not strand the save lock), so swallow it and carry on.
-  try {
-    await PdfGen.run(_pdfBody, _fn, invNumber);
+  // navigation (and must not strand the save lock). try/catch covers a rejection;
+  // withTimeout covers the worse case of a promise that never settles, which is what
+  // actually happened here (see PdfGen._saveToLocalFolder).
+  const _pdf = await Utils.withTimeout(PdfGen.run(_pdfBody, _fn, invNumber), 30000, 'PdfGen.run');
+  if (_pdf.ok) {
     // Mark PDF as fresh so doPrint() can skip regeneration
     try { sessionStorage.setItem('freshPdf', JSON.stringify({ inv: invNumber, file: _fn })); } catch(e) {}
-  } catch (e) {
-    console.warn('[saveInvoice] PDF generation failed — invoice is saved, continuing', e);
+  } else {
+    Utils.apTrace('PdfGen.run ' + (_pdf.timedOut ? 'TIMED OUT' : 'failed') + ' — invoice saved, continuing',
+      { invoiceNumber: invNumber, timedOut: !!_pdf.timedOut });
+    if (_pdf.timedOut) {
+      Utils.showAlert('สร้าง PDF ไม่เสร็จในเวลาที่กำหนด — ใบกำกับบันทึกแล้ว และยังพิมพ์ได้ตามปกติ', 'warning');
+    }
   }
 
-  if (shouldPrint) {
-    // "บันทึก & พิมพ์" — navigate to view mode to trigger auto-print. The token in the
-    // returned URL is what ties the arm to THIS navigation (see Utils.armAutoPrint).
-    const _apUrl = Utils.armAutoPrint(invNumber);
-    setTimeout(() => { location.href = _apUrl; }, 1500);
-  } else {
-    // "บันทึก PDF" — go straight to invoice list to avoid race condition
-    // where Tauri HDD write hasn't completed when ?view= calls DB.getInvoices()
-    setTimeout(() => { location.href = 'invoices.html'; }, 1000);
-  }
+  // Navigation now happens whatever the PDF did. "บันทึก PDF" goes straight to the list
+  // to avoid the race where a Tauri HDD write hasn't landed when ?view= reads invoices.
+  setTimeout(() => { location.href = _apUrl || 'invoices.html'; }, _apUrl ? 1500 : 1000);
 }
 
 // ── CAP STOCK MIN-QTY CHECK (called before saving) ──────────────────────────
@@ -2259,12 +2291,25 @@ async function saveInvoiceEdit(shouldPrint = false) {
   const _eFn = PdfGen.sanitize(_eCust ? _eCust.name : 'unknown') + '_' + PdfGen.sanitize(currentInvNum) + '.pdf';
   // Commit edits to Firestore immediately before navigating; upload bar shows progress.
   try { if (window.Sync && typeof Sync.flushNow === 'function') Sync.flushNow(); } catch (e) {}
-  Utils.showAlert('<i class="bi bi-hourglass-split me-1"></i>กำลังสร้าง PDF...', 'info');
-  await PdfGen.run(_ePdfBody, _eFn);
-  try { sessionStorage.setItem('freshPdf', JSON.stringify({ inv: currentInvNum, file: _eFn })); } catch(e) {}
+  // Armed BEFORE the PDF step, same as saveInvoice() — and for the same reason. This
+  // path was worse: the await had no try/catch at all, so a rejection stranded it just
+  // as surely as a promise that never settled.
   const _eUrl = shouldPrint
     ? Utils.armAutoPrint(currentInvNum)
     : 'invoice-create.html?view=' + encodeURIComponent(currentInvNum);
+
+  Utils.showAlert('<i class="bi bi-hourglass-split me-1"></i>กำลังสร้าง PDF...', 'info');
+  const _ePdf = await Utils.withTimeout(PdfGen.run(_ePdfBody, _eFn), 30000, 'PdfGen.run (edit)');
+  if (_ePdf.ok) {
+    try { sessionStorage.setItem('freshPdf', JSON.stringify({ inv: currentInvNum, file: _eFn })); } catch(e) {}
+  } else {
+    Utils.apTrace('PdfGen.run (edit) ' + (_ePdf.timedOut ? 'TIMED OUT' : 'failed') + ' — edit saved, continuing',
+      { invoiceNumber: currentInvNum, timedOut: !!_ePdf.timedOut });
+    if (_ePdf.timedOut) {
+      Utils.showAlert('สร้าง PDF ไม่เสร็จในเวลาที่กำหนด — การแก้ไขบันทึกแล้ว และยังพิมพ์ได้ตามปกติ', 'warning');
+    }
+  }
+
   setTimeout(() => { location.href = _eUrl; }, 1500);
 }
 

@@ -164,7 +164,10 @@ section('every call site uses the helper — no site writes the arm itself');
   const live = ['utils.js', 'invoice-create.html', 'invoices.html'];
   const writers = live.filter(f => /setItem\('autoPrint'/.test(read(f)));
   t('only utils.js writes the arm', writers.length === 1 && writers[0] === 'utils.js', writers);
-  t('save uses the helper', /const _apUrl = Utils\.armAutoPrint\(invNumber\)/.test(createSrc));
+  // v1.0.268 moved this ahead of the PDF step and made it conditional in one expression.
+  // Arming on a plain "บันทึก PDF" would print an invoice nobody asked to print.
+  t('save uses the helper, and only when printing was asked for',
+    /const _apUrl = shouldPrint \? Utils\.armAutoPrint\(invNumber\) : null;/.test(createSrc));
   t('save-edit uses the helper', /Utils\.armAutoPrint\(currentInvNum\)/.test(createSrc));
   t('the list page uses the helper', /location\.href = Utils\.armAutoPrint\(num\)/.test(listSrc));
   // The edit path navigates to the view page whether or not it prints; only the

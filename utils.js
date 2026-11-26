@@ -165,9 +165,9 @@ const LZString = (function () {
 // ── End LZString ────────────────────────────────────────────────────────────
 
 const APP_VERSION = {
-  version: '1.0.267',
-  date: '2026-11-26T08:18:32.935Z',
-  label: 'v1.0.267 (26 พ.ย. 2569)',
+  version: '1.0.268',
+  date: '2026-11-26T08:54:33.057Z',
+  label: 'v1.0.268 (26 พ.ย. 2569)',
 };
 
 // Changelog — add new entry here when releasing a new version.
@@ -458,6 +458,29 @@ const Utils = {
   // consumed on the first read. An interrupted navigation never reaches a URL
   // carrying the token, a later visit to the same invoice has no token, and a reload
   // finds the arm already consumed. No clock, so a slow boot cannot lose the print.
+  // ── withTimeout (v1.0.268) ──────────────────────────────────────────────────
+  // A promise that never SETTLES is worse than one that rejects: the awaiting code just
+  // stops — no error, no log, no unhandledrejection, nothing to see from outside.
+  //
+  // That is what broke "บันทึก & พิมพ์" on the desktop app for five releases.
+  // PdfGen._saveToLocalFolder awaited handle.requestPermission() on the saved PDF
+  // folder; that call needs a live user gesture, and by then the click is long gone, so
+  // in the Tauri WebView the prompt never rendered and the promise never resolved. The
+  // invoice saved, then execution simply stopped before the code that arms the print —
+  // which is why the trace showed a view with "not armed" and no arm line at all.
+  //
+  // Resolves to { ok:true, value } | { ok:false, timedOut:true, label } |
+  // { ok:false, error, label } — never rejects, so a call site can always carry on.
+  withTimeout(promise, ms, label) {
+    let timer;
+    return Promise.race([
+      Promise.resolve(promise).then(
+        value => ({ ok: true, value }),
+        error => ({ ok: false, error, label })),
+      new Promise(res => { timer = setTimeout(() => res({ ok: false, timedOut: true, label }), ms); }),
+    ]).then(r => { clearTimeout(timer); return r; });
+  },
+
   // Trace the hand-off into wt_errors (Settings → Troubleshoot). UNCONDITIONAL, and
   // deliberately so: v1.0.265 gated the routine lines behind localStorage.__apTrace,
   // which can never be read on the desktop app — DB.init()'s Tauri branch wipes every
