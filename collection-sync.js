@@ -313,9 +313,9 @@ window.CollectionSync = window.CollectionSync || {
           let batch = this._db.batch(), ops = 0;
           for (const id of ids) {
             batch.delete(col.doc(id));
-            if (++ops >= 450) { await batch.commit(); batch = this._db.batch(); ops = 0; }
+            if (++ops >= 450) { await batch.commit(); if ((window.Sync && Sync.countWrite)) Sync.countWrite(this.cfg.col + ':dedup', ops); batch = this._db.batch(); ops = 0; }
           }
-          if (ops > 0) await batch.commit();
+          if (ops > 0) { await batch.commit(); if ((window.Sync && Sync.countWrite)) Sync.countWrite(this.cfg.col + ':dedup', ops); }
           this._logLine('removed ' + ids.length + ' duplicate server docs');
         } catch (e) { console.warn('[' + this.cfg.name + '] dup cleanup failed', e); }
       },
@@ -356,7 +356,7 @@ window.CollectionSync = window.CollectionSync || {
           _ts: firebase.firestore.FieldValue.serverTimestamp(),
         });
         let batch = this._db.batch(), ops = 0;
-        const flush = async () => { await batch.commit(); batch = this._db.batch(); ops = 0; };
+        const flush = async () => { await batch.commit(); if ((window.Sync && Sync.countWrite)) Sync.countWrite(this.cfg.col, ops); batch = this._db.batch(); ops = 0; };
         for (const r of upserts) {
           batch.set(col.doc(r.id), { ...this._stripMeta(r), ...meta() }, { merge: true });
           if (++ops >= 450) await flush();
@@ -368,6 +368,7 @@ window.CollectionSync = window.CollectionSync || {
         if (ops > 0) {
           this._logLine('committing ' + upserts.length + ' upsert, ' + deletes.length + ' delete …');
           await batch.commit();
+          if ((window.Sync && Sync.countWrite)) Sync.countWrite(this.cfg.col, ops);
           this._logLine('commit OK (' + upserts.length + ' upsert, ' + deletes.length + ' delete)');
         }
       },

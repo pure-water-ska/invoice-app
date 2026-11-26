@@ -144,6 +144,9 @@ function makeEnv(invoices, opts) {
       ready: opts.ready !== false,
       _db: { batch: () => ({ delete: ref => deleted.push(ref), commit: async () => { if (opts.commitFails) throw new Error('unavailable'); } }) },
       _orgRef: () => ({ collection: () => ({ doc: id => id }) }),
+      // Sync.countWrite exists on the real object (v1.0.270 write counter); a host
+      // without it throws inside the lifted method rather than testing anything.
+      countWrite: () => {},
       _addTombstones: (col, ids) => tombstoned.push(...ids),
     },
     get local() { return local; },

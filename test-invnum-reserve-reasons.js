@@ -55,6 +55,9 @@ function host(over) {
   return Object.assign({
     ready: true,
     _deviceId: 'dev1',
+    // Sync.countWrite exists on the real object (v1.0.270 write counter); a host
+    // without it throws inside the lifted method rather than testing anything.
+    countWrite() {},
     _lastFloorWhy: '',
     _lastAtomicWhy: '',
     _db: { runTransaction: async fn => fn({ get: async () => ({ exists: false, data: () => ({}) }), set() {} }) },

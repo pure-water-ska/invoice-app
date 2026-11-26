@@ -67,6 +67,9 @@ function makeEnv(localArr, opts) {
       _saveServerIds: () => {},
       _clearTombstones: (col, ids) => tombClears.push(...ids),
       _deviceId: 'dev1',
+      // Sync.countWrite exists on the real object (v1.0.270 write counter); a host
+      // without it throws inside the lifted method rather than testing anything.
+      countWrite() {},
       _deviceName: () => 'PC-1',
     },
     written, tombClears, logs, fpMap, serverIds,

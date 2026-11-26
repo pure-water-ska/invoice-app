@@ -48,7 +48,7 @@
       let remoteOK = false;
       try {
         const col = _orgCol();
-        if (col) { await col.doc(id).set({ data: base64, _ts: Date.now(), _by: (window.Sync && Sync._deviceId) || '' }); remoteOK = true; }
+        if (col) { await col.doc(id).set({ data: base64, _ts: Date.now(), _by: (window.Sync && Sync._deviceId) || '' }); if ((window.Sync && Sync.countWrite)) Sync.countWrite('images', 1); remoteOK = true; }
       } catch (e) { console.warn('[Images] Firestore put failed (kept local):', e.message); }
       if (opts && opts.requireRemote && !remoteOK) {
         try { if (typeof IDB !== 'undefined' && IDB.images) await IDB.images.delete(id); } catch (e) {}
@@ -117,6 +117,7 @@
       } catch (e) { return { status: 'failed', error: 'read: ' + (e.message || e) }; }
 
       try {
+        if ((window.Sync && Sync.countWrite)) Sync.countWrite('images:recover', 1);
         await col.doc(id).set({
           data: local, _ts: Date.now(),
           _by: (window.Sync && Sync._deviceId) || '',
@@ -142,7 +143,7 @@
       const id = value.slice(PREFIX.length);
       _mem.delete(id);
       try { if (typeof IDB !== 'undefined' && IDB.images) await IDB.images.delete(id); } catch (e) {}
-      try { const col = _orgCol(); if (col) await col.doc(id).delete(); } catch (e) {}
+      try { const col = _orgCol(); if (col) { await col.doc(id).delete(); if ((window.Sync && Sync.countWrite)) Sync.countWrite('images:delete', 1); } } catch (e) {}
     }
   };
 

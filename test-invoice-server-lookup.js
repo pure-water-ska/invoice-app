@@ -76,6 +76,9 @@ function makeSync(serverDocs, localArr, opts = {}) {
       }),
     },
     _deviceId: 'THIS-PC',
+    // Sync.countWrite exists on the real object (v1.0.270 write counter); a host
+    // without it throws inside the lifted method rather than testing anything.
+    countWrite() {},
     _serverIds: {}, _pullIds: {}, _lastSyncedRecs: {},
     _orgRef: () => ({
       collection: (n) => ({

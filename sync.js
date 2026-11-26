@@ -92,7 +92,68 @@ var Sync = {
     'wt_activity',
     'wt_logins',
     'wt_errors',
+    // The write counter MUST stay here. It exists to measure Firestore writes, so
+    // syncing it would make every measurement cause another write — circular, and
+    // capable of burning a daily quota by itself.
+    'wt_write_stats',
   ]),
+
+  // ── Firestore write counter (v1.0.270) ──────────────────────────────────────
+  // On 26 Nov 2026 the daily free write quota (20,000/day on Spark) ran out and the
+  // atomic invoice-number reservation failed with resource-exhausted — so 251169-005 and
+  // -006 went out on numbers that were checked free but never reserved, the exact shape
+  // that duplicated four numbers once before. Reads still worked, which is why only the
+  // write path failed.
+  //
+  // Modelling normal use gives TENS of writes a day, not 20,000, so reading the code was
+  // never going to find where they went: the candidates all costed out cheap (pricing
+  // batches 3,279 rules into ~32 product docs; delta sync seeds its fingerprints from the
+  // whole local array, so it does not re-push). The Firebase console reports a daily
+  // aggregate with no breakdown by collection, and does not attribute onSnapshot traffic
+  // at all. So the count has to come from the client.
+  //
+  // Every commit site reports its op count here. Totals are kept per day, per label, in
+  // a local-only key, and shown by ตรวจการเขียน in Settings.
+  _wstats: null,
+  _wstatsDirty: false,
+
+  _wstatsToday() { return new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10); },
+
+  _loadWstats() {
+    if (this._wstats) return this._wstats;
+    let v = null;
+    try { v = (typeof DB !== 'undefined') ? DB._getArray('wt_write_stats') : null; } catch (e) {}
+    this._wstats = (v && !Array.isArray(v)) ? v : {};
+    return this._wstats;
+  },
+
+  // n is the number of Firestore WRITE OPERATIONS, not the number of commits: a batch of
+  // 300 set() calls is 300 writes against the quota, which is the whole point of counting
+  // here rather than counting commits.
+  countWrite(label, n) {
+    try {
+      if (!n || n < 0) return;
+      const all = this._loadWstats();
+      const day = this._wstatsToday();
+      const d = all[day] || (all[day] = {});
+      d[label] = (d[label] || 0) + n;
+      d._total = (d._total || 0) + n;
+      // Keep a fortnight — enough to see a pattern, small enough to stay cheap.
+      const days = Object.keys(all).sort();
+      while (days.length > 14) delete all[days.shift()];
+      this._wstatsDirty = true;
+      if (!this._wstatsTimer) {
+        this._wstatsTimer = setTimeout(() => {
+          this._wstatsTimer = null;
+          if (!this._wstatsDirty) return;
+          this._wstatsDirty = false;
+          // setLocalOnly: cache + HDD/localStorage, never a push. NO_SYNC covers the key
+          // as well, so this is belt and braces on purpose.
+          try { if (typeof DB !== 'undefined') DB.setLocalOnly('wt_write_stats', this._wstats); } catch (e) {}
+        }, 4000);
+      }
+    } catch (e) {}
+  },
 
   // ── Proportional mass-delete guard for the per-record sync modules (v1.0.239) ──
   // The >5 guard in _writeKey only covers COLLECTIONS (invoices/payments). Customers,
@@ -216,9 +277,9 @@ var Sync = {
       let batch = this._db.batch(), n = 0;
       for (const id of ids) {
         batch.delete(col.doc(id));
-        if (++n >= 450) { await batch.commit(); batch = this._db.batch(); n = 0; }
+        if (++n >= 450) { await batch.commit(); this.countWrite('invoices:sweep-delete', n); batch = this._db.batch(); n = 0; }
       }
-      if (n > 0) await batch.commit();
+      if (n > 0) { await batch.commit(); this.countWrite('invoices:sweep-delete', n); }
       try { sessionStorage.setItem(this._sweepKey, '1'); } catch {}
       try {
         DB.logError('PAGE-SWEEP',
@@ -1232,6 +1293,7 @@ var Sync = {
       if (Array.isArray(val)) {
         // ── Array document: replace the whole `d` field ──────────────────
         // Arrays have no meaningful sub-key identity — replace entirely.
+        this.countWrite('doc:' + docName, 1);
         await docRef.set({
           d:  val,
           ts: firebase.firestore.FieldValue.serverTimestamp(),
@@ -1255,10 +1317,12 @@ var Sync = {
           updates[`d.${k}`] = v;
         }
         try {
+          this.countWrite('doc:' + docName, 1);
           await docRef.update(updates);
         } catch (e) {
           if (e.code === 'not-found') {
             // Document doesn't exist yet — create it with the full value
+            this.countWrite('doc:' + docName, 1);
             await docRef.set({ d: val, ts: firebase.firestore.FieldValue.serverTimestamp(), by: this._deviceId });
           } else { throw e; }
         }
@@ -1400,7 +1464,7 @@ var Sync = {
       const emitProg = () => {
         try { window.dispatchEvent(new CustomEvent('sync:writeprogress', { detail: { key, done: doneUp, total: totalUp } })); } catch (e) {}
       };
-      const commit = async () => { await batch.commit(); batch = this._db.batch(); ops = 0; bytes = 0; emitProg(); };
+      const commit = async () => { await batch.commit(); this.countWrite(colName, ops); batch = this._db.batch(); ops = 0; bytes = 0; emitProg(); };
       if (totalUp > 0) emitProg();
 
       // ── Cap batches by SIZE as well as op count ──────────────────────────
@@ -1431,6 +1495,7 @@ var Sync = {
 
       if (ops > 0) {
         await batch.commit();
+        this.countWrite(colName, ops);
         emitProg();
         // Extend the ignore window after the commit so the listener skips
         // our own echo (covers both the upserts and the deletes above).
@@ -1896,7 +1961,7 @@ var Sync = {
                   toSync      = localOnly.filter(r => !knownServerIds.has(r.id));
                   toKeepLocal = localOnly.filter(r =>  knownServerIds.has(r.id));
                   for (const rec of toSync) {
-                    try { await base.collection(colName).doc(rec.id).set({ ...rec, _by: this._deviceId, _ts: Date.now() }); this._serverIds[colName].add(rec.id); } catch {}
+                    try { await base.collection(colName).doc(rec.id).set({ ...rec, _by: this._deviceId, _ts: Date.now() }); this.countWrite(colName + ':pull-repush', 1); this._serverIds[colName].add(rec.id); } catch {}
                   }
                   if (toSync.length) this._saveServerIds(colName);
                 } else {
@@ -2054,7 +2119,7 @@ var Sync = {
 
     const col = this._orgRef().collection(colName);
     let batch = this._db.batch(), ops = 0, pushed = 0;
-    const flush = async () => { if (ops) { await batch.commit(); batch = this._db.batch(); ops = 0; } };
+    const flush = async () => { if (ops) { await batch.commit(); this.countWrite(colName + ':push-missing', ops); batch = this._db.batch(); ops = 0; } };
     for (const r of recs) {
       const { _by, _ts, _byName, ...rec } = r;
       batch.set(col.doc(r.id), {
@@ -2977,6 +3042,7 @@ var Sync = {
     const batch = this._db.batch();
     ids.forEach(id => batch.delete(col.doc(id)));
     await batch.commit();          // awaited, NOT fire-and-forget — the caller reports failure
+    this.countWrite('invoices:edit-delete', ids.length);
     ids.forEach(id => { if (this._serverIds.invoices) this._serverIds.invoices.delete(id); });
     this._saveServerIds('invoices');
     return ids.length;
@@ -3096,6 +3162,7 @@ var Sync = {
     const floor = Math.max(srvMax, localFloorRun || 0);
     const ref = this._orgRef().collection('inv_counters').doc(dateKey);
     try {
+      this.countWrite('inv_counters', 1);
       const run = await this._db.runTransaction(async (tx) => {
         const snap = await tx.get(ref);
         const cur  = (snap.exists && Number(snap.data().run)) || 0;

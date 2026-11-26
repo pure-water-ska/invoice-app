@@ -20,6 +20,7 @@ const DB = {
     CAP_DEDUCTIONS:       'wt_cap_deductions',
     PRICE_HISTORY:        'wt_price_history',
     ERRORS:               'wt_errors',
+    WRITE_STATS:          'wt_write_stats',
     RETURNS:              'wt_returns'
   },
 

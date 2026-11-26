@@ -451,7 +451,7 @@
             for (const op of byPid.get(pid)) rules[op.ruleId] = op.rule ? op.rule : del;
             batch.set(col.doc(pid), { productId: pid, rules, ...this._meta() }, { merge: true });
           }
-          try { await batch.commit(); }
+          try { await batch.commit(); if ((window.Sync && Sync.countWrite)) Sync.countWrite('pricing_byproduct', chunk.length); }
           catch (e) { failed = true; this._noteFailure(chunk.flatMap(pid => byPid.get(pid)), e); throw e; }
           const cur = this._loadQueue(), base = this._ensureBaseline();
           for (const pid of chunk) for (const op of byPid.get(pid)) {
@@ -495,11 +495,12 @@
       let batch = this._db.batch(), ops = 0;
       for (const pid of groups.keys()) {
         batch.set(col.doc(pid), { productId: pid, rules: groups.get(pid) || {}, ...this._meta() }, { merge: false });
-        if (++ops >= 450) { await batch.commit(); batch = this._db.batch(); ops = 0; }
+        if (++ops >= 450) { await batch.commit(); if ((window.Sync && Sync.countWrite)) Sync.countWrite('pricing_byproduct:bulk', ops); batch = this._db.batch(); ops = 0; }
       }
       if (ops > 0) {
         this._logLine('bootstrap: committing ' + groups.size + ' product doc(s) …');
         await batch.commit();
+        if ((window.Sync && Sync.countWrite)) Sync.countWrite('pricing_byproduct:bulk', ops);
         this._logLine('bootstrap: commit OK');
       }
     },

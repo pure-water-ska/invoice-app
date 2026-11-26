@@ -1913,9 +1913,9 @@ async function clearAllData() {
           let batch = Sync._db.batch(), ops = 0;
           for (const d of snap.docs) {
             batch.delete(d.ref);
-            if (++ops >= 490) { await batch.commit(); batch = Sync._db.batch(); ops = 0; }
+            if (++ops >= 490) { await batch.commit(); if ((window.Sync && Sync.countWrite)) Sync.countWrite('admin:bulk', ops); batch = Sync._db.batch(); ops = 0; }
           }
-          if (ops > 0) await batch.commit();
+          if (ops > 0) { await batch.commit(); if ((window.Sync && Sync.countWrite)) Sync.countWrite('admin:bulk', ops); }
         });
 
       await Promise.all([...docClears, ...colClears]);
@@ -2047,6 +2047,75 @@ function _hddPaint(lines) {
   wrap.appendChild(btn);
   out.appendChild(wrap);
 }
+// ── ตรวจการเขียน (v1.0.270) ─────────────────────────────────────────────────
+// Where the daily Firestore write quota goes, counted on the client.
+//
+// On 26 Nov 2026 the 20,000/day Spark write quota ran out and the invoice-number
+// reservation failed with resource-exhausted, so two invoices went out on numbers that
+// were checked free but never reserved. Reads were unaffected, which is why only the
+// write path broke.
+//
+// Reading the code could not find the cause: modelled normal use costs TENS of writes a
+// day. Pricing batches 3,279 rules into ~32 product docs; delta sync seeds its
+// fingerprints from the whole local array so it does not re-push; the per-record modules
+// diff before writing. Every candidate came out cheap. And the Firebase console reports
+// only a daily aggregate — no breakdown by collection, and it does not attribute
+// onSnapshot traffic at all. So the count has to come from the client, which is what
+// Sync.countWrite now does at every commit site.
+//
+// This is a REPORT, not a probe: it performs no writes of its own (that would be
+// self-defeating), and the counter key is local-only and in Sync.NO_SYNC.
+function runWriteStatsCheck() {
+  const ver = (typeof APP_VERSION !== 'undefined' && APP_VERSION.version) ? APP_VERSION.version : '?';
+  const L = ['=== ตรวจการเขียน Firestore · v' + ver + ' ==='];
+  L.push('โควต้าฟรี (Spark): เขียนได้ 20,000 ครั้ง/วัน · รีเซ็ตเที่ยงคืนเวลาแปซิฟิก');
+  try {
+    if (window.Sync && typeof Sync._quotaResetAt === 'function') {
+      const at = Sync._quotaResetAt(Date.now());
+      if (at) L.push('รีเซ็ตรอบถัดไป: ' + new Date(at).toLocaleString('th-TH'));
+    }
+  } catch (e) {}
+  L.push('');
+
+  let all = null;
+  try { all = (typeof DB !== 'undefined') ? DB._getArray('wt_write_stats') : null; } catch (e) {}
+  if (!all || Array.isArray(all) || !Object.keys(all).length) {
+    L.push('ยังไม่มีข้อมูล — การนับเริ่มที่ v1.0.270');
+    L.push('ใช้งานตามปกติ 1 วันแล้วกดปุ่มนี้อีกครั้ง จะเห็นว่าโควต้าหมดไปกับอะไร');
+    _hddPaint(L); return;
+  }
+
+  const days = Object.keys(all).sort().reverse();
+  for (const day of days) {
+    const d = all[day] || {};
+    const total = d._total || 0;
+    const pct = Math.round(total / 20000 * 100);
+    L.push(day + ' — รวม ' + total.toLocaleString() + ' ครั้ง (' + pct + '% ของโควต้า)' +
+      (total >= 20000 ? '  ⚠️ เต็มโควต้า' : ''));
+    // Biggest first: the point is to name the one path that dominates.
+    Object.keys(d).filter(k => k !== '_total').sort((a, b) => d[b] - d[a]).forEach(k => {
+      L.push('    ' + String(d[k]).padStart(7) + '  ' + k);
+    });
+    L.push('');
+  }
+
+  // A per-day total far above what the day's work can explain is the signal worth acting
+  // on; the label beside it says which path to look at.
+  const today = all[days[0]] || {};
+  const biggest = Object.keys(today).filter(k => k !== '_total')
+    .sort((a, b) => today[b] - today[a])[0];
+  L.push('สรุป:');
+  if (!biggest) {
+    L.push('  ยังไม่มีการเขียนวันนี้');
+  } else if ((today._total || 0) >= 20000) {
+    L.push('  ⚠️ โควต้าวันนี้เต็ม — ตัวที่กินมากสุดคือ "' + biggest + '" (' + today[biggest].toLocaleString() + ')');
+  } else {
+    L.push('  ตัวที่กินมากสุดวันนี้: "' + biggest + '" (' + today[biggest].toLocaleString() + ' ครั้ง)');
+  }
+  L.push('  หมายเหตุ: นับจากเครื่องนี้เท่านั้น — เครื่องอื่นใช้โควต้าเดียวกันแต่ไม่ถูกนับที่นี่');
+  _hddPaint(L);
+}
+
 // ── ตรวจจองเลขที่ (v1.0.269) ────────────────────────────────────────────────
 // An ACTIVE round-trip test of the atomic invoice-number reservation, in the style of
 // ตรวจ HDD — which is what finally surfaced the fs scope bug after eight passive
@@ -2638,9 +2707,9 @@ async function forceDedupeCustomers() {
     let batch = Sync._db.batch(), ops = 0, deleted = 0;
     for (const id of dropIds) {
       batch.delete(col.doc(id)); ops++; deleted++;
-      if (ops >= 400) { await batch.commit(); batch = Sync._db.batch(); ops = 0; L.push('deleted ' + deleted + '…'); paint(); }
+      if (ops >= 400) { await batch.commit(); if ((window.Sync && Sync.countWrite)) Sync.countWrite('admin:rebaseline-delete', ops); batch = Sync._db.batch(); ops = 0; L.push('deleted ' + deleted + '…'); paint(); }
     }
-    if (ops > 0) await batch.commit();
+    if (ops > 0) { await batch.commit(); if ((window.Sync && Sync.countWrite)) Sync.countWrite('admin:bulk', ops); }
     L.push('deleted ' + deleted + ' duplicate docs from server');
 
     // Set local to the deduped canonical set (strip sync meta fields)
@@ -2674,9 +2743,9 @@ async function purgeAllCustomers() {
     let batch = Sync._db.batch(), ops = 0, deleted = 0;
     for (const d of snap.docs) {
       batch.delete(d.ref); ops++; deleted++;
-      if (ops >= 400) { await batch.commit(); batch = Sync._db.batch(); ops = 0; L.push('deleted ' + deleted + '…'); paint(); }
+      if (ops >= 400) { await batch.commit(); if ((window.Sync && Sync.countWrite)) Sync.countWrite('admin:rebaseline-delete', ops); batch = Sync._db.batch(); ops = 0; L.push('deleted ' + deleted + '…'); paint(); }
     }
-    if (ops > 0) await batch.commit();
+    if (ops > 0) { await batch.commit(); if ((window.Sync && Sync.countWrite)) Sync.countWrite('admin:bulk', ops); }
     L.push('deleted ' + deleted + ' docs from ' + colName); paint();
 
     // 2) Delete the legacy whole-array document data/customers
@@ -2987,9 +3056,9 @@ async function runRebaseline() {
     for (const d of dsnap.docs) {
       if (KEEP_DOCS.has(d.id)) continue;
       batch.delete(d.ref); ops++; ddel++;
-      if (ops >= 400) { await batch.commit(); batch = Sync._db.batch(); ops = 0; }
+      if (ops >= 400) { await batch.commit(); if ((window.Sync && Sync.countWrite)) Sync.countWrite('admin:bulk', ops); batch = Sync._db.batch(); ops = 0; }
     }
-    if (ops > 0) await batch.commit();
+    if (ops > 0) { await batch.commit(); if ((window.Sync && Sync.countWrite)) Sync.countWrite('admin:bulk', ops); }
     grand += ddel;
     L[L.length - 1] = `✓ เอกสารข้อมูล — ลบ ${ddel} docs (เก็บบัญชีผู้ใช้ไว้)`; paint();
 
