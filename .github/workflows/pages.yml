@@ -5,21 +5,37 @@ on:
     branches: [main]
   workflow_dispatch:   # allow manual trigger
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
+# Scoped per job rather than granted to both: `build` only reads the repo, and the
+# Pages write + OIDC token belong to `deploy` alone.
+permissions: {}
 
 concurrency:
   group: "pages"
   cancel-in-progress: false
 
+# ── Why two jobs (v1.0.266) ──────────────────────────────────────────────────
+# This used to be ONE job doing upload-pages-artifact then deploy-pages back to back.
+# deploy-pages asks the API for the artifact's metadata, and that read is not
+# immediately consistent with the upload that just finished: on 25 Nov 2026 three
+# consecutive runs failed with "No artifacts named github-pages were found", 277 ms
+# after the upload step had logged "successfully finalized. Artifact ID 14996319600".
+# The artifact was there — a later query returned it, unexpired — and the action has no
+# retry for an empty result, so it simply gave up.
+#
+# A re-run is NOT the fix and makes it worse: re-running the failed job re-runs the
+# upload too, so the run ends up holding two artifacts of the same name and deploy then
+# fails with "Multiple artifacts... count is 2". Trigger a fresh run instead.
+#
+# Splitting is GitHub's own documented shape for Pages, which is why most repos never
+# see this: the job boundary — runner teardown, artifact finalisation, a new runner
+# starting — takes seconds rather than milliseconds, so the metadata read is no longer
+# racing its own write. This removes the race rather than out-waiting it; a `sleep`
+# tuned today would be a guess that fails again on a slower day.
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+  build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -57,15 +73,18 @@ jobs:
             echo "No GOOGLE_CLIENT_ID secret found and no drive-config.js in repo — Google Drive disabled"
           fi
 
-      # 3. Update Service Worker cache version with build timestamp
+      # 4. Update Service Worker cache version with build timestamp
       #    → ทุก deploy ใหม่จะ bust cache เก่า, browser จะดาวน์โหลดไฟล์ใหม่ทั้งหมด
+      #    NOTE: web deploy only. The desktop bundle ships whatever is committed, so its
+      #    cache name never changes between releases — see the ?v= busting in
+      #    scripts/bump-version.js, which is what covers the desktop app.
       - name: Update SW cache version
         run: |
           BUILD_TS=$(date -u +%Y%m%dT%H%M%S)
           sed -i "s/const CACHE_VERSION  = .*/const CACHE_VERSION  = '${BUILD_TS}';/" sw.js
           echo "Cache version: ${BUILD_TS}"
 
-      # 4. Upload and deploy
+      # 5. Package the site for Pages
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
@@ -74,6 +93,19 @@ jobs:
         with:
           path: '.'
 
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
       - name: Deploy to GitHub Pages
-        id: deploy
+        id: deployment
         uses: actions/deploy-pages@v4
