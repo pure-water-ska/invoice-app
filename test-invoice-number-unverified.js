@@ -127,7 +127,13 @@ console.log('\nAtomic returns null, checked cannot verify — warned, and both r
   };
   const r = await allocate({ sync });
   t('warned', unverifiedAlerts(r.alerts).length === 1);
-  t('records that atomic returned null', /atomic returned null/.test(r.errors[0].detail.reason), r.errors[0].detail.reason);
+  // v1.0.269: the caller no longer logs the bare "atomic returned null" — that one string
+  // covered five causes needing five different fixes. It reports Sync._lastAtomicWhy.
+  // This stub sets no reason, so the explicit fallback must still say so rather than
+  // logging an empty cause.
+  t('records that the atomic path failed', /^atomic: /.test(r.errors[0].detail.reason), r.errors[0].detail.reason);
+  t('…and says plainly that no reason was recorded',
+    /no reason recorded/.test(r.errors[0].detail.reason));
   t('records that the check could not verify', /could not verify/.test(r.errors[0].detail.reason));
 }
 

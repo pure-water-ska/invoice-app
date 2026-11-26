@@ -2047,6 +2047,88 @@ function _hddPaint(lines) {
   wrap.appendChild(btn);
   out.appendChild(wrap);
 }
+// ── ตรวจจองเลขที่ (v1.0.269) ────────────────────────────────────────────────
+// An ACTIVE round-trip test of the atomic invoice-number reservation, in the style of
+// ตรวจ HDD — which is what finally surfaced the fs scope bug after eight passive
+// symptom-fixes had missed it.
+//
+// Why it exists: the user hit "เลขที่ … ตรวจแล้วว่าว่าง แต่ไม่ได้ถูกจอง" on 251169-005 and
+// 251169-006. A number checked free but never reserved is the shape that duplicated four
+// numbers once already — another device can legitimately be handed the same one. The log
+// said only "atomic returned null", which was true of five different causes needing five
+// different fixes. Per memory, the atomic path has never been VERIFIED against live
+// Firestore at all, so "it has never once worked" is a live possibility.
+//
+// It writes to inv_counters/__probe — deliberately the same collection, so the rules path
+// under test is the real one, but a key no invoice ever reads. No real counter moves and
+// no invoice number is consumed.
+async function runInvNumCheck() {
+  const ver = (typeof APP_VERSION !== 'undefined' && APP_VERSION.version) ? APP_VERSION.version : '?';
+  const L = ['=== ตรวจการจองเลขที่ · v' + ver + ' ==='];
+  const paint = () => _hddPaint(L);
+  paint();
+
+  if (!window.Sync) { L.push('❌ Sync ไม่ได้โหลด'); paint(); return; }
+  L.push('Sync.ready: ' + (Sync.ready ? '✅ true' : '❌ false — จองไม่ได้ทุกกรณี'));
+  L.push('org: orgs/' + (Sync._orgId || '?'));
+  L.push('runTransaction: ' + (Sync._db && typeof Sync._db.runTransaction === 'function'
+    ? '✅ มี' : '❌ ไม่มี — แปลว่าไม่เคยจองสำเร็จเลยบนเครื่องนี้'));
+  paint();
+  if (!Sync.ready || !Sync._db) { L.push(''); L.push('สรุป: sync ยังไม่พร้อม — ลองใหม่เมื่อเชื่อมต่อแล้ว'); paint(); return; }
+
+  // 1) The server floor read. Uses { source: 'server' }, so it fails when the server is
+  //    unreachable even though a cached read would still answer — the asymmetry that
+  //    makes "checked but not reserved" possible.
+  const prefix = DB._invNumParts(new Date().toISOString().slice(0, 10)).prefix;
+  L.push('');
+  L.push('[1] อ่านเลขสูงสุดจาก server (prefix ' + prefix + ')...');
+  paint();
+  const floor = await Sync._serverMaxRunForPrefix(prefix);
+  L.push(floor === null
+    ? '    ❌ ล้มเหลว: ' + (Sync._lastFloorWhy || 'ไม่ทราบสาเหตุ')
+    : '    ✅ สูงสุด = ' + floor);
+  paint();
+
+  // 2) The transaction itself, against the probe key.
+  L.push('');
+  L.push('[2] ทดลองเขียน transaction ที่ inv_counters/__probe ...');
+  paint();
+  let txWhy = '', txOk = false;
+  try {
+    const got = await Sync._db.runTransaction(async (tx) => {
+      const ref = Sync._orgRef().collection('inv_counters').doc('__probe');
+      const snap = await tx.get(ref);
+      const cur = (snap.exists && Number(snap.data().run)) || 0;
+      tx.set(ref, { run: cur + 1, at: new Date().toISOString(), by: Sync._deviceId || '', probe: true }, { merge: true });
+      return cur + 1;
+    });
+    txOk = true;
+    L.push('    ✅ สำเร็จ — เขียนได้ (run=' + got + ')');
+  } catch (e) {
+    txWhy = ((e && e.code) || 'failed') + (e && e.message ? ': ' + String(e.message).slice(0, 140) : '');
+    L.push('    ❌ ล้มเหลว: ' + txWhy);
+  }
+  paint();
+
+  L.push('');
+  L.push('สรุป:');
+  if (txOk && floor !== null) {
+    L.push('  ✅ การจองเลขที่ทำงานได้ตามปกติ — ถ้ายังเจอ "จองไม่สำเร็จ" ให้กดปุ่มนี้ตอนที่เพิ่งเจอ');
+  } else if (!txOk && /permission-denied/.test(txWhy)) {
+    L.push('  ❌ Firestore rules ไม่อนุญาตให้เขียน inv_counters');
+    L.push('     → แปลว่าการจองเลขที่ไม่เคยทำงานเลย ต้องแก้ rules ที่ Firebase Console');
+  } else if (!txOk && /unavailable|failed-precondition|deadline/.test(txWhy)) {
+    L.push('  ⚠️ ติดต่อ server ไม่ได้ — transaction ใช้ cache ไม่ได้ ต้องออนไลน์จริง');
+    L.push('     → แต่การ "ตรวจว่าเลขว่าง" อ่านจาก cache ได้ จึงผ่านทั้งที่จองไม่ได้');
+  } else if (!txOk) {
+    L.push('  ❌ จองไม่สำเร็จ: ' + txWhy);
+  } else {
+    L.push('  ⚠️ เขียนได้ แต่อ่านเลขสูงสุดจาก server ไม่ได้: ' + (Sync._lastFloorWhy || '?'));
+    L.push('     → จะ fallback ไปใช้เลขที่ไม่ได้จอง');
+  }
+  paint();
+}
+
 async function runHddCheck() {
   const ver = (typeof APP_VERSION !== 'undefined' && APP_VERSION.version) ? APP_VERSION.version : '?';
   const L = ['=== ตรวจ HDD (เดสก์ท็อป) · v' + ver + ' ==='];

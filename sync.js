@@ -3018,8 +3018,17 @@ var Sync = {
   // Forced to source:'server' — a cached read could report a max that is too LOW, which
   // would seed the counter below numbers already in use. Throws offline, which is correct
   // here: the caller must fall back rather than guess.
+  // Records WHY it could not answer in this._lastFloorWhy (v1.0.269). Returning a bare
+  // null told the caller nothing, and the real error went only to console.warn — which
+  // is invisible in a release Tauri build. Note the deliberate { source: 'server' }:
+  // this read FAILS when the server is unreachable, while reserveFreeInvoiceNumber can
+  // still answer from cache. So "atomic failed but the check verified" can mean the
+  // server was never asked at all, and that distinction has to be visible.
   async _serverMaxRunForPrefix(prefix) {
-    if (!this.ready || !this._db || !prefix) return null;
+    this._lastFloorWhy = '';
+    if (!this.ready) { this._lastFloorWhy = 'sync not ready'; return null; }
+    if (!this._db)   { this._lastFloorWhy = 'no firestore handle'; return null; }
+    if (!prefix)     { this._lastFloorWhy = 'no prefix'; return null; }
     try {
       const snap = await this._orgRef().collection('invoices')
         .where('invoiceNumber', '>=', prefix)
@@ -3034,6 +3043,10 @@ var Sync = {
       });
       return max;
     } catch (e) {
+      // e.code is the useful part — 'permission-denied' and 'unavailable' mean entirely
+      // different things here and need different fixes.
+      this._lastFloorWhy = 'server read ' + ((e && e.code) || 'failed') +
+        (e && e.message ? ': ' + String(e.message).slice(0, 80) : '');
       console.warn('[Sync] _serverMaxRunForPrefix failed:', e.message);
       return null;
     }
@@ -3062,10 +3075,24 @@ var Sync = {
   // collection, or contention. Callers MUST fall back: failing to reserve must never stop
   // an invoice from being saved.
   async reserveInvoiceNumberAtomic(dateKey, prefix, localFloorRun = 0) {
-    if (!this.ready || !this._db || !dateKey || !prefix) return null;
-    if (typeof this._db.runTransaction !== 'function') return null;
+    // FIVE different conditions used to return a bare null, and the caller logged every
+    // one of them as the same four words, "atomic returned null". That is what the user
+    // saw on 251169-005 and 251169-006 — a number checked free but never reserved, which
+    // is the shape that duplicated four numbers once already — with nothing to say
+    // whether the cause was rules, connectivity, a missing API or the floor read.
+    // this._lastAtomicWhy now names it, and the caller puts it in the log and the
+    // on-screen warning. Diagnostic only: every fallback behaves exactly as before.
+    const fail = (why) => { this._lastAtomicWhy = why; return null; };
+    this._lastAtomicWhy = '';
+    if (!this.ready)  return fail('sync not ready');
+    if (!this._db)    return fail('no firestore handle');
+    if (!dateKey)     return fail('no dateKey');
+    if (!prefix)      return fail('no prefix');
+    // Permanent if it ever happens: it would mean this Firestore build cannot do
+    // transactions at all, so NO invoice has ever been reserved on this device.
+    if (typeof this._db.runTransaction !== 'function') return fail('runTransaction unavailable in this firestore build');
     const srvMax = await this._serverMaxRunForPrefix(prefix);
-    if (srvMax === null) return null;                    // no trustworthy floor → fall back
+    if (srvMax === null) return fail('no server floor — ' + (this._lastFloorWhy || 'unknown'));
     const floor = Math.max(srvMax, localFloorRun || 0);
     const ref = this._orgRef().collection('inv_counters').doc(dateKey);
     try {
@@ -3076,10 +3103,19 @@ var Sync = {
         tx.set(ref, { run: next, at: new Date().toISOString(), by: this._deviceId || '' }, { merge: true });
         return next;
       });
+      // No clear needed here: the reason is reset at entry and only fail() ever sets it,
+      // so reaching this line already means it is empty. (A redundant clear here was
+      // removed after a mutation test could not distinguish its presence from absence —
+      // a line no test can justify is a line that may as well not exist.)
       return { number: `${prefix}${String(run).padStart(3, '0')}`, run };
     } catch (e) {
+      // The code is what identifies the fix: 'permission-denied' → Firestore rules do
+      // not allow inv_counters (and the reservation has then NEVER worked);
+      // 'unavailable'/'failed-precondition' → transactions need connectivity and do not
+      // run against the offline cache; 'aborted' → contention, which is retryable.
       console.warn('[Sync] reserveInvoiceNumberAtomic failed:', e.message);
-      return null;
+      return fail('transaction ' + ((e && e.code) || 'failed') +
+        (e && e.message ? ': ' + String(e.message).slice(0, 100) : ''));
     }
   },
 
