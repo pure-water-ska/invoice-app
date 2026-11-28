@@ -169,7 +169,7 @@
 
 <script src="./vendor/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-<script src="utils.js?v=1.0.270"></script><script src="db.js?v=1.0.270"></script><script src="auth.js?v=1.0.270"></script><script src="nav.js?v=1.0.270"></script><script src="idb.js?v=1.0.270"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.272"></script><script src="db.js?v=1.0.272"></script><script src="auth.js?v=1.0.272"></script><script src="nav.js?v=1.0.272"></script><script src="idb.js?v=1.0.272"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -777,8 +777,14 @@ function render() {
 
   // Render pagination bar
   const pg = document.getElementById('invPagination');
-  if (totalPages <= 1) { pg.style.display = 'none'; return; }
-  pg.style.display = '';
+  // Bootstrap's .d-flex is "display: flex !important", which BEATS a plain inline
+  // display:none — so once the bar has been shown (style.display = '' clears the
+  // original display:none!important attribute) it could never be hidden again, and a
+  // filter narrowing the list to one page left a stale "จาก 904 รายการ · หน้า 1 / 31"
+  // under a short table. Found in the browser; no source-level check would show it.
+  // setProperty with 'important' is what actually wins against the utility class.
+  if (totalPages <= 1) { pg.style.setProperty('display', 'none', 'important'); return; }
+  pg.style.setProperty('display', 'flex', 'important');
   pg.innerHTML = `
     <span>แสดง ${(_invPage-1)*INV_PAGE_SIZE+1}–${Math.min(_invPage*INV_PAGE_SIZE, list.length)} จาก ${list.length} รายการ</span>
     <div class="d-flex gap-1 align-items-center">

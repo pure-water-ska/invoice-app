@@ -3107,7 +3107,7 @@ async function runCustomerAnalysis() {
   L.push('=== Customer / delete analysis ==='); paint();
   try {
     if (typeof Sync === 'undefined' || !Sync._db || typeof DB === 'undefined') { L.push('❌ not ready'); paint(); return; }
-    L.push('app version : ' + (window.APP_VERSION ? APP_VERSION.version : '?'));
+    L.push('app version : ' + (typeof APP_VERSION !== 'undefined' ? APP_VERSION.version : '?'));
     L.push('deviceId    : ' + Sync._deviceId);
     const colName = 'customers_v2';
     L.push('customers col: ' + colName);
@@ -4125,7 +4125,7 @@ function _cpPaintPlan(body) {
       '<tr><td class="text-muted">ราคากลาง (ทุกลูกค้า)</td><td class="text-end">' + n(s.std) + ' รายการ</td></tr>' +
       '<tr><td class="text-muted">ใบกำกับ / การชำระ / สินค้า / ผู้ใช้</td><td class="text-end">ไม่แตะต้อง</td></tr>' +
     '</tbody></table>' +
-    '<div class="alert alert-warning small py-2">ให้ทุกเครื่องอัปเดตเป็น v' + (window.APP_VERSION ? APP_VERSION.version : '1.0.239') +
+    '<div class="alert alert-warning small py-2">ให้ทุกเครื่องอัปเดตเป็น v' + (typeof APP_VERSION !== 'undefined' ? APP_VERSION.version : '1.0.239') +
       ' ก่อน แล้วค่อยกดปุ่มนี้ ไม่เช่นนั้นเครื่องที่ยังค้างอยู่อาจลบซ้ำอีก</div>' +
     '<button class="btn btn-danger btn-sm" id="cpRestoreBtn" onclick="runCustPriceRestore()">' +
       '<i class="bi bi-database-fill-up me-1"></i>กู้คืน ' + n(s.custTo) + ' ลูกค้า และ ' + n(s.priceTo) + ' ราคา</button>';

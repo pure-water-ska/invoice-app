@@ -142,6 +142,7 @@
         <tbody id="paymentTable"><tr><td colspan="6" class="text-center text-muted py-3">ยังไม่มีข้อมูล</td></tr></tbody>
       </table>
     </div>
+    <div id="payPagination" class="d-flex justify-content-between align-items-center px-3 py-2 border-top small text-muted" style="display:none!important"></div>
   </div>
 </div>
 
@@ -736,7 +737,7 @@
 <script src="./vendor/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="utils.js?v=1.0.270"></script><script src="db.js?v=1.0.270"></script><script src="auth.js?v=1.0.270"></script><script src="nav.js?v=1.0.270"></script><script src="idb.js?v=1.0.270"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
+<script src="utils.js?v=1.0.272"></script><script src="db.js?v=1.0.272"></script><script src="auth.js?v=1.0.272"></script><script src="nav.js?v=1.0.272"></script><script src="idb.js?v=1.0.272"></script><script src="image-store.js?v=1.0.162"></script><script src="bedate.js"></script>
 <script>
 const session = Auth.require();
 DB.init();
@@ -759,6 +760,7 @@ function clearFilters() {
     el.value = '';
     if (el._flatpickr) el._flatpickr.clear();
   });
+  _payResetPage();
   render();
 }
 
@@ -808,8 +810,29 @@ function populatePaymentFilters() {
 
 function setSort(col) {
   if (_sortCol === col) _sortDir = -_sortDir; else { _sortCol = col; _sortDir = -1; }
+  // Back to page 1: re-sorting reorders the whole list, so staying on page 12 would
+  // show a slice that has nothing to do with what was there a moment ago.
+  _payPage = 1;
   render();
 }
+
+// ── Pagination (v1.0.272) ───────────────────────────────────────────────────
+// render() used to write every matching invoice into the table — ~1,050 rows rebuilt on
+// every keystroke in the search box, which is the same cost that made pricing.html take
+// ~4 s per render before it was paginated. Mirrors invoices.html exactly: same page
+// size, same markup, same Thai wording, hidden when there is only one page.
+//
+// NOTE this is DOM cost only. It does not reduce Firestore reads — the listener has
+// already pulled the collection by the time any of this runs, so "show fewer rows" is
+// never a quota fix.
+const PAY_PAGE_SIZE = 30;
+let _payPage = 1;
+
+// Anything that changes WHICH rows match must reset the page, or you can be left on a
+// page that no longer exists. invoices.html resets in eight places; these are the
+// equivalents here. Saving a payment deliberately does NOT reset — paying several
+// invoices in a row should not bounce you back to the start each time.
+function _payResetPage() { _payPage = 1; }
 let pendingOverpayData = null;
 let payImages = { transfer: '', cheque: '', signed: '' };
 let _pendingPaymentData = null;   // holds data (array) while waiting for date confirmation
@@ -1001,11 +1024,11 @@ async function _uploadPaymentImages(p) {
 
 // Re-render after sync so newly-imported invoices (PDF/Excel) appear
 // even if their Firestore push was in-flight when the page first loaded.
-window.addEventListener('sync:ready', () => render());
+window.addEventListener('sync:ready', () => { _payResetPage(); render(); });
 
 // Re-render when a remote device pushes payment/invoice changes
 window.addEventListener('sync:updated', (e) => {
-  if (['wt_payments', 'wt_invoices', 'wt_customers'].includes(e.detail?.key)) render();
+  if (['wt_payments', 'wt_invoices', 'wt_customers'].includes(e.detail?.key)) render();   // keeps the page: a remote edit should not move the user
 });
 window.addEventListener('DOMContentLoaded', () => {
   // Init modals and date pickers first (sync, no data needed)
@@ -1044,12 +1067,12 @@ window.addEventListener('DOMContentLoaded', () => {
       if (cust) { document.getElementById('filterCustomer').value = cust.name; document.getElementById('filterCustomerId').value = cust.id; }
     }
 
-    document.getElementById('filterStatus').addEventListener('input', render);
+    document.getElementById('filterStatus').addEventListener('input', () => { _payResetPage(); render(); });
     ['filterDestAcct','filterDestBank','filterSourceBank'].forEach(id =>
-      document.getElementById(id).addEventListener('change', render));
-    document.getElementById('searchInv').addEventListener('input', Utils.debounce(render, 200));
-    BEDate.byId('filterFrom', { onChange: render });
-    BEDate.byId('filterTo',   { onChange: render });
+      document.getElementById(id).addEventListener('change', () => { _payResetPage(); render(); }));
+    document.getElementById('searchInv').addEventListener('input', Utils.debounce(() => { _payResetPage(); render(); }, 200));
+    BEDate.byId('filterFrom', { onChange: () => { _payResetPage(); render(); } });
+    BEDate.byId('filterTo',   { onChange: () => { _payResetPage(); render(); } });
     render();
   });
 });
@@ -1082,13 +1105,14 @@ function _fcFilter() {
   const q = document.getElementById('filterCustomer').value.trim().toLowerCase();
   _fcRender(q ? _fcList.filter(c => c.name.toLowerCase().includes(q)) : _fcList);
   document.getElementById('filterCustomerId').value = ''; // typing invalidates the prior pick
-  if (!q) render(); // cleared → show all again
+  if (!q) { _payResetPage(); render(); } // cleared → show all again
 }
 function _fcClose() { const dd = document.getElementById('filterCustDropdown'); if (dd) dd.style.display = 'none'; _fcHi = -1; }
 function _fcSelect(id, name) {
   document.getElementById('filterCustomer').value   = name;
   document.getElementById('filterCustomerId').value = id;
   _fcClose();
+  _payResetPage();
   render();
 }
 function _fcKey(e) {
@@ -1357,10 +1381,22 @@ function render() {
       // row then never rendered, leaving a blank table instead of "ไม่พบรายการ". v1.0.253.
       hasOther: !!(q || fcId || fs || fDestAcct || fDestBank || fSrcBank),
     });
+    // This path returns before the pager is rendered below, so hide it here too —
+    // otherwise a filter that matches nothing leaves the previous result's
+    // "แสดง 1–30 จาก 1,047" sitting under an empty table.
+    const pgEmpty = document.getElementById('payPagination');
+    if (pgEmpty) pgEmpty.style.setProperty('display', 'none', 'important');
     return;
   }
 
-  tbody.innerHTML = list.map(inv => {
+  // Clamp before slicing: a filter that shrinks the list can leave _payPage past the
+  // end, which would render an empty table with rows that plainly exist.
+  const totalPages = Math.max(1, Math.ceil(list.length / PAY_PAGE_SIZE));
+  if (_payPage > totalPages) _payPage = totalPages;
+  if (_payPage < 1) _payPage = 1;
+  const pageList = list.slice((_payPage - 1) * PAY_PAGE_SIZE, _payPage * PAY_PAGE_SIZE);
+
+  tbody.innerHTML = pageList.map(inv => {
     const cust  = custMap[inv.customerId];
     const total = parseFloat(inv.totalAmount) || 0;
     const paid  = paidFor(inv);
@@ -1409,6 +1445,27 @@ function render() {
       </td>
     </tr>`;
   }).join('');
+
+  // Pagination bar — same shape as invoices.html's, hidden on a single page.
+  const pg = document.getElementById('payPagination');
+  if (!pg) return;
+  // Bootstrap's .d-flex is "display: flex !important", which BEATS a plain inline
+  // display:none — so once the bar has been shown (style.display = '' clears the
+  // original display:none!important attribute) it could never be hidden again, and a
+  // filter narrowing the list to one page left a stale "จาก 904 รายการ · หน้า 1 / 31"
+  // under a short table. Found in the browser; no source-level check would show it.
+  // setProperty with 'important' is what actually wins against the utility class.
+  if (totalPages <= 1) { pg.style.setProperty('display', 'none', 'important'); return; }
+  pg.style.setProperty('display', 'flex', 'important');
+  pg.innerHTML = `
+    <span>แสดง ${(_payPage-1)*PAY_PAGE_SIZE+1}–${Math.min(_payPage*PAY_PAGE_SIZE, list.length)} จาก ${list.length} รายการ</span>
+    <div class="d-flex gap-1 align-items-center">
+      <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_payPage=1;render()" ${_payPage===1?'disabled':''}>«</button>
+      <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_payPage--;render()" ${_payPage===1?'disabled':''}>‹</button>
+      <span class="px-2">หน้า ${_payPage} / ${totalPages}</span>
+      <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_payPage++;render()" ${_payPage===totalPages?'disabled':''}>›</button>
+      <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="_payPage=${totalPages};render()" ${_payPage===totalPages?'disabled':''}>»</button>
+    </div>`;
 }
 
 // ── Open modal ────────────────────────────────────────────────────────────────

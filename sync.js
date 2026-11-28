@@ -3274,7 +3274,10 @@ var Sync = {
       const msg = `<i class="bi ${T.icon} me-1"></i><strong>${A.verb}${T.label}</strong>`
                 + (name ? `: ${this._esc(name)}` : '')
                 + `<span style="opacity:.75;font-size:.85em">${who}</span>`;
-      if (window.Utils && Utils.showToast) Utils.showToast(msg, toastType);
+      // bare Utils — utils.js declares `const Utils`, so window.Utils is ALWAYS
+      // undefined (same gotcha as window.DB/IDB/Auth/APP_VERSION). This guard was
+      // always false, so cross-device activity toasts never appeared at all.
+      if (typeof Utils !== 'undefined' && Utils.showToast) Utils.showToast(msg, toastType);
     } catch (e) { console.warn('[Sync] activity toast failed:', e.message); }
   },
   _esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); },

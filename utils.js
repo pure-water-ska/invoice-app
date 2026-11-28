@@ -165,9 +165,9 @@ const LZString = (function () {
 // ── End LZString ────────────────────────────────────────────────────────────
 
 const APP_VERSION = {
-  version: '1.0.270',
-  date: '2026-11-26T09:46:36.506Z',
-  label: 'v1.0.270 (26 พ.ย. 2569)',
+  version: '1.0.272',
+  date: '2026-11-28T10:12:04.558Z',
+  label: 'v1.0.272 (28 พ.ย. 2569)',
 };
 
 // Changelog — add new entry here when releasing a new version.
@@ -968,7 +968,12 @@ Utils.compressImage = function(file, maxPx, quality) {
     if (!s) return;                       // logged out / login page → close normally
 
     event.preventDefault();               // hold the close until data is safe
-    var bp = (window.Utils && Utils.blockingProgress) || null;
+    // bare Utils — this file declares `const Utils`, so window.Utils is undefined
+    // even here. bp was therefore ALWAYS null and the close overlay never showed: the
+    // flush still ran, but nothing told the user the app was holding the close to save
+    // data, in a path that has already cost data once. Three lines below a comment
+    // documenting the identical trap for Auth.
+    var bp = (typeof Utils !== 'undefined' && Utils.blockingProgress) || null;
     try {
       if (bp) bp.open('กำลังบันทึกข้อมูลก่อนปิดโปรแกรม', [
         { id: 'up',  label: 'อัปโหลดข้อมูลที่ค้างขึ้น server' },

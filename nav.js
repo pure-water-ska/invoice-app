@@ -161,7 +161,13 @@
     // cache can't serve an old copy of sync.js/connection-status.js/etc. after
     // an update (the SW matches by exact URL, so the ?v query misses the cache).
     try {
-      const v = (window.APP_VERSION && APP_VERSION.version) || '';
+      // bare APP_VERSION — utils.js declares `const APP_VERSION`, so window.APP_VERSION
+      // is always undefined and v was always '', meaning NO dynamically loaded script
+      // ever got a ?v= query. On the web that was masked (pages.yml bumps the SW cache
+      // name every deploy); on the desktop the committed cache name never changes, so
+      // Cache-First scripts loaded here — local-folder-sync.js, drive-*.js — could be
+      // served stale indefinitely. This is the guard that was supposed to prevent that.
+      const v = (typeof APP_VERSION !== 'undefined' && APP_VERSION.version) || '';
       if (v && /^\.?\//.test(src) && /\.js$/.test(src) && src.indexOf('?') === -1) {
         src = src + '?v=' + v;
       }
@@ -350,7 +356,13 @@
     // cache can't serve an old copy of sync.js/connection-status.js/etc. after
     // an update (the SW matches by exact URL, so the ?v query misses the cache).
     try {
-      const v = (window.APP_VERSION && APP_VERSION.version) || '';
+      // bare APP_VERSION — utils.js declares `const APP_VERSION`, so window.APP_VERSION
+      // is always undefined and v was always '', meaning NO dynamically loaded script
+      // ever got a ?v= query. On the web that was masked (pages.yml bumps the SW cache
+      // name every deploy); on the desktop the committed cache name never changes, so
+      // Cache-First scripts loaded here — local-folder-sync.js, drive-*.js — could be
+      // served stale indefinitely. This is the guard that was supposed to prevent that.
+      const v = (typeof APP_VERSION !== 'undefined' && APP_VERSION.version) || '';
       if (v && /^\.?\//.test(src) && /\.js$/.test(src) && src.indexOf('?') === -1) {
         src = src + '?v=' + v;
       }
